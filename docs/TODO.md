@@ -253,7 +253,7 @@ AeroMirror is relaunched, a clean first install remains interactive, and an
 automatic downgrade is refused. Deterministic Setup and source-contract checks
 pass; a real installed update remains a physical release gate.
 
-The 0.12.19 candidate adds a read-only assessment for the exact Private-network
+The 0.12.19 release adds a read-only assessment for the exact Private-network
 Bonjour mDNS firewall rule and an explicit, confirmed, UAC-gated repair limited
 to the validated Bonjour executable, UDP 5353, and `LocalSubnet`. It does not
 mutate the Bonjour service or wire external-rule removal into uninstall.
@@ -574,6 +574,11 @@ Escape is captured as an event only while actual fullscreen is active. A
   available without rewriting foreign window styles or sending a speculative
   second toggle; normal framed Alt+Enter exit is not changed. Physical
   Photos/button/Escape/transition acceptance remains pending.
+
+Annotated `v0.12.19`, normal latest Release `375664260`, its exact four
+assets, API digests, checksums, canonical/legacy latest routes, and fresh
+public download equality pass. Installed behavior and the physical rows above
+remain pending; published tag/assets are immutable.
 
 - [ ] Log source dimensions, pixel aspect ratio, rotation metadata, and
   renderer dimensions for orientation transitions.

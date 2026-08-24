@@ -63,7 +63,8 @@ behavior:
   `Network/NetworkProfileInfo.cs`, and `Properties/AssemblyInfo.cs`.
 - The isolated cleanup passed the managed Release build,
   `ReceiverResilience.Tests.ps1`, and `git diff --check` at the time it was
-  made. The combined 0.12.19 worktree still requires the complete final gate.
+  made. The combined 0.12.19 exact-tag and publication gates subsequently
+  passed; physical acceptance remains separate.
 
 Do not broaden this cleanup into a field move or a partial-class split while
 the gallery/fullscreen and discovery fixes are being stabilized.
@@ -101,12 +102,12 @@ for a release-cycle rewrite.
 | --- | --- | --- |
 | `src/Receiver/ReceiverContext.cs` | Application coordinator, tray/menu construction, timers, high-level state, and shared fields/properties. | Keep as the composition root. Replace the growing field set gradually with owned components and typed read-only snapshots. The 250 ms monitor should not be used to emulate edge-triggered keyboard input. |
 | `src/Receiver/ReceiverContext.Core.cs` | UxPlay/beacon process lifecycle, startup policy, marker observation, native command channel, discovery maintenance, argument construction, and diagnostics text. | Largest hotspot. `ObserveCoreOutput` mixes parsing with side effects; extract a pure typed marker parser first. Remove the obsolete `PairingMode == "password"` argument branch only after migration tests prove persisted legacy values normalize to `none`. Repeated nullable initialization of `coreCommandSync` exists to support reflection-created test objects; production synchronization should eventually live in an always-initialized command-channel object. |
-| `src/Receiver/ReceiverContext.BonjourFirewall.cs` | New 0.12.19 background firewall assessment, tray warning/action, explicit confirmation/UAC repair flow, diagnostics, and discovery refresh after repair. | Correctly keeps mutation behind an explicit user action and runs assessment/UAC waiting off the UI thread. Keep UI projection here while the feature stabilizes; later expose a typed assessment snapshot if the coordinator is decomposed. Exercise cancellation, unavailable policy, form ownership, and repeated-assessment paths manually before release. |
+| `src/Receiver/ReceiverContext.BonjourFirewall.cs` | New 0.12.19 background firewall assessment, tray warning/action, explicit confirmation/UAC repair flow, diagnostics, and discovery refresh after repair. | Correctly keeps mutation behind an explicit user action and runs assessment/UAC waiting off the UI thread. Keep UI projection here while the feature stabilizes; later expose a typed assessment snapshot if the coordinator is decomposed. Exercise cancellation, unavailable policy, form ownership, and repeated-assessment paths before physical acceptance. |
 | `src/Receiver/ReceiverContext.Diagnostics.cs` | Support bundle/report flow, autostart, shutdown, logging/redaction, and shared argument quoting. | Responsibilities are only loosely related. Standard Windows argv quoting and round-trip tests are complete. Repository/product identity is also hard-coded here while update configuration exists elsewhere; centralize it later as build metadata. Log queue/batch/file limits should be named internal policy constants, not user preferences. |
 | `src/Receiver/ReceiverContext.HttpReset.cs` | Local HTTP reset endpoint, strict request parsing, nonce/auth checks, and response handling. | This is the most cohesive partial and already uses a static compiled parser. Keep it independent; security tokens, loopback binding, request limits, and status codes are protocol/security invariants. |
 | `src/Receiver/ReceiverContext.LostConnection.cs` | Lost-stream detection, overlay state, renderer handoff, reconnect timing, and queued UI actions. | Multiple integer pending flags and cancellation tokens encode mutually exclusive transitions informally. Characterize transitions first, then replace them with one typed mailbox/state machine. Do not change this during gallery/fullscreen fixes. |
 | `src/Receiver/ReceiverContext.Rendering.cs` | Renderer HWND discovery, chrome/fullscreen detection, saved placement, automatic fit, orientation/media-canvas policy, and presentation commands. | Current 0.12.19 non-cropping policy is the correct safe default: a transport canvas signature is not a content rectangle. Input/control effects moved to their focused partial. Split geometry further only after pure decisions have direct tests; keep Win32 effects in the adapter. |
-| `src/Receiver/ReceiverContext.RendererControls.cs` | Event-driven foreground Escape hook, shell-owned fullscreen control coordination, and stale-borderless detection. | The hook is bounded to actual fullscreen and always continues the keyboard chain. The stale path intentionally offers a visible manual action instead of a non-idempotent automatic toggle. Physical focus, repeated transition, DPI, and multi-monitor behavior remains acceptance evidence. |
+| `src/Receiver/ReceiverContext.RendererControls.cs` | Event-driven foreground Escape hook, shell-owned fullscreen control coordination, and stale-borderless detection. | The hook is bounded to actual fullscreen and always continues the keyboard chain. The stale path intentionally offers a visible manual action instead of a non-idempotent automatic toggle. Physical focus, repeated transition, DPI, and multi-monitor behaviors remain acceptance evidence. |
 | `src/Receiver/RendererPresentationPolicy.cs` | New pure 0.12.19 geometry constants and Photos/device-frame classifiers. | Good extraction. These values describe renderer/protocol behavior, so named code constants are preferable to user configuration. Add table-driven geometry tests, including the rule that a Photos canvas may influence outer orientation but never authorize pixel cropping. |
 
 ### UI
@@ -208,11 +209,11 @@ Completed in source and automated contracts:
 4. Non-cropping Photos presentation and typed receiver readiness.
 5. Read-only background firewall assessment and explicit background repair.
 
-The remaining release work is to run the complete managed/native/package/
-installer/publication gates. Discovery after cold boot, long idle, network
-change, session unlock, and manual restart; real Escape/focus; visible photo
-edges; and the non-admin UAC/firewall path remain physical acceptance. Ordinary
-startup must remain non-mutating.
+The complete managed/native/package/installer/publication gates pass.
+Discovery after cold boot, long idle, network change, session unlock, and
+manual restart; real Escape/focus; visible photo edges; and the non-admin
+UAC/firewall path remain physical acceptance. Ordinary startup must remain
+non-mutating.
 
 ### Stage 1: mechanical hygiene after release
 

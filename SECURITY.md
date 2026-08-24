@@ -4,11 +4,11 @@
 
 Only the latest published AeroMirror release receives security fixes.
 
-Public `v0.12.18` is currently the latest published normal-channel review
-release. The local 0.12.19 candidate does not expand the public support
-statement until its immutable tag, exact assets, and public download
-verification complete. Physical gallery/fullscreen and iPhone discovery rows
-are reported separately and are not implied by publication.
+Public `v0.12.19` is currently the latest published normal-channel review
+release. Its immutable annotated tag, exact four assets, API digests, and
+public re-download verification pass. Physical gallery/fullscreen, UAC
+firewall, and iPhone discovery rows are reported separately and are not
+implied by publication.
 
 ## Reporting a vulnerability
 

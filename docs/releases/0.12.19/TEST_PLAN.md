@@ -18,13 +18,14 @@ is a prerequisite finding, not proof of the missing-row cause.
 | Receiver resilience suite | PASS | Complete suite plus new non-crop, Escape/rearm, overlay Z-order, async firewall, updater, and readiness contracts |
 | Source/version/default audit | PASS | Shell/Setup `0.12.19.0`, Setup comparison and exactly five script defaults `0.12.19` |
 | Native reuse/provenance | PASS | Native contracts and eight-scenario worker lifecycle pass; core remains SHA-256 `c217386cbc916f8889a9c03774390fe7ec7d8c7ee0b6f64358215caceeb35118`; corresponding-source build passes |
-| Review payload and Setup | PASS | Final pre-tag payload, embedded equality, x64 Setup, and all non-installing self-checks pass; exact-tag release will rerun them |
+| Standalone discovery-pipe harness | NOT RUN | Installed receiver owned the machine-wide BLE status file; the delivered native core is byte-identical to 0.12.18 and physical visibility remains PENDING |
+| Review payload and Setup | PASS | Clean exact-tag payload, embedded equality, x64 Setup, and all non-installing self-checks pass |
 | Physical Photos contain | PENDING | Complete portrait and landscape photos remain visible without cover-crop |
 | Physical fullscreen control | PENDING | Button, tray, Alt+Enter, Escape, exit, and repeated Photos transitions |
 | Physical titlebar lifecycle | PENDING | DPI, multi-monitor, minimize/restore, close, taskbar, topmost, and no orphan control |
 | Private Bonjour repair | PENDING | Missing-rule detection, explicit UAC repair, LocalSubnet-only rule, no broad/duplicate rule, and iPhone rediscovery |
 | Long-idle discovery | PENDING | Repeated iPhone browse checks while same-PID renewal continues |
-| Tag and publication | PENDING | Immutable annotated tag, exact four assets, checksums/API digests, latest routes, and fresh downloads |
+| Tag and publication | PASS | Annotated `v0.12.19`, Release `375664260`, exact four assets, checksums/API digests, canonical/legacy latest routes, and fresh downloads agree |
 
 ## Automated acceptance
 
@@ -103,8 +104,7 @@ second attempt, the button becomes orphaned or steals focus, normal window
 chrome is not restored, repair broadens firewall scope, or local Bonjour
 readiness is presented as proof that an iPhone can see the receiver.
 
-The candidate may be published as an explicitly labelled review release after
-all automated, package, and source prepublication gates pass. Publication is
-not verified or complete until the public-asset/API/download gates pass and the
-post-release build report records them. Physical rows may remain PENDING but
-must be stated as such in the Release body.
+The candidate was published as an explicitly labelled normal review release
+after all automated, package, source, and exact-tag gates passed. The
+public-asset/API/download gates and post-release build report now pass.
+Physical rows remain PENDING and are stated as such in the Release body.

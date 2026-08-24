@@ -6,27 +6,30 @@ This is the single current-state handoff for AeroMirror. Keep it concise and
 update it whenever release status, accepted tests, blockers, or the immediate
 next step changes.
 
-## Active corrective review candidate — 0.12.19
+## Latest public review release — 0.12.19
 
 - Trigger: physical testing on another PC reports that 0.12.18 can crop the
   Photos image, a normal Escape press can be missed, and fullscreen has no
   visible renderer-window control. These are accepted failure reports even
   though the PC inspected on 2026-08-24 was separately found to be running
   installed 0.12.17.
-- Gallery direction: the exact Photos transport signature is not a content
+- Gallery behavior: the exact Photos transport signature is not a content
   rectangle. The managed 3.85x cover/fill transform is removed; the complete
   frame remains contained while the outer window can retain its trusted phone
   orientation. Letterboxing is safer than unverified pixel loss.
-- Fullscreen direction: add one shell-owned titlebar-adjacent control without
-  cross-process subclassing, and replace 250 ms key-state sampling with a
-  bounded event hook installed only during actual fullscreen; capture also
+- Fullscreen behavior: one shell-owned titlebar-adjacent control is added
+  without cross-process subclassing and replaces 250 ms key-state sampling
+  with a bounded event hook installed only during actual fullscreen; capture also
   requires the renderer PID/root to own foreground and never consumes Escape.
-- Discovery evidence: the local 0.12.17 shell/core did not crash. Same-PID,
-  same-port DNS-SD renewals, BLE, Bonjour, and the listener remained healthy,
-  but the Private firewall profile lacked a matching inbound UDP 5353 rule for
-  the externally installed Bonjour executable. 0.12.19 adds exact diagnosis
-  and explicit UAC-gated Private/UDP/5353/LocalSubnet repair; it does not alter
-  Public/TCP/Any scope or mutate the current machine during development.
+- Discovery evidence: a later installed 0.12.18 run from 13:06 through 15:03
+  did not crash. Same-PID/same-port renewals at 14:16 and 14:36 completed
+  `READY`; a manual restart at 14:53 and the next 15:03 renewal also completed.
+  No iPhone session reached the core. The physical Ethernet profile was Private,
+  Bonjour/BLE/sockets were locally ready, but read-only inspection found no
+  exact inbound Private/UDP 5353/LocalSubnet rule for `mDNSResponder.exe`.
+  This is the strongest observed boundary, not proof of a captured packet drop.
+  Version 0.12.19 diagnoses that exact condition and offers an explicit
+  UAC-gated narrow repair.
 - Maintainability: renderer invariants move to a typed policy; the updater's
   unreachable filename compatibility helper, duplicate scale literal, unused
   imports, unreachable network branch, and Russian-text readiness inference
@@ -34,24 +37,33 @@ next step changes.
   staged follow-up rather than being mixed into this corrective patch.
 - Version: shell/Setup source targets `0.12.19.0`, Setup comparison 0.12.19,
   and exactly five script defaults target 0.12.19.
+- Publication: annotated `v0.12.19` resolves to commit
+  `997e29324ec092ad46ae83a00fa6d08525c1b863`. Normal latest GitHub Release
+  `375664260` is `draft=false`, `prerelease=false`, and contains exactly
+  four immutable assets. Canonical/legacy latest routes, API digests, checksum
+  entries, and fresh public re-download equality pass.
 - Automated/package status: managed build, complete resilience, focused
   firewall contracts, native contracts, eight-scenario worker lifecycle,
   unchanged core hash, corresponding-source build, final review payload, x64
   Setup, embedded equality, and non-installing self-checks pass. The standalone
   discovery-pipe harness was not run because an installed receiver owned its
-  machine-wide BLE status file; native delivery is byte-identical to 0.12.18.
-  Physical acceptance and tag/publication remain PENDING in
-  `docs/releases/0.12.19/TEST_PLAN.md`.
-- Immediate next step: commit, create the immutable annotated tag, rerun the
-  clean exact-tag release pipeline, and publish only as a normal-channel review
-  Release with the physical limitations visible.
+  machine-wide BLE status file; the delivered native core executable is
+  byte-identical to 0.12.18.
+  Exact identities are recorded in
+  `docs/releases/0.12.19/BUILD_REPORT.md`.
+- Pending: installed update/reinstall, physical gallery/fullscreen/DPI,
+  explicit UAC firewall repair, and long-idle iPhone visibility remain PENDING
+  in `docs/releases/0.12.19/TEST_PLAN.md`.
+- Immediate next step: install the immutable public Setup, explicitly repair
+  the missing narrow Bonjour rule if offered, and record the one-hour/physical
+  matrix without moving the tag or replacing any asset.
 
-## Latest public review release — 0.12.18
+## Previous public review release — 0.12.18
 
-- Status: published as the normal updater-visible review Release. Annotated
+- Status: published as an immutable prior normal-channel review Release. Annotated
   `v0.12.18` resolves to commit
   `419ed6b199e89cf3c01efa6728f64423d9f049ed`; GitHub Release `373984443`
-  is `draft=false`, `prerelease=false`, and the current latest Release. Public
+  is `draft=false` and `prerelease=false`; 0.12.19 is now latest. Public
   `v0.12.17` and every earlier tag/asset remain immutable.
 - User behavior: the tray exposes one direct **Полный экран (Esc — выйти)**
   action. The three incremental photo-zoom controls are removed. The exact

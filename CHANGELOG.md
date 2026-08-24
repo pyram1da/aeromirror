@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.12.19 — non-cropping gallery and accessible fullscreen (review candidate)
+## 0.12.19 — non-cropping gallery and accessible fullscreen (review release)
 
 ### Changes
 
@@ -24,11 +24,14 @@
 
 ### Evidence and status
 
-- Source targets `0.12.19`/`0.12.19.0`; automated, pre-tag packaging, Setup,
-  and corresponding-source gates pass. Exact-tag and publication gates remain
-  pending.
-- The 0.12.18 native core/runtime and corresponding-source provenance are
-  intended to remain byte-identical; this patch changes the managed shell and
+- Source targets `0.12.19`/`0.12.19.0`; automated, exact-tag packaging,
+  Setup, and corresponding-source gates pass.
+- Annotated `v0.12.19` and normal latest Release `375664260` publish the
+  exact four-asset set. API digests, checksums, canonical/legacy latest routes,
+  and fresh public re-download equality pass.
+- The delivered native core/runtime and their pinned source inputs remain
+  byte-identical to 0.12.18; the versioned corresponding-source ZIP has its
+  own 0.12.19 archive identity. This patch changes the managed shell and
   installer-facing diagnostics only.
 - Physical Photos, fullscreen/button/Escape, Private-firewall repair, and
   long-idle iPhone visibility remain governed by

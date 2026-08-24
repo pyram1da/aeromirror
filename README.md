@@ -69,7 +69,7 @@ Apple. AirPlay, iPhone, and Apple are trademarks of Apple Inc.
   move; the window also adapts on real portrait/landscape changes, and
   automatic fitting restores the learned proportions after a manual resize
   unless the user turns it off; for the exact correlated Photos/media
-  signature, the 0.12.19 candidate keeps the trusted phone shape (or a
+  signature, the 0.12.19 release keeps the trusted phone shape (or a
   conservative portrait fallback when Photos arrives first) but contains the
   complete frame at normal scale instead of using the unverified 0.12.18 cover
   transform; the former schema-12 Photos A/B key and the 0.12.17 incremental
@@ -162,27 +162,31 @@ officially supports Windows 10 1809 x64 and newer. Windows 10 is outside Microso
 but remains an explicit application target. ARM64 and 32-bit packages are not
 included.
 
-## Unpublished 0.12.19 review candidate
+## Latest public 0.12.19 review release
 
-The local candidate keeps every pixel of the encoded Photos frame, adds a
+The public release keeps every pixel of the encoded Photos frame, adds a
 shell-owned fullscreen/exit control for both framed and actual fullscreen
 states, and replaces timer polling with bounded event-driven Escape. It also
 diagnoses one exact missing Private Bonjour mDNS firewall rule and offers only
 an explicit, confirmed, UAC-gated narrow repair. It does not alter the Bonjour
-service or remove that external rule during uninstall. Automated and pre-tag
-package gates pass; physical Photos, fullscreen, DPI, firewall, and long-idle
-iPhone rows remain PENDING. Version 0.12.18 remains the latest public release
-until publication.
+service or remove that external rule during uninstall.
+
+Annotated tag `v0.12.19` resolves to commit
+`997e29324ec092ad46ae83a00fa6d08525c1b863`. Normal GitHub Release
+`375664260` is the updater-visible latest release with exactly four verified
+assets. Automated, exact-tag, Setup, API digest, latest-route, and fresh public
+download gates pass; physical Photos, fullscreen, DPI, firewall, and long-idle
+iPhone rows remain PENDING.
 
 See the [0.12.19 release notes](docs/releases/0.12.19/RELEASE_NOTES.md) and
-[test plan](docs/releases/0.12.19/TEST_PLAN.md).
+[test plan](docs/releases/0.12.19/TEST_PLAN.md); exact public identities are in
+the [build report](docs/releases/0.12.19/BUILD_REPORT.md).
 
-## Latest public 0.12.18 review release
+## Previous public 0.12.18 review release
 
 The source targets 0.12.18/`0.12.18.0`. Annotated tag `v0.12.18` and normal
-GitHub Release `373984443` are the current updater-visible review release for
-real-device gallery/fullscreen testing. All prior tags and assets remain
-immutable.
+GitHub Release `373984443` remain immutable review history after 0.12.19
+became updater-visible latest. All prior tags and assets also remain immutable.
 
 The tray now has one direct **Полный экран (Esc — выйти)** action. While the
 native D3D11 window actually covers its monitor without a frame, the shell
@@ -329,31 +333,32 @@ For normal use, open the
 and download:
 
 ```text
-AeroMirror-Setup-0.12.18.exe
+AeroMirror-Setup-0.12.19.exe
 ```
 
-`v0.12.18` is the normal updater-visible review Release for physical Photos
-and fullscreen testing. Its managed/native contracts, reproducible source,
-13-entry review package, Setup lifecycle, public API digests, and fresh
-re-downloads pass. It keeps 0.12.16 recurring same-process discovery
-maintenance, replaces 0.12.17 manual Photos zoom with automatic portrait fill,
-and makes fullscreen state/exit safe. Installed-update and physical
-Photos/Camera/rotation acceptance remain pending; earlier published assets are
-not replaced.
+`v0.12.19` is the normal updater-visible review Release for physical Photos,
+fullscreen, and discovery testing. Its automated/native contracts,
+corresponding source, exact-tag 13-entry review package, Setup lifecycle,
+public API digests, and fresh re-downloads pass. It keeps 0.12.16 recurring
+same-process discovery maintenance, removes the unverified 0.12.18 Photos
+cover transform, adds a visible shell-owned fullscreen control and reliable
+event-driven Escape, and diagnoses one exact missing Private Bonjour rule.
+Installed-update and physical Photos/firewall/long-idle acceptance remain
+pending; earlier published assets are not replaced.
 
 Scope and pending physical acceptance are in the
-[0.12.18 release notes](docs/releases/0.12.18/RELEASE_NOTES.md) and
-[test plan](docs/releases/0.12.18/TEST_PLAN.md). Exact tag, public assets,
+[0.12.19 release notes](docs/releases/0.12.19/RELEASE_NOTES.md) and
+[test plan](docs/releases/0.12.19/TEST_PLAN.md). Exact tag, public assets,
 digests, and re-download evidence are in the
-[build report](docs/releases/0.12.18/BUILD_REPORT.md). The historical
+[build report](docs/releases/0.12.19/BUILD_REPORT.md). The historical
 [0.12.8 release notes](docs/releases/0.12.8/RELEASE_NOTES.md) and
 [test plan](docs/releases/0.12.8/TEST_PLAN.md) remain available; 0.12.8 was
 never tagged or published. Published 0.12.7 remains immutable history.
 
-The canonical repository is now `pyram1da/aeromirror`. AeroMirror 0.12.18 still
+The canonical repository is now `pyram1da/aeromirror`. AeroMirror 0.12.19 still
 contains the former `Nadejny/aeromirror` updater slug; GitHub redirects its
 `releases/latest` API to the canonical repository. Canonical and legacy API,
-HTML/latest, and Setup routes resolve to the same verified `v0.12.18`
+HTML/latest, and Setup routes resolve to the same verified `v0.12.19`
 Release.
 
 The installer:
@@ -493,31 +498,31 @@ installer from that exact ZIP with:
 
 ```powershell
 .\package-review.ps1 `
-  -Version 0.12.18 `
+  -Version 0.12.19 `
   -HeadlessRuntimePath .\artifacts\headless-runtime
 
 .\build-installer.ps1 `
-  -Version 0.12.18 `
-  -PortableZip .\artifacts\AeroMirror-review-payload-x64-0.12.18.zip
+  -Version 0.12.19 `
+  -PortableZip .\artifacts\AeroMirror-review-payload-x64-0.12.19.zip
 ```
 
 The result is:
 
 ```text
-artifacts\installer\AeroMirror-Setup-0.12.18.exe
+artifacts\installer\AeroMirror-Setup-0.12.19.exe
 ```
 
-Public release names use three-part semantic versions such as `0.12.18`.
+Public release names use three-part semantic versions such as `0.12.19`.
 Windows executable metadata internally requires four numeric fields and may
-show `0.12.18.0` in a file-property dialog; the AeroMirror UI and a future
-GitHub Release would intentionally show only `0.12.18`.
+show `0.12.19.0` in a file-property dialog; the AeroMirror UI and GitHub
+Release intentionally show only `0.12.19`.
 
 For local offline engineering tests, create the full portable package with
 both explicit inputs:
 
 ```powershell
 .\package.ps1 `
-  -Version 0.12.18 `
+  -Version 0.12.19 `
   -UxPlayPortablePath .\artifacts\headless-runtime `
   -HeadlessCorePath .\artifacts\headless-runtime\uxplay-windows.exe
 ```
@@ -531,7 +536,7 @@ SHA-256.
 
 ### Rebuild the reviewed native core
 
-`AeroMirror-native-source-0.12.18.zip` is a prepared corresponding-source
+`AeroMirror-native-source-0.12.19.zip` is a prepared corresponding-source
 archive: the `uxplay-windows` and `libuxplay` patches are already applied, so
 do not apply them a second time. After providing the pinned Qt 6.10.1 and
 MSYS2 toolchains listed in
@@ -540,7 +545,7 @@ MSYS2 toolchains listed in
 ```powershell
 # Use a short extraction path: the MinGW/CMake object tree can exceed the
 # Windows filename limit under a deeply nested Downloads/workspace folder.
-$source = Resolve-Path .\AeroMirror-native-source-0.12.18\uxplay-windows
+$source = Resolve-Path .\AeroMirror-native-source-0.12.19\uxplay-windows
 & "$source\AeroMirror-build-inputs\build-compatible-core.ps1" `
   -UpstreamRoot $source `
   -Qt610Prefix C:\path\to\Qt-6.10.1 `
@@ -631,6 +636,10 @@ docs/
   TROUBLESHOOTING.md         log collection and first-run reproduction
   TODO.md                    product and protocol roadmap
   releases/
+    0.12.19/
+      RELEASE_NOTES.md       non-cropping gallery/fullscreen release summary
+      TEST_PLAN.md           gallery, fullscreen, and discovery gates
+      BUILD_REPORT.md        published tag, assets, hashes, and test status
     0.12.18/
       RELEASE_NOTES.md       automatic Photos layout review-release summary
       TEST_PLAN.md           fullscreen-state and gallery acceptance gates
@@ -837,7 +846,7 @@ pass; deeper UI extraction should be reviewed separately from receiver fixes.
   GitHub redirects it to canonical `pyram1da/aeromirror`, and both latest API
   routes returned the same public `v0.12.7` Release ID.
 - Bonjour/mDNS and Windows Firewall remain external system dependencies. The
-  0.12.19 candidate can explicitly add only the exact Private/UDP
+  0.12.19 release can explicitly add only the exact Private/UDP
   5353/LocalSubnet rule for the validated Bonjour executable after confirmation
   and UAC; it does not change the Bonjour service or clean the rule on uninstall.
   Allow the receiver only on intended network categories. Some managed or guest
@@ -925,13 +934,13 @@ The current license inventory is an engineering review, not legal advice.
 
 ## Sharing a build
 
-For the public 0.12.18 review Release, share the GitHub Release page or its
+For the public 0.12.19 review Release, share the GitHub Release page or its
 network Setup—not a loose `AeroMirror.exe`. Project policy keeps these assets
 together and immutable:
 
-- `AeroMirror-Setup-0.12.18.exe`;
-- `AeroMirror-source-0.12.18.zip`;
-- `AeroMirror-native-source-0.12.18.zip`;
+- `AeroMirror-Setup-0.12.19.exe`;
+- `AeroMirror-source-0.12.19.zip`;
+- `AeroMirror-native-source-0.12.19.zip`;
 - `SHA256SUMS.txt`.
 
 The native source archive contains the exact prepared `uxplay-windows` and
