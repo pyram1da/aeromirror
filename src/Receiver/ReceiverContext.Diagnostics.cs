@@ -199,8 +199,9 @@ namespace AirPlayReceiverMvp
             }
         }
 
-        private void SetState(bool running, string text)
+        private void SetState(bool running, string text, bool ready = false)
         {
+            Interlocked.Exchange(ref receiverReady, ready ? 1 : 0);
             receiverStateText = text;
             statusItem.Text = running ? "● " + text : "○ " + text;
             startStopItem.Text = running ? "Остановить приёмник" : "Запустить приёмник";
@@ -229,6 +230,7 @@ namespace AirPlayReceiverMvp
                 Interlocked.Exchange(ref restartStopCompleted, 0);
             }
             StopCoreInternal("application exit", true, true);
+            ResetRendererControls(true);
             Log("=== AeroMirror session ended ===");
             FlushLog(1000);
             tray.Visible = false;
@@ -249,7 +251,39 @@ namespace AirPlayReceiverMvp
 
         private static string QuoteArgument(string value)
         {
-            return "\"" + value.Replace("\"", "\\\"") + "\"";
+            if (value == null)
+                value = "";
+
+            var quoted = new StringBuilder(value.Length + 2);
+            quoted.Append('"');
+            int backslashCount = 0;
+            foreach (char character in value)
+            {
+                if (character == '\\')
+                {
+                    backslashCount++;
+                    continue;
+                }
+
+                if (character == '"')
+                {
+                    quoted.Append('\\', backslashCount * 2 + 1);
+                    quoted.Append('"');
+                    backslashCount = 0;
+                    continue;
+                }
+
+                if (backslashCount != 0)
+                {
+                    quoted.Append('\\', backslashCount);
+                    backslashCount = 0;
+                }
+                quoted.Append(character);
+            }
+
+            quoted.Append('\\', backslashCount * 2);
+            quoted.Append('"');
+            return quoted.ToString();
         }
 
         internal static void Log(string message)

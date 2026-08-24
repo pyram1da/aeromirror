@@ -253,6 +253,18 @@ AeroMirror is relaunched, a clean first install remains interactive, and an
 automatic downgrade is refused. Deterministic Setup and source-contract checks
 pass; a real installed update remains a physical release gate.
 
+The 0.12.19 candidate adds a read-only assessment for the exact Private-network
+Bonjour mDNS firewall rule and an explicit, confirmed, UAC-gated repair limited
+to the validated Bonjour executable, UDP 5353, and `LocalSubnet`. It does not
+mutate the Bonjour service or wire external-rule removal into uninstall.
+
+The 0.12.19 corrective review adds a separate Windows prerequisite check for
+the external Bonjour service. Startup assessment is read-only. Only an exact
+missing Private/UDP 5353/LocalSubnet rule for the validated
+`mDNSResponder.exe` exposes an explicit repair action; the user must confirm it
+and approve Windows UAC. This does not change Bonjour service ownership and is
+not evidence that an iPhone currently sees the receiver.
+
 - [ ] Add a versioned local IPC contract, preferably JSON Lines over a
   per-user Windows named pipe.
 - [ ] Emit explicit core states such as `starting`, `mdnsReady`, `ready`,
@@ -306,6 +318,16 @@ pass; a real installed update remains a physical release gate.
   pending-reboot indicators, firewall/network state, and the effect of a
   receiver stop/start. Do not add a generic reboot prompt or machine-wide
   Bonjour mutation without a proven prerequisite and rollback design.
+- [x] Diagnose the exact missing Private Bonjour mDNS rule and offer only an
+  explicit narrow repair; keep ordinary startup read-only.
+- [ ] Physically validate UAC decline/approval, exact rule scope, no duplicate
+  rule, and renewed iPhone visibility on a controlled Windows machine.
+- [x] Diagnose the exact external Bonjour executable/firewall contract and
+  keep any Private UDP 5353 LocalSubnet repair behind explicit confirmation
+  and UAC; never add Public, TCP, Any-address, or automatic startup rules.
+- [ ] Physically validate missing-rule detection, declined UAC, accepted
+  repair, exact resulting rule scope, iPhone rediscovery, and behavior after
+  reboot without treating local rule presence as browse attestation.
 - [x] Skip the shortcut/launch option form for updates and same-version
   reinstalls, preserve the installed shortcut state, relaunch after success,
   and retain an explicit downgrade boundary.
@@ -542,6 +564,17 @@ and a real installed update remain pending. The normal updater-visible
 latest routes, and fresh public re-download equality pass without converting
 those pending physical rows into PASS.
 
+The 0.12.19 corrective review removes the 0.12.18 cover scale after physical
+testing showed lost image edges. The exact Photos canvas can still select a
+portrait outer-window target, but presentation remains at neutral 100% so the
+complete transport frame is contained. A shell-owned non-activating control
+adds direct fullscreen entry/exit near the renderer chrome, and foreground
+Escape is captured as an event only while actual fullscreen is active. A
+  stale non-monitor borderless transition keeps the explicit exit control
+  available without rewriting foreign window styles or sending a speculative
+  second toggle; normal framed Alt+Enter exit is not changed. Physical
+  Photos/button/Escape/transition acceptance remains pending.
+
 - [ ] Log source dimensions, pixel aspect ratio, rotation metadata, and
   renderer dimensions for orientation transitions.
 - [x] Suppress a different Photos/media canvas ratio after a device-frame
@@ -577,6 +610,11 @@ those pending physical rows into PASS.
 - [x] Replace incremental manual zoom with one exact-canvas portrait-fill
   calculation, preserving a trusted landscape target and resetting scale in
   fullscreen, on class exit, and at renderer-session start.
+- [x] Remove the unverified portrait-fill scale after physical cropping and
+  keep the complete Photos transport frame contained at neutral scale until a
+  trustworthy content rectangle exists.
+- [x] Add a shell-owned non-activating fullscreen control and event-driven
+  foreground Escape path with bounded hook lifetime and unchanged Alt+Enter.
 - [ ] Expose a trustworthy content rectangle/crop signal or validate a
   conservative pixel-analysis design for Photos canvases that contain their
   own encoded black bars; do not crop real dark content by guesswork.

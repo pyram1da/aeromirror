@@ -190,3 +190,38 @@ exists. A newer installed version is excluded from the unattended path so a
 downgrade continues to require an explicit warning and confirmation. This
 choice changes presentation only; it does not weaken download-digest checks,
 the backup/rollback transaction, per-user identity, or settings persistence.
+
+## D-014 — Do not crop a Photos transport canvas without a trusted content rectangle
+
+**Status:** accepted
+
+An observed AirPlay geometry signature may identify a presentation canvas and
+help choose the outer renderer-window orientation. It does not identify the
+photo rectangle inside that canvas. AeroMirror therefore keeps presentation
+scale neutral and contains the complete frame unless a future versioned native
+contract supplies trustworthy content bounds. Letterboxing is preferable to
+silently losing real image pixels.
+
+Fullscreen remains a native renderer operation. The shell may add a
+non-activating visible control and an event-driven foreground Escape path, but
+it must not subclass the foreign window, consume the key, or infer fullscreen
+solely from a managed toggle flag.
+
+## D-015 — Keep Bonjour firewall repair exact, explicit, and separate from service ownership
+
+**Status:** accepted
+
+Bonjour is an external machine-wide service. AeroMirror may diagnose whether
+its exact `mDNSResponder.exe` lacks a narrowly scoped inbound Windows Firewall
+rule, but ordinary startup must remain read-only. Repair requires explicit
+user confirmation and Windows administrator approval and is limited to the
+exact executable, Private profile, UDP local port 5353, remote `LocalSubnet`,
+and no edge traversal. Public, TCP, arbitrary-address, broad application, and
+automatic Bonjour-service changes are prohibited.
+
+Version 0.12.19 does not wire removal of this external rule into uninstall and
+must not promise automatic cleanup.
+
+The rule proves only a local Windows prerequisite. It cannot be described as
+continuous iPhone visibility, successful DNS-SD browsing, BLE/AWDL support, or
+physical interoperability without separate device evidence.

@@ -132,9 +132,9 @@ namespace AirPlayReceiverMvp
         private IntPtr rendererPolicyWindow = IntPtr.Zero;
         private bool rendererPolicyApplied;
         private bool rendererPolicyAlwaysOnTop;
-        private int appliedPresentationScalePermille = 1000;
+        private int appliedPresentationScalePermille =
+            RendererPresentationPolicy.NormalScalePermille;
         private bool rendererFullscreenActive;
-        private bool rendererEscapeWasDown;
         private bool rendererPolicyShowInTaskbar;
         private IntPtr rendererMoveSizeWindow = IntPtr.Zero;
         private Size rendererMoveSizeStartClientSize = Size.Empty;
@@ -170,6 +170,7 @@ namespace AirPlayReceiverMvp
         private int discoveryRefreshAfterNetworkCheck;
         private bool resumeAfterSafeNetwork;
         private string receiverStateText = "Приёмник остановлен";
+        private int receiverReady;
 
         public ReceiverContext(string[] args, EventWaitHandle showEvent)
         {
@@ -203,10 +204,16 @@ namespace AirPlayReceiverMvp
                 delegate { ShowSettings(); });
             networkWarningItem.ForeColor = Color.FromArgb(154, 92, 0);
             networkWarningItem.Visible = false;
+            bonjourFirewallItem = new ToolStripMenuItem(
+                "Исправить доступ Bonjour…", null,
+                delegate { RepairBonjourFirewall(null); });
+            bonjourFirewallItem.ForeColor = Color.FromArgb(154, 92, 0);
+            bonjourFirewallItem.Visible = false;
 
             var menu = new ContextMenuStrip();
             menu.Items.Add(statusItem);
             menu.Items.Add(networkWarningItem);
+            menu.Items.Add(bonjourFirewallItem);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("Открыть настройки", null, delegate { ShowSettings(); });
             menu.Items.Add(startStopItem);
@@ -265,6 +272,7 @@ namespace AirPlayReceiverMvp
             Log("Executable: " +
                 Path.GetFileName(Assembly.GetExecutingAssembly().Location));
             BeginNetworkProfileRefresh();
+            BeginBonjourFirewallAssessment();
             if (settings.AutoStartReceiver)
             {
                 startAfterNetworkCheck = true;
@@ -305,6 +313,14 @@ namespace AirPlayReceiverMvp
             get { return nonPhysicalProfileCount > 0; }
         }
         public string ReceiverStateText { get { return receiverStateText; } }
+        public bool IsReceiverReady
+        {
+            get
+            {
+                return Interlocked.CompareExchange(
+                    ref receiverReady, 0, 0) == 1;
+            }
+        }
         public bool IsMirrorSessionActive
         {
             get

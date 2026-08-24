@@ -1,10 +1,50 @@
 # Project state
 
-Last updated: 2026-08-20
+Last updated: 2026-08-24
 
 This is the single current-state handoff for AeroMirror. Keep it concise and
 update it whenever release status, accepted tests, blockers, or the immediate
 next step changes.
+
+## Active corrective review candidate — 0.12.19
+
+- Trigger: physical testing on another PC reports that 0.12.18 can crop the
+  Photos image, a normal Escape press can be missed, and fullscreen has no
+  visible renderer-window control. These are accepted failure reports even
+  though the PC inspected on 2026-08-24 was separately found to be running
+  installed 0.12.17.
+- Gallery direction: the exact Photos transport signature is not a content
+  rectangle. The managed 3.85x cover/fill transform is removed; the complete
+  frame remains contained while the outer window can retain its trusted phone
+  orientation. Letterboxing is safer than unverified pixel loss.
+- Fullscreen direction: add one shell-owned titlebar-adjacent control without
+  cross-process subclassing, and replace 250 ms key-state sampling with a
+  bounded event hook installed only during actual fullscreen; capture also
+  requires the renderer PID/root to own foreground and never consumes Escape.
+- Discovery evidence: the local 0.12.17 shell/core did not crash. Same-PID,
+  same-port DNS-SD renewals, BLE, Bonjour, and the listener remained healthy,
+  but the Private firewall profile lacked a matching inbound UDP 5353 rule for
+  the externally installed Bonjour executable. 0.12.19 adds exact diagnosis
+  and explicit UAC-gated Private/UDP/5353/LocalSubnet repair; it does not alter
+  Public/TCP/Any scope or mutate the current machine during development.
+- Maintainability: renderer invariants move to a typed policy; the updater's
+  unreachable filename compatibility helper, duplicate scale literal, unused
+  imports, unreachable network branch, and Russian-text readiness inference
+  are removed. A broader ReceiverContext/SettingsForm decomposition remains a
+  staged follow-up rather than being mixed into this corrective patch.
+- Version: shell/Setup source targets `0.12.19.0`, Setup comparison 0.12.19,
+  and exactly five script defaults target 0.12.19.
+- Automated/package status: managed build, complete resilience, focused
+  firewall contracts, native contracts, eight-scenario worker lifecycle,
+  unchanged core hash, corresponding-source build, final review payload, x64
+  Setup, embedded equality, and non-installing self-checks pass. The standalone
+  discovery-pipe harness was not run because an installed receiver owned its
+  machine-wide BLE status file; native delivery is byte-identical to 0.12.18.
+  Physical acceptance and tag/publication remain PENDING in
+  `docs/releases/0.12.19/TEST_PLAN.md`.
+- Immediate next step: commit, create the immutable annotated tag, rerun the
+  clean exact-tag release pipeline, and publish only as a normal-channel review
+  Release with the physical limitations visible.
 
 ## Latest public review release — 0.12.18
 

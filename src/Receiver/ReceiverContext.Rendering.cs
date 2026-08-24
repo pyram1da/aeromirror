@@ -20,13 +20,6 @@ namespace AirPlayReceiverMvp
 {
     internal sealed partial class ReceiverContext
     {
-        private const double ProvisionalIPhoneAspect = 9.0 / 19.5;
-        private const double DeviceFrameAspectTolerance = 0.03;
-        private const int PresentationScaleBasePermille = 1000;
-        private const int PresentationScaleMaximumPermille = 5000;
-        private static readonly Size ProvisionalIPhonePortraitSize =
-            new Size(900, 1950);
-
         private enum RendererFitTargetKind
         {
             None,
@@ -80,6 +73,7 @@ namespace AirPlayReceiverMvp
 
         private void ResetRendererMoveSizeTracking()
         {
+            ResetRendererControls(false);
             IntPtr hook = rendererMoveSizeHook;
             IntPtr showHook = rendererWindowShowHook;
             rendererMoveSizeHook = IntPtr.Zero;
@@ -725,12 +719,22 @@ namespace AirPlayReceiverMvp
         private void ApplyTopMost()
         {
             if (!IsCoreRunning)
+            {
+                ResetRendererControls(false);
                 return;
+            }
             IntPtr previousWindow = fittedStreamWindow;
             IntPtr window;
             if (!TryGetRendererWindow(out window))
+            {
+                ResetRendererControls(false);
                 return;
+            }
+            bool wasFullscreen = rendererFullscreenActive;
             bool fullscreen = UpdateRendererFullscreenState(window);
+            bool staleBorderless = HandleStaleBorderlessRenderer(
+                window, wasFullscreen, fullscreen);
+            UpdateRendererControls(window, fullscreen, staleBorderless);
             if (fullscreen)
             {
                 // If fullscreen was reached before the first supervision pass,
@@ -740,7 +744,7 @@ namespace AirPlayReceiverMvp
                     fittedStreamWindow = IntPtr.Zero;
                 ClearPendingManualRendererFit();
                 ApplyPresentationScale(
-                    PresentationScaleBasePermille,
+                    RendererPresentationPolicy.NormalScalePermille,
                     "fullscreen presentation");
                 CompleteLostConnectionRendererHandoff();
                 return;
@@ -799,8 +803,7 @@ namespace AirPlayReceiverMvp
                 videoSize, ambiguousMediaCanvas,
                 out orientationAuthoritative,
                 out suppressionChanged);
-            ApplyAutomaticPresentationScale(
-                videoSize, automaticVideoSize, ambiguousMediaCanvas);
+            ApplyNonCroppingPresentationScale(ambiguousMediaCanvas);
             bool provisionalMediaCanvasFit = ambiguousMediaCanvas;
             RendererFitTargetKind fitTargetKind =
                 ResolveRendererFitTargetKind(
@@ -922,17 +925,6 @@ namespace AirPlayReceiverMvp
         private bool UpdateRendererFullscreenState(IntPtr window)
         {
             bool fullscreen = IsRendererFullscreenWindow(window);
-            bool escapeDown = fullscreen &&
-                NativeMethods.GetForegroundWindow() == window &&
-                NativeMethods.IsEscapeKeyDown();
-            if (escapeDown && !rendererEscapeWasDown)
-            {
-                if (TryWriteNativeVideoCommand(
-                        "video-fullscreen-toggle", "fullscreen escape"))
-                    Log("Requested renderer fullscreen exit from Esc.");
-            }
-            rendererEscapeWasDown = escapeDown;
-
             if (rendererFullscreenActive != fullscreen)
             {
                 rendererFullscreenActive = fullscreen;
@@ -1130,7 +1122,7 @@ namespace AirPlayReceiverMvp
             {
                 if (!IsRendererFullscreenWindow(window))
                     ApplyPresentationScale(
-                        PresentationScaleBasePermille,
+                        RendererPresentationPolicy.NormalScalePermille,
                         "fullscreen entry");
                 if (TryWriteNativeVideoCommand(
                         "video-fullscreen-toggle", "fullscreen toggle"))
@@ -1148,37 +1140,18 @@ namespace AirPlayReceiverMvp
                     ToolTipIcon.Info);
         }
 
-        private void ApplyAutomaticPresentationScale(
-            Size mediaCanvas, Size targetWindow,
-            bool ambiguousMediaCanvas)
+        private void ApplyNonCroppingPresentationScale(
+            bool photosCanvas)
         {
-            int desired = ResolveAutomaticPresentationScale(
-                mediaCanvas, targetWindow, ambiguousMediaCanvas);
-            ApplyPresentationScale(desired,
-                desired == PresentationScaleBasePermille
-                    ? "normal presentation"
-                    : "automatic Photos portrait fill");
-        }
-
-        private static int ResolveAutomaticPresentationScale(
-            Size mediaCanvas, Size targetWindow,
-            bool ambiguousMediaCanvas)
-        {
-            if (!ambiguousMediaCanvas ||
-                mediaCanvas.Width <= 0 || mediaCanvas.Height <= 0 ||
-                targetWindow.Width <= 0 || targetWindow.Height <= 0 ||
-                targetWindow.Height <= targetWindow.Width ||
-                mediaCanvas.Width <= mediaCanvas.Height)
-                return PresentationScaleBasePermille;
-
-            double mediaAspect = (double)mediaCanvas.Width /
-                mediaCanvas.Height;
-            double targetAspect = (double)targetWindow.Width /
-                targetWindow.Height;
-            int permille = (int)Math.Round(
-                PresentationScaleBasePermille * mediaAspect / targetAspect);
-            return Math.Max(PresentationScaleBasePermille,
-                Math.Min(PresentationScaleMaximumPermille, permille));
+            // The Photos marker identifies only a transport canvas. Without a
+            // trusted content rectangle, any cover/fill scale can discard real
+            // pixels. Keep the complete frame visible and let the sink contain
+            // it inside the portrait-oriented outer window.
+            ApplyPresentationScale(
+                RendererPresentationPolicy.NormalScalePermille,
+                photosCanvas
+                    ? "non-cropping Photos presentation"
+                    : "normal presentation");
         }
 
         private bool ApplyPresentationScale(int desired, string reason)
@@ -1262,10 +1235,10 @@ namespace AirPlayReceiverMvp
                     // Photos uses a landscape transport canvas even for a
                     // portrait phone. Keep the last trusted device shape (or
                     // the conservative iPhone portrait fallback) as the
-                    // shell-window target; the D3D sink is scaled separately
-                    // to fill that target without changing the stream bytes.
+                    // shell-window target. The complete transport frame stays
+                    // contained because this marker is not a content rectangle.
                     Size presentationTarget = deviceFrameVideoSize.IsEmpty
-                        ? ProvisionalIPhonePortraitSize
+                        ? RendererPresentationPolicy.ProvisionalPortraitSize
                         : deviceFrameVideoSize;
                     suppressionChanged = lastSuppressedVideoSize != videoSize;
                     lastSuppressedVideoSize = videoSize;
@@ -1306,36 +1279,28 @@ namespace AirPlayReceiverMvp
             // interpreted as crop, PAR, or rotation metadata; it is only
             // part of a complete, conservative signature that keeps a
             // generic 4K 16:9 canvas from becoming the device baseline.
-            return width0 == 3840 && height0 == 2160 &&
-                sourceWidth == 3840 && sourceHeight == 2160 &&
-                auxiliaryWidth == 0 && auxiliaryHeight == 0 &&
-                encodedWidth == 3840 && encodedHeight == 2160;
+            return RendererPresentationPolicy.IsKnownPhotosCanvas(
+                width0, height0, sourceWidth, sourceHeight,
+                auxiliaryWidth, auxiliaryHeight,
+                encodedWidth, encodedHeight);
         }
 
         private static bool HaveEquivalentDeviceFrameAspect(
             Size first, Size second)
         {
-            double firstAspect = NormalizedVideoAspect(first);
-            double secondAspect = NormalizedVideoAspect(second);
-            return firstAspect > 0.0 && secondAspect > 0.0 &&
-                Math.Abs(firstAspect - secondAspect) <=
-                    DeviceFrameAspectTolerance;
+            return RendererPresentationPolicy.HaveEquivalentDeviceAspect(
+                first, second);
         }
 
         private static bool IsLikelyModernIPhoneDeviceFrame(Size videoSize)
         {
-            double aspect = NormalizedVideoAspect(videoSize);
-            return aspect > 0.0 &&
-                Math.Abs(aspect - ProvisionalIPhoneAspect) <=
-                    DeviceFrameAspectTolerance;
+            return RendererPresentationPolicy.IsLikelyModernIPhoneFrame(
+                videoSize);
         }
 
         private static double NormalizedVideoAspect(Size videoSize)
         {
-            if (videoSize.Width <= 0 || videoSize.Height <= 0)
-                return 0.0;
-            return (double)Math.Min(videoSize.Width, videoSize.Height) /
-                Math.Max(videoSize.Width, videoSize.Height);
+            return RendererPresentationPolicy.NormalizedAspect(videoSize);
         }
 
         private static int VideoOrientation(Size videoSize)
@@ -1385,8 +1350,9 @@ namespace AirPlayReceiverMvp
             double aspect = videoSize.Width > 0 && videoSize.Height > 0
                 ? (double)videoSize.Width / videoSize.Height
                 : (clientHeight >= clientWidth
-                    ? ProvisionalIPhoneAspect :
-                        1.0 / ProvisionalIPhoneAspect);
+                    ? RendererPresentationPolicy.ModernIPhonePortraitAspect :
+                        1.0 /
+                            RendererPresentationPolicy.ModernIPhonePortraitAspect);
             int targetClientWidth;
             int targetClientHeight;
             if (preserveClientArea)

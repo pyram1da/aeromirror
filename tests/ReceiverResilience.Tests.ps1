@@ -32,10 +32,105 @@ $lostConnectionUiSource = [IO.File]::ReadAllText(
     (Join-Path $sourceRoot "UI\LostConnectionForm.cs"))
 $settingsFormSource = [IO.File]::ReadAllText(
     (Join-Path $sourceRoot "UI\SettingsForm.cs"))
+$accessNoteStart = $settingsFormSource.IndexOf(
+    "private void UpdateAccessNote()", [StringComparison]::Ordinal)
+$accessNoteEnd = $settingsFormSource.IndexOf(
+    "private void UpdateStartupChild()", [Math]::Max(0, $accessNoteStart),
+    [StringComparison]::Ordinal)
+Assert-True ($accessNoteStart -ge 0 -and $accessNoteEnd -gt $accessNoteStart) `
+    "the settings access-note policy has a deterministic source boundary"
+$accessNoteSource = $settingsFormSource.Substring(
+    $accessNoteStart, $accessNoteEnd - $accessNoteStart)
+$unknownNetworkAccessNote = $accessNoteSource.IndexOf(
+    "else if (!context.IsNetworkProfileKnown)",
+    [StringComparison]::Ordinal)
+$publicNetworkAccessNote = $accessNoteSource.IndexOf(
+    "else if (context.IsPublicNetwork)",
+    [StringComparison]::Ordinal)
+$unknownNetworkProfileText = [Text.Encoding]::UTF8.GetString(
+    [Convert]::FromBase64String(
+        "0J/RgNC+0YTQuNC70Ywg0YTQuNC30LjRh9C10YHQutC+0Lkg0YHQtdGC0Lgg0L/QvtC60LAg0L3QtSDQvtC/0YDQtdC00LXQu9GR0L0="))
+$receiverWillNotStartText = [Text.Encoding]::UTF8.GetString(
+    [Convert]::FromBase64String(
+        "0JHQtdC3IFBJTiDQv9GA0LjRkdC80L3QuNC6"))
+$repeatNetworkCheckText = [Text.Encoding]::UTF8.GetString(
+    [Convert]::FromBase64String(
+        "0J/QvtCy0YLQvtGA0LjRgtC1INC/0YDQvtCy0LXRgNC60YMg0YHQtdGC0Lg="))
+Assert-True ($unknownNetworkAccessNote -ge 0 -and
+    $publicNetworkAccessNote -gt $unknownNetworkAccessNote -and
+    $accessNoteSource.Contains($unknownNetworkProfileText) -and
+    $accessNoteSource.Contains($receiverWillNotStartText) -and
+    $accessNoteSource.Contains($repeatNetworkCheckText)) `
+    "an unknown physical network is not described as private and explains the fail-closed PIN policy"
 $receiverCoreSource = [IO.File]::ReadAllText(
     (Join-Path $sourceRoot "Receiver\ReceiverContext.Core.cs"))
 $receiverContextSource = [IO.File]::ReadAllText(
     (Join-Path $sourceRoot "Receiver\ReceiverContext.cs"))
+$rendererControlsSource = [IO.File]::ReadAllText(
+    (Join-Path $sourceRoot "Receiver\ReceiverContext.RendererControls.cs"))
+$rendererButtonSource = [IO.File]::ReadAllText(
+    (Join-Path $sourceRoot "UI\RendererFullscreenButtonForm.cs"))
+$bonjourFirewallContextSource = [IO.File]::ReadAllText(
+    (Join-Path $sourceRoot "Receiver\ReceiverContext.BonjourFirewall.cs"))
+$bonjourAssessmentGetterStart = $bonjourFirewallContextSource.IndexOf(
+    "private BonjourFirewallAssessment GetBonjourFirewallAssessment()",
+    [StringComparison]::Ordinal)
+$bonjourAssessmentGetterEnd = $bonjourFirewallContextSource.IndexOf(
+    "internal string GetBonjourFirewallDiagnosticLine()",
+    [Math]::Max(0, $bonjourAssessmentGetterStart),
+    [StringComparison]::Ordinal)
+$bonjourRepairStart = $bonjourFirewallContextSource.IndexOf(
+    "public void RepairBonjourFirewall(IWin32Window owner)",
+    [StringComparison]::Ordinal)
+$bonjourRepairEnd = $bonjourFirewallContextSource.IndexOf(
+    "private void HandleBonjourFirewallRepairResult()",
+    [Math]::Max(0, $bonjourRepairStart),
+    [StringComparison]::Ordinal)
+Assert-True ($bonjourAssessmentGetterStart -ge 0 -and
+    $bonjourAssessmentGetterEnd -gt $bonjourAssessmentGetterStart -and
+    $bonjourRepairStart -ge 0 -and
+    $bonjourRepairEnd -gt $bonjourRepairStart) `
+    "Bonjour assessment and repair have deterministic source boundaries"
+$bonjourAssessmentGetterSource = $bonjourFirewallContextSource.Substring(
+    $bonjourAssessmentGetterStart,
+    $bonjourAssessmentGetterEnd - $bonjourAssessmentGetterStart)
+$bonjourRepairSource = $bonjourFirewallContextSource.Substring(
+    $bonjourRepairStart, $bonjourRepairEnd - $bonjourRepairStart)
+Assert-True (-not $bonjourAssessmentGetterSource.Contains(
+        "AssessPrivateMdnsRule()") -and
+    $bonjourAssessmentGetterSource.Contains(
+        "BeginBonjourFirewallAssessment();") -and
+    $bonjourRepairSource.Contains("ThreadPool.QueueUserWorkItem") -and
+    $bonjourRepairSource.IndexOf(
+        "ThreadPool.QueueUserWorkItem", [StringComparison]::Ordinal) -lt
+        $bonjourRepairSource.IndexOf(
+            "RepairPrivateMdnsRuleExplicitlyWithUac",
+            [StringComparison]::Ordinal) -and
+    $bonjourFirewallContextSource.Contains(
+        "HandleBonjourFirewallRepairResult();") -and
+    $bonjourFirewallContextSource.Contains(
+        "ref bonjourFirewallRepairReady")) `
+    "Bonjour assessment and explicit UAC repair never wait synchronously on the WinForms thread"
+$quoteArgumentStart = $source.IndexOf(
+    "private static string QuoteArgument(string value)",
+    [StringComparison]::Ordinal)
+$quoteArgumentEnd = $source.IndexOf(
+    "internal static void Log(string message)",
+    [Math]::Max(0, $quoteArgumentStart),
+    [StringComparison]::Ordinal)
+Assert-True ($quoteArgumentStart -ge 0 -and
+    $quoteArgumentEnd -gt $quoteArgumentStart) `
+    "Windows argument quoting has a focused implementation boundary"
+$quoteArgumentSource = $source.Substring(
+    $quoteArgumentStart, $quoteArgumentEnd - $quoteArgumentStart)
+Assert-True ($quoteArgumentSource.Contains("if (value == null)") -and
+    $quoteArgumentSource.Contains("new StringBuilder(value.Length + 2)") -and
+    $quoteArgumentSource.Contains(
+        "quoted.Append('\\', backslashCount * 2 + 1);") -and
+    $quoteArgumentSource.Contains(
+        "quoted.Append('\\', backslashCount * 2);") -and
+    -not $quoteArgumentSource.Contains("value.Replace")) `
+    "Windows argument quoting doubles slash runs before quotes and the closing quote"
 $installerSource = [IO.File]::ReadAllText(
     (Join-Path $projectRoot "installer\AirPlayReceiverSetup.cs"))
 Assert-True (-not $settingsFormSource.Contains(
@@ -934,16 +1029,21 @@ Assert-True ([regex]::Matches(
     $source.Contains("TryWriteNativeVideoCommand(") -and
     $receiverCoreSource.Contains("lock (coreCommandSync)") -and
     $source.Contains("ref appliedPresentationScalePermille, 0, 0") -and
-    $source.Contains("PresentationScaleMaximumPermille = 5000") -and
-    $source.Contains("ResolveAutomaticPresentationScale(") -and
+    $source.Contains("ApplyNonCroppingPresentationScale(") -and
+    $source.Contains("RendererPresentationPolicy.NormalScalePermille") -and
+    -not $source.Contains("PresentationScaleMaximumPermille") -and
+    -not $source.Contains("ResolveAutomaticPresentationScale(") -and
     $source.Contains("IsRendererFullscreenWindow(window)") -and
-    $source.Contains("NativeMethods.GetForegroundWindow() == window") -and
-    $source.Contains("NativeMethods.IsEscapeKeyDown()") -and
+    $rendererControlsSource.Contains("NativeMethods.WH_KEYBOARD_LL") -and
+    $rendererControlsSource.Contains("NativeMethods.CallNextHookEx(") -and
+    $rendererControlsSource.Contains("UninstallRendererKeyboardHook()") -and
+    $rendererControlsSource.Contains("ref rendererEscapeRequestState") -and
+    -not $source.Contains("NativeMethods.IsEscapeKeyDown()") -and
     -not $source.Contains("AdjustPhotosZoom(") -and
     -not $source.Contains("ResetPhotosZoom(") -and
     -not $source.Contains("WM_SYSKEYDOWN") -and
     -not $source.Contains("PostMessage(")) `
-    "fullscreen preserves native window state with Esc exit and Photos uses automatic portrait fill without manual zoom controls"
+    "fullscreen uses bounded event-driven exits and Photos keeps every source pixel without manual zoom controls"
 Assert-True ($source.Contains("internal sealed class LostConnectionForm") -and
     $lostConnectionUiSource.Contains("titleLabel.Text =") -and
     $lostConnectionUiSource.Contains("detailLabel.Text =") -and
@@ -1200,6 +1300,163 @@ $instanceFlags = [Reflection.BindingFlags]::Instance -bor `
 $staticFlags = [Reflection.BindingFlags]::Static -bor `
     [Reflection.BindingFlags]::NonPublic -bor `
     [Reflection.BindingFlags]::Public
+
+$rendererButtonType = $assembly.GetType(
+    "AirPlayReceiverMvp.RendererFullscreenButtonForm", $true)
+$calculateRendererButtonBounds = $rendererButtonType.GetMethod(
+    "CalculateBounds", $staticFlags)
+$shouldShowRendererButton = $rendererButtonType.GetMethod(
+    "ShouldShow", $staticFlags)
+$shouldCaptureRendererEscape = $contextType.GetMethod(
+    "ShouldCaptureRendererEscape", $staticFlags)
+$resolveRendererEscapeKeyState = $contextType.GetMethod(
+    "ResolveRendererEscapeKeyState", $staticFlags)
+$isStaleBorderlessTransition = $contextType.GetMethod(
+    "IsStaleBorderlessTransition", $staticFlags)
+Assert-True ($null -ne $calculateRendererButtonBounds -and
+    $null -ne $shouldShowRendererButton -and
+    $null -ne $shouldCaptureRendererEscape -and
+    $null -ne $resolveRendererEscapeKeyState -and
+    $null -ne $isStaleBorderlessTransition) `
+    "renderer fullscreen controls expose deterministic policy boundaries"
+
+$rendererBounds = [Drawing.Rectangle]::new(100, 200, 800, 600)
+$normalButtonBounds = [Drawing.Rectangle]$calculateRendererButtonBounds.Invoke(
+    $null, [object[]]@($rendererBounds, $false, 96, 46))
+$fullscreenButtonBounds = [Drawing.Rectangle]$calculateRendererButtonBounds.Invoke(
+    $null, [object[]]@($rendererBounds, $true, 96, 46))
+$highDpiButtonBounds = [Drawing.Rectangle]$calculateRendererButtonBounds.Invoke(
+    $null, [object[]]@($rendererBounds, $true, 192, 92))
+$narrowButtonBounds = [Drawing.Rectangle]$calculateRendererButtonBounds.Invoke(
+    $null, [object[]]@(
+        [Drawing.Rectangle]::new(0, 0, 120, 300), $false, 96, 46))
+Assert-True ($normalButtonBounds.Width -eq 36 -and
+    $normalButtonBounds.Height -eq 28 -and
+    $normalButtonBounds.Right -le $rendererBounds.Right - (46 * 3) -and
+    $fullscreenButtonBounds.Right -lt $rendererBounds.Right -and
+    $fullscreenButtonBounds.Top -gt $rendererBounds.Top -and
+    $highDpiButtonBounds.Width -eq 72 -and
+    $highDpiButtonBounds.Height -eq 56 -and
+    $narrowButtonBounds.IsEmpty) `
+    "renderer fullscreen control is DPI-aware and never overlaps standard caption buttons"
+Assert-True ([bool]$shouldShowRendererButton.Invoke(
+        $null, [object[]]@($true, $false, $true)) -and
+    -not [bool]$shouldShowRendererButton.Invoke(
+        $null, [object[]]@($true, $false, $false)) -and
+    -not [bool]$shouldShowRendererButton.Invoke(
+        $null, [object[]]@($true, $true, $true)) -and
+    -not [bool]$shouldShowRendererButton.Invoke(
+        $null, [object[]]@($false, $false, $true))) `
+    "renderer fullscreen control stays off minimized, missing, and unrelated foreground windows"
+Assert-True ([bool]$shouldCaptureRendererEscape.Invoke(
+        $null, [object[]]@($true, 77, [uint32]77, $true)) -and
+    -not [bool]$shouldCaptureRendererEscape.Invoke(
+        $null, [object[]]@($false, 77, [uint32]77, $true)) -and
+    -not [bool]$shouldCaptureRendererEscape.Invoke(
+        $null, [object[]]@($true, 77, [uint32]78, $true)) -and
+    -not [bool]$shouldCaptureRendererEscape.Invoke(
+        $null, [object[]]@($true, 77, [uint32]77, $false))) `
+    "Escape capture requires actual fullscreen and the foreground renderer root"
+Assert-True ([int]$resolveRendererEscapeKeyState.Invoke(
+        $null, [object[]]@(0, $true)) -eq 1 -and
+    [int]$resolveRendererEscapeKeyState.Invoke(
+        $null, [object[]]@(1, $true)) -eq 1 -and
+    [int]$resolveRendererEscapeKeyState.Invoke(
+        $null, [object[]]@(1, $false)) -eq 3 -and
+    [int]$resolveRendererEscapeKeyState.Invoke(
+        $null, [object[]]@(2, $false)) -eq 0 -and
+    [int]$resolveRendererEscapeKeyState.Invoke(
+        $null, [object[]]@(3, $false)) -eq 3) `
+    "short Escape is retained through key-up and a sent held press rearms on release"
+Assert-True ([bool]$isStaleBorderlessTransition.Invoke(
+        $null, [object[]]@($true, $false, $true)) -and
+    -not [bool]$isStaleBorderlessTransition.Invoke(
+        $null, [object[]]@($true, $false, $false)) -and
+    -not [bool]$isStaleBorderlessTransition.Invoke(
+        $null, [object[]]@($true, $true, $true))) `
+    "only a fullscreen-to-borderless transition keeps the explicit exit recovery control"
+Assert-True ($rendererButtonSource.Contains("WsExNoActivate") -and
+    $rendererButtonSource.Contains("ShowWithoutActivation") -and
+    $rendererButtonSource.Contains("standardWidth * 3") -and
+    $rendererButtonSource.Contains(
+        "NativeMethods.GW_HWNDPREV") -and
+    $rendererButtonSource.Contains(
+        "topMost ? NativeMethods.HWND_TOPMOST : NativeMethods.HWND_TOP") -and
+    -not $rendererButtonSource.Contains("SetParent(") -and
+    -not $rendererButtonSource.Contains("SetWindowLongPtr(") -and
+    $rendererControlsSource.Contains("Interlocked.CompareExchange(") -and
+    $rendererControlsSource.Contains("NativeMethods.WM_KEYUP") -and
+    $rendererControlsSource.Contains(
+        "settings.AlwaysOnTop || exitMode") -and
+    $rendererControlsSource.Contains("rendererStaleBorderlessWindow") -and
+    -not $rendererControlsSource.Contains(
+        '"restore stale borderless renderer frame"') -and
+    $rendererControlsSource.Contains("NativeMethods.CallNextHookEx(")) `
+    "fullscreen control remains shell-owned and the keyboard hook always preserves the system chain"
+
+$quoteArgument = $contextType.GetMethod("QuoteArgument", $staticFlags)
+Assert-True ($null -ne $quoteArgument) `
+    "managed process arguments use one focused Windows quoting helper"
+$commandLineNativeType = Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+
+public static class AeroMirrorCommandLineNative
+{
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern IntPtr CommandLineToArgvW(
+        string commandLine, out int argumentCount);
+
+    [DllImport("kernel32.dll")]
+    public static extern IntPtr LocalFree(IntPtr memory);
+}
+"@ -PassThru
+
+$quoteRoundTripCases = @(
+    [pscustomobject]@{ Label = "null"; Value = $null },
+    [pscustomobject]@{ Label = "empty"; Value = "" },
+    [pscustomobject]@{ Label = "ordinary text"; Value = "AeroMirror" },
+    [pscustomobject]@{ Label = "spaces"; Value = "Aero Mirror Receiver" },
+    [pscustomobject]@{ Label = "quote"; Value = 'say "hello"' },
+    [pscustomobject]@{
+        Label = "backslashes before quote"
+        Value = "before" + ("\" * 3) + '"after'
+    },
+    [pscustomobject]@{
+        Label = "trailing backslashes"
+        Value = "C:\Program Files\AeroMirror" + ("\" * 3)
+    }
+)
+foreach ($case in $quoteRoundTripCases) {
+    [object[]]$invokeArguments = [object[]]::new(1)
+    $invokeArguments[0] = $case.Value
+    $quotedArgument = [string]$quoteArgument.Invoke(
+        $null, $invokeArguments)
+    $commandLine = '"AeroMirrorTest.exe" ' + $quotedArgument
+    $argumentCount = 0
+    $argumentVector = $commandLineNativeType::CommandLineToArgvW(
+        $commandLine, [ref]$argumentCount)
+    Assert-True ($argumentVector -ne [IntPtr]::Zero) `
+        "CommandLineToArgvW accepts the $($case.Label) quoted argument"
+    try {
+        Assert-True ($argumentCount -eq 2) `
+            "$($case.Label) adds exactly one Windows argv argument"
+        $roundTripValue = [Runtime.InteropServices.Marshal]::PtrToStringUni(
+            [Runtime.InteropServices.Marshal]::ReadIntPtr(
+                $argumentVector, [IntPtr]::Size))
+        $expectedValue = if ($null -eq $case.Value) {
+            ""
+        }
+        else {
+            [string]$case.Value
+        }
+        Assert-True ($roundTripValue -ceq $expectedValue) `
+            "$($case.Label) survives Windows argv quoting unchanged"
+    }
+    finally {
+        $commandLineNativeType::LocalFree($argumentVector) | Out-Null
+    }
+}
 
 $testStorageRoot = [IO.Path]::GetFullPath((Join-Path `
     ([IO.Path]::GetTempPath()) ([Guid]::NewGuid().ToString("N"))))
@@ -1821,6 +2078,15 @@ finally {
 
 $updateType = $assembly.GetType(
     "AirPlayReceiverMvp.UpdateService", $true)
+$obsoleteInstallerCompatibility = $updateType.GetMethod(
+    "IsCompatibleInstallerName", $staticFlags)
+$updateServiceSource = [IO.File]::ReadAllText(
+    (Join-Path $sourceRoot "Updates\UpdateService.cs"))
+Assert-True ($null -eq $obsoleteInstallerCompatibility -and
+    $updateServiceSource.Contains(
+        '"AeroMirror-Setup-" + latest.ToString(3) + ".exe"') -and
+    -not $updateServiceSource.Contains("IsCompatibleInstallerName")) `
+    "the updater selects the one exact versioned Setup asset without a redundant architecture-name filter"
 $tryParseVersion = $updateType.GetMethod("TryParseVersion", $staticFlags)
 Assert-True ($null -ne $tryParseVersion) `
     "release version parser exists"
@@ -2004,15 +2270,12 @@ $resolveAutomaticVideo = $contextType.GetMethod(
     "ResolveAutomaticVideoSize", $instanceFlags)
 $resolveManualFitVideo = $contextType.GetMethod(
     "ResolveManualFitVideoSize", $instanceFlags)
-$resolveAutomaticPresentationScale = $contextType.GetMethod(
-    "ResolveAutomaticPresentationScale", $staticFlags)
 Assert-True ($null -ne $sameDeviceAspect -and
     $null -ne $likelyModernIPhoneFrame -and
     $null -ne $knownAmbiguousMediaCanvas -and
     $null -ne $resolveAutomaticVideo -and
-    $null -ne $resolveManualFitVideo -and
-    $null -ne $resolveAutomaticPresentationScale) `
-    "renderer orientation and automatic Photos fill expose deterministic decisions"
+    $null -ne $resolveManualFitVideo) `
+    "renderer orientation and non-cropping Photos layout expose deterministic decisions"
 
 $portraitFrame = [Drawing.Size]::new(998, 2160)
 $landscapeFrame = [Drawing.Size]::new(3840, 1776)
@@ -2213,19 +2476,9 @@ $manualPhotoFit = [Drawing.Size]$resolveManualFitVideo.Invoke(
     $context, [object[]]@($presentationCanvas, $true))
 Assert-True ($manualPhotoFit -eq $portraitFrame) `
     "manual tray fitting uses the automatic Photos portrait target"
-Assert-True ([int]$resolveAutomaticPresentationScale.Invoke(
-        $null, [object[]]@(
-            $presentationCanvas, $portraitFrame, $true)) -eq 3848 -and
-    [int]$resolveAutomaticPresentationScale.Invoke(
-        $null, [object[]]@(
-            $presentationCanvas, $provisionalPortrait, $true)) -eq 3852 -and
-    [int]$resolveAutomaticPresentationScale.Invoke(
-        $null, [object[]]@(
-            $presentationCanvas, $landscapeFrame, $true)) -eq 1000 -and
-    [int]$resolveAutomaticPresentationScale.Invoke(
-        $null, [object[]]@(
-            $presentationCanvas, $portraitFrame, $false)) -eq 1000) `
-    "automatic Photos fill covers only a portrait target and resets elsewhere"
+Assert-True ($null -eq $contextType.GetMethod(
+        "ResolveAutomaticPresentationScale", $staticFlags)) `
+    "Photos presentation cannot select a cover scale without a trusted content rectangle"
 $portraitReturnResult = Resolve-AutomaticVideoSize $portraitFrame
 Assert-True ($portraitReturnResult.OrientationAuthoritative -and
     $portraitReturnResult.Size -eq $portraitFrame) `

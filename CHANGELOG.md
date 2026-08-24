@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.12.19 — non-cropping gallery and accessible fullscreen (review candidate)
+
+### Changes
+
+- Replaced the unverified 3.85x Photos cover transform with a strict
+  non-cropping presentation. The exact observed canvas may still retain the
+  trusted portrait outer-window shape, but it no longer authorizes discarding
+  pixels without a real content rectangle.
+- Added a managed fullscreen button that follows the native renderer title
+  bar without cross-process subclassing. The bounded keyboard hook exists only
+  during actual fullscreen, and Escape capture additionally requires the
+  renderer PID/root to own foreground; tray and native Alt+Enter remain.
+- Added focused Bonjour firewall diagnostics for a confirmed Windows case in
+  which the core, ports, DNS-SD renewals, BLE, and service stayed healthy while
+  the Private profile lacked an inbound mDNS rule for the Bonjour executable.
+  Repair is explicit and UAC-gated, with only Private/UDP 5353/LocalSubnet
+  scope for that exact executable.
+- Centralized renderer geometry invariants in a typed policy, removed a
+  duplicated scale literal, a redundant updater filename filter, unused
+  imports, an unreachable network-start branch, and localized-text parsing
+  from receiver readiness.
+
+### Evidence and status
+
+- Source targets `0.12.19`/`0.12.19.0`; automated, pre-tag packaging, Setup,
+  and corresponding-source gates pass. Exact-tag and publication gates remain
+  pending.
+- The 0.12.18 native core/runtime and corresponding-source provenance are
+  intended to remain byte-identical; this patch changes the managed shell and
+  installer-facing diagnostics only.
+- Physical Photos, fullscreen/button/Escape, Private-firewall repair, and
+  long-idle iPhone visibility remain governed by
+  [`docs/releases/0.12.19/TEST_PLAN.md`](docs/releases/0.12.19/TEST_PLAN.md).
+  Publication must label those rows PENDING rather than accepted.
+
 ## 0.12.18 — automatic Photos layout and safe fullscreen (review release)
 
 ### Changes

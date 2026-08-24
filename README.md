@@ -69,12 +69,13 @@ Apple. AirPlay, iPhone, and Apple are trademarks of Apple Inc.
   move; the window also adapts on real portrait/landscape changes, and
   automatic fitting restores the learned proportions after a manual resize
   unless the user turns it off; for the exact correlated Photos/media
-  signature, 0.12.18 keeps the trusted phone shape (or a conservative portrait
-  fallback when Photos arrives first) and applies one centered automatic fill
-  without promoting the canvas to device orientation or making provisional
-  placement persistable; the former schema-12 Photos A/B key and the 0.12.17
-  incremental zoom controls are retired; property-backed fullscreen now
-  suspends every shell resize/save path and exits with foreground Esc;
+  signature, the 0.12.19 candidate keeps the trusted phone shape (or a
+  conservative portrait fallback when Photos arrives first) but contains the
+  complete frame at normal scale instead of using the unverified 0.12.18 cover
+  transform; the former schema-12 Photos A/B key and the 0.12.17 incremental
+  zoom controls are retired; property-backed fullscreen suspends every shell
+  resize/save path, has a shell-owned no-activate enter/exit control, and uses
+  bounded event-driven foreground Escape;
   the last normal position, size, and DPI are restored on the next session and
   clamped into an available monitor; saved bounds are applied from the early
   window-show event, unchanged native-window policy is cached, and the window
@@ -160,6 +161,21 @@ not the runtime downloaded by the public network installer. Qt 6.10.1
 officially supports Windows 10 1809 x64 and newer. Windows 10 is outside Microsoft's normal consumer support lifecycle,
 but remains an explicit application target. ARM64 and 32-bit packages are not
 included.
+
+## Unpublished 0.12.19 review candidate
+
+The local candidate keeps every pixel of the encoded Photos frame, adds a
+shell-owned fullscreen/exit control for both framed and actual fullscreen
+states, and replaces timer polling with bounded event-driven Escape. It also
+diagnoses one exact missing Private Bonjour mDNS firewall rule and offers only
+an explicit, confirmed, UAC-gated narrow repair. It does not alter the Bonjour
+service or remove that external rule during uninstall. Automated and pre-tag
+package gates pass; physical Photos, fullscreen, DPI, firewall, and long-idle
+iPhone rows remain PENDING. Version 0.12.18 remains the latest public release
+until publication.
+
+See the [0.12.19 release notes](docs/releases/0.12.19/RELEASE_NOTES.md) and
+[test plan](docs/releases/0.12.19/TEST_PLAN.md).
 
 ## Latest public 0.12.18 review release
 
@@ -820,9 +836,12 @@ pass; deeper UI extraction should be reviewed separately from receiver fixes.
 - GitHub update checking in 0.12.7 uses the former `Nadejny/aeromirror` slug;
   GitHub redirects it to canonical `pyram1da/aeromirror`, and both latest API
   routes returned the same public `v0.12.7` Release ID.
-- Bonjour/mDNS and Windows Firewall configuration remain external system
-  dependencies. Allow the receiver only on the network categories you intend
-  to use. Some managed or guest Wi-Fi networks block device discovery.
+- Bonjour/mDNS and Windows Firewall remain external system dependencies. The
+  0.12.19 candidate can explicitly add only the exact Private/UDP
+  5353/LocalSubnet rule for the validated Bonjour executable after confirmation
+  and UAC; it does not change the Bonjour service or clean the rule on uninstall.
+  Allow the receiver only on intended network categories. Some managed or guest
+  Wi-Fi networks block device discovery.
   AeroMirror extracts a portable app runtime but installs no system-wide
   .NET/VC++ redistributable, driver, or framework prerequisite and should not
   normally require a full Windows reboot. Bonjour is machine-wide, so an

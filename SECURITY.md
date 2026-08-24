@@ -4,14 +4,11 @@
 
 Only the latest published AeroMirror release receives security fixes.
 
-Public `v0.12.9` is currently the latest published release. Internal
-0.12.10–0.12.15 candidates are not published supported versions and must not
-be presented as security updates. The 0.12.15 source audit hardens bounded
-HTTP/RTSP and mirror parsing, SETUP/pairing/FairPlay/RTP/NTP validation,
-allocation and buffer rollback, and checked crypto-error propagation in the
-supported default native path. Those changes remain pretag and do not expand
-the public support statement until a later release completes its required
-reproducibility, physical, and publication gates.
+Public `v0.12.18` is currently the latest published normal-channel review
+release. The local 0.12.19 candidate does not expand the public support
+statement until its immutable tag, exact assets, and public download
+verification complete. Physical gallery/fullscreen and iPhone discovery rows
+are reported separately and are not implied by publication.
 
 ## Reporting a vulnerability
 
@@ -44,6 +41,13 @@ project before sharing it.
 AeroMirror is a local-network receiver built on UxPlay. Reports about UxPlay,
 GStreamer, Qt, Bonjour/mDNS, or bundled codec libraries may need coordinated
 disclosure to their upstream maintainers as well.
+
+Ordinary startup observes but does not mutate the machine-wide Bonjour service
+or Windows Firewall. The 0.12.19 explicit repair action is offered only when
+the exact Bonjour executable lacks the narrow Private/UDP 5353/LocalSubnet
+inbound rule; it requires user confirmation and Windows UAC. Treat any
+automatic mutation, Public/TCP/Any-address widening, executable-path
+substitution, or deletion of unrelated firewall rules as a security defect.
 
 The connection-loss continuity view may copy unobscured renderer client pixels
 from the Windows desktop into process memory. It rejects capture when another

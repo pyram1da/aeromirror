@@ -115,16 +115,6 @@ namespace AirPlayReceiverMvp
                 return;
             }
 
-            if (!networkProfileKnown && settings.PairingMode == "none")
-            {
-                SetState(false, "Не удалось определить сеть · включите PIN");
-                if (settings.Notify && notify)
-                    tray.ShowBalloonTip(6000, AppTitle,
-                        "AeroMirror не смог определить профиль сети. Для безопасного запуска включите PIN или повторите проверку сети.",
-                        ToolTipIcon.Warning);
-                return;
-            }
-
             if (publicNetwork && settings.PairingMode == "none")
             {
                 SetState(false, "Публичная сеть · включите PIN");
@@ -2051,9 +2041,8 @@ namespace AirPlayReceiverMvp
             appliedVideoOrientation = 0;
             Interlocked.Exchange(
                 ref appliedPresentationScalePermille,
-                PresentationScaleBasePermille);
+                RendererPresentationPolicy.NormalScalePermille);
             rendererFullscreenActive = false;
-            rendererEscapeWasDown = false;
         }
 
         private void ResetIdleDiscoveryRenewalSchedule()
@@ -2924,6 +2913,8 @@ namespace AirPlayReceiverMvp
                 Interlocked.CompareExchange(
                     ref coreDiscoveryRecoveryAttempts, 0, 0) + ".");
             text.AppendLine("Bonjour Service: " + GetBonjourStatus());
+            text.AppendLine("Bonjour · Windows Firewall: " +
+                GetBonjourFirewallDiagnosticLine());
             text.AppendLine("Автозапуск: " + (IsAutostartEnabled() ? "включён" : "выключен"));
             text.AppendLine("Запуск в трее: " + (settings.StartMinimized ? "включён" : "выключен"));
             text.AppendLine("Кнопка ×: " + (settings.CloseToTray ? "свернуть в трей" : "закрыть приложение"));
@@ -3062,7 +3053,7 @@ namespace AirPlayReceiverMvp
                 IsCoreRunning)
             {
                 SetState(true,
-                    "Приёмник включён · ожидание подключения");
+                    "Приёмник включён · ожидание подключения", true);
             }
 
             if (restartPending && DateTime.UtcNow >= restartDueUtc)
@@ -3111,7 +3102,7 @@ namespace AirPlayReceiverMvp
                     coreReadinessRecoveryAttempts = 0;
                     coreReadinessPid = 0;
                     SetState(true,
-                        "Приёмник включён · ожидание подключения");
+                        "Приёмник включён · ожидание подключения", true);
                 }
                 else if (coreReadyChecks < 8)
                 {
@@ -3157,6 +3148,7 @@ namespace AirPlayReceiverMvp
             HandleCoreDiscoveryRecovery();
             HandleSessionUnlockDiscoveryRefresh();
             HandleAutomaticDiscoveryMaintenance();
+            HandleBonjourFirewallAssessment();
             ApplyTopMost();
             ApplyLostConnectionPlaceholderPolicy();
             if (form != null && !form.IsDisposed)

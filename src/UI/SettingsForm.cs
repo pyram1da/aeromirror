@@ -644,8 +644,7 @@ namespace AirPlayReceiverMvp
             bool dark = appliedDarkTheme ??
                 ThemeHelper.IsDark(context.CurrentSettings.ThemeMode);
             bool receiverReady = context.IsCoreRunning &&
-                context.ReceiverStateText.IndexOf(
-                    "включён", StringComparison.OrdinalIgnoreCase) >= 0;
+                context.IsReceiverReady;
             if (receiverReady)
             {
                 status.Text = "Приёмник включён";
@@ -1273,6 +1272,12 @@ namespace AirPlayReceiverMvp
                 accessNote.Text =
                     "PIN вводится при первом знакомстве устройств. Доверие сохраняется " +
                     "между этим iPhone и ноутбуком независимо от названия Wi-Fi-сети.";
+            }
+            else if (!context.IsNetworkProfileKnown)
+            {
+                accessNote.Text =
+                    "Профиль физической сети пока не определён. Без PIN приёмник " +
+                    "не запустится. Повторите проверку сети.";
             }
             else if (context.IsPublicNetwork)
             {

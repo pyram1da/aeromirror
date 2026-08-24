@@ -122,6 +122,17 @@ pending-reboot indicators, sockets/readiness markers, and iPhone browse result.
 Do not report the reboot as a normal installation requirement until a clean VM
 reproduces the same lifecycle.
 
+### 0.12.19 Private Bonjour firewall diagnostic
+
+If diagnostics report that the exact Private Bonjour mDNS rule is missing, use
+**Исправить доступ Bonjour…** only after recording the existing firewall state.
+The action asks for confirmation and Windows UAC, then may add one inbound rule
+for the validated `mDNSResponder.exe`: Private profile, UDP 5353, remote
+`LocalSubnet`, no edge traversal. Declining UAC or a failed exact-path/policy
+check must leave the machine unchanged. This action does not repair the Bonjour
+service, does not run automatically, and 0.12.19 does not remove the external
+rule during uninstall. Record the before/after rule and iPhone browse result.
+
 ## What the review log records
 
 Depending on the review build, the log may include:
@@ -175,11 +186,12 @@ Depending on the review build, the log may include:
   suspended. The same unit continues to the renderer. This marker proves the
   parser/action boundary only; correlate it with later health deltas, sink and
   Present progress, and a screen recording before saying visible video resumed;
-- for 0.12.18, managed fullscreen enter/exit/suspension lines plus native
-  `AEROMIRROR_VIDEO_FULLSCREEN` and `AEROMIRROR_VIDEO_SCALE` results. Automatic
-  portrait fill is expected only for the exact Photos canvas with a portrait
-  target; fullscreen is expected to use 1000 permille. These geometry/state
-  records do not contain pixels and do not prove that the visible crop is right;
+- for 0.12.19, managed fullscreen/control/Escape and stale-borderless
+  detection/manual-exit
+  lines plus native `AEROMIRROR_VIDEO_FULLSCREEN` and
+  `AEROMIRROR_VIDEO_SCALE` results. Photos presentation and fullscreen are
+  expected to use 1000 permille. These records contain no pixels and do not
+  prove that the complete visible image is correct;
 - the actual GStreamer decoder/video sink selected at pipeline creation, plus
   renderer, pipeline warnings, and errors.
 

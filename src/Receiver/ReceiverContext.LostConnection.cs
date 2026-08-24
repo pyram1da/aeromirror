@@ -321,7 +321,10 @@ namespace AirPlayReceiverMvp
             int height = Math.Min(760, Math.Max(360,
                 (int)Math.Round(workArea.Height * 0.78)));
             int width = Math.Min(520, Math.Max(320,
-                (int)Math.Round(height * ProvisionalIPhoneAspect) + 32));
+                (int)Math.Round(
+                    height *
+                        RendererPresentationPolicy.ModernIPhonePortraitAspect) +
+                    32));
             Rectangle fallback = new Rectangle(
                 workArea.Left + (workArea.Width - width) / 2,
                 workArea.Top + (workArea.Height - height) / 2,

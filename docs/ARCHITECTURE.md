@@ -270,6 +270,25 @@ a cached browse result. Bonjour remains an external machine-wide service. The
 receiver observes its state but does not start, stop, repair, uninstall, or
 otherwise mutate that service.
 
+Version 0.12.19 separately assesses one exact external Windows Firewall
+condition: an enabled inbound Allow rule for the validated Bonjour
+`mDNSResponder.exe`, Private profile, UDP 5353, remote `LocalSubnet`, with edge
+traversal disabled. AeroMirror changes nothing automatically. Only the explicit
+**Исправить доступ Bonjour…** action, user confirmation, and Windows UAC may add
+that narrow rule. It does not repair or reconfigure the Bonjour service, open
+Public/TCP/Any traffic, or provide uninstall cleanup for the external rule.
+
+Version 0.12.19 separately inspects the Windows Firewall boundary around that
+external service. A background read-only assessment resolves the strict
+`mDNSResponder.exe` service path and accepts only an enabled inbound Allow rule
+for that exact executable, the Private profile, UDP local port 5353, remote
+`LocalSubnet`, and no edge traversal. Ordinary startup never changes the
+firewall. If the exact rule is missing, a visible tray action explains the
+scope, asks the user, and invokes one UAC-gated system `netsh.exe` command.
+Public, TCP, arbitrary-port/address, Bonjour-service, and automatic-startup
+mutation remain outside this path. Local rule presence is still not proof of
+current iPhone browse visibility.
+
 ## Native worker, protocol, and renderer ownership
 
 The supported default native receiver has four long-lived worker owners:
@@ -420,13 +439,13 @@ Photos-first session cannot poison the next session's placement.
 The marker reports the encoded stream dimensions; it is not remote-control
 input, pixel-aspect metadata, or a guarantee that an iPhone application itself
 has not letterboxed content inside the video frame. In particular, Photos may
-place a portrait presentation inside the encoded `3840x2160` canvas. Version
-0.12.18 uses a deterministic geometry-only transform for this one replay-backed
-case: when the target window is portrait, uniform scale is the canvas aspect
-divided by the target aspect (3848 permille for the observed `998x2160` target
-and 3852 for the fallback). The result is clamped to 1000–5000 permille,
-centered, equal on both axes, and reset outside that portrait media-canvas
-state. No pixels are classified and no generic content rectangle is inferred.
+place a portrait presentation inside the encoded `3840x2160` canvas. Physical
+0.12.18 testing showed that its geometry-only 3.85x cover transform could crop
+the displayed image. Version 0.12.19 therefore removes that transform and
+keeps the sink at the neutral 1000-permille scale. The outer window may still
+follow the trusted phone shape, but the complete transport frame is contained;
+letterboxing is accepted until the native boundary exposes a trustworthy
+content rectangle. No pixel classification or generic crop inference is used.
 
 Presentation commands share the redirected standard-input control channel with
 discovery commands. The shell serializes writes and revalidates current process
@@ -440,11 +459,25 @@ managed toggle flag, because Alt+Enter can change native state independently.
 The shell requires a monitor-sized outer rectangle and a matching borderless
 client area. While that state is active, supervision skips policy mutation,
 saved-placement restore/write, automatic/manual fitting, and continuity-bounds
-capture. Foreground Esc queues the same native toggle; automatic Photos scale
-is 100% in fullscreen and is recalculated after the normal framed window
-returns. A future versioned IPC contract should replace
-stdout parsing and expose explicit stream, orientation, and content-layout
-events before any automatic crop or rotation policy is considered.
+  capture. Version 0.12.19 installs a low-level keyboard hook only while actual
+  fullscreen exists; capture additionally requires that renderer PID/root to
+  own foreground. The callback queues one Escape edge and immediately
+  continues the Windows hook chain; the WinForms
+supervision pass sends the native toggle and removes the hook after exit.
+
+A small shell-owned, non-activating tool window provides the visible
+fullscreen control without subclassing or injecting into the native renderer.
+In a framed window it sits to the left of the three standard caption buttons;
+in fullscreen it remains a top-right exit affordance. It is hidden when the
+  renderer is absent, invisible, minimized, or another application owns the
+  foreground, including when the renderer policy is always-on-top. If a media transition
+  leaves the same renderer non-monitor-sized but still borderless immediately
+  after actual fullscreen, the shell keeps the explicit exit control available.
+  It does not send an automatic second toggle because that operation is not
+  idempotent and could re-enter fullscreen. A future
+versioned IPC contract should replace stdout/window heuristics and expose
+explicit stream, orientation, fullscreen, and content-layout events before any
+automatic crop or rotation policy is considered.
 
 ## Renderer pipeline selection
 
@@ -594,6 +627,10 @@ renegotiation path plus an IPC command from the Windows shell.
   four-digit PIN is enabled.
 - This gate depends on Windows network classification and is not a substitute
   for correctly scoped firewall rules or network isolation.
+- AeroMirror never creates a firewall rule silently. The optional Bonjour
+  repair requires an exact executable/rule assessment, explicit confirmation,
+  and Windows administrator approval; it is confined to Private UDP 5353 from
+  the local subnet.
 - Persisted pairing mode is untrusted input. Only no-PIN mode or PIN mode with
   exactly four ASCII digits is canonical; unknown, obsolete, or malformed
   values become unprotected so a Public/Unknown physical profile fails closed.

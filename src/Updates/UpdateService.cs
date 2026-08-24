@@ -1,20 +1,11 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
-using System.Drawing;
 using System.IO;
 using System.Net;
-using System.Net.NetworkInformation;
-using System.Reflection;
-using System.Runtime.InteropServices;
 using System.Security.Cryptography;
-using System.ServiceProcess;
 using System.Text;
 using System.Text.RegularExpressions;
-using System.Threading;
-using System.Windows.Forms;
 using System.Web.Script.Serialization;
-using Microsoft.Win32;
 
 namespace AirPlayReceiverMvp
 {
@@ -83,8 +74,7 @@ namespace AirPlayReceiverMvp
                     if (string.Equals(
                             name,
                             expectedInstaller,
-                            StringComparison.OrdinalIgnoreCase) &&
-                        IsCompatibleInstallerName(name))
+                            StringComparison.OrdinalIgnoreCase))
                     {
                         info.InstallerUrl =
                             GetString(asset, "browser_download_url");
@@ -97,15 +87,6 @@ namespace AirPlayReceiverMvp
                 }
             }
             return info;
-        }
-
-        private static bool IsCompatibleInstallerName(string name)
-        {
-            string lower = (name ?? "").ToLowerInvariant();
-            return lower.IndexOf("arm64") < 0 &&
-                lower.IndexOf("aarch64") < 0 &&
-                lower.IndexOf("x86") < 0 &&
-                lower.IndexOf("win32") < 0;
         }
 
         internal static string DownloadAndVerify(UpdateInfo info)
