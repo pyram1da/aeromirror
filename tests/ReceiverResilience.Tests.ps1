@@ -66,10 +66,16 @@ $receiverCoreSource = [IO.File]::ReadAllText(
     (Join-Path $sourceRoot "Receiver\ReceiverContext.Core.cs"))
 $receiverContextSource = [IO.File]::ReadAllText(
     (Join-Path $sourceRoot "Receiver\ReceiverContext.cs"))
-$rendererControlsSource = [IO.File]::ReadAllText(
-    (Join-Path $sourceRoot "Receiver\ReceiverContext.RendererControls.cs"))
-$rendererButtonSource = [IO.File]::ReadAllText(
-    (Join-Path $sourceRoot "UI\RendererFullscreenButtonForm.cs"))
+$deletedRendererControlsPath = Join-Path $sourceRoot `
+    "Receiver\ReceiverContext.RendererControls.cs"
+$deletedRendererButtonPath = Join-Path $sourceRoot `
+    "UI\RendererFullscreenButtonForm.cs"
+Assert-True (-not (Test-Path -LiteralPath $deletedRendererControlsPath) -and
+    -not (Test-Path -LiteralPath $deletedRendererButtonPath) -and
+    -not $source.Contains("RendererFullscreenButtonForm") -and
+    -not $source.Contains("WH_KEYBOARD_LL") -and
+    -not $source.Contains("rendererEscapeRequestState")) `
+    "managed fullscreen overlay and low-level Escape hook are removed"
 $bonjourFirewallContextSource = [IO.File]::ReadAllText(
     (Join-Path $sourceRoot "Receiver\ReceiverContext.BonjourFirewall.cs"))
 $bonjourAssessmentGetterStart = $bonjourFirewallContextSource.IndexOf(
@@ -96,6 +102,14 @@ $bonjourAssessmentGetterSource = $bonjourFirewallContextSource.Substring(
     $bonjourAssessmentGetterEnd - $bonjourAssessmentGetterStart)
 $bonjourRepairSource = $bonjourFirewallContextSource.Substring(
     $bonjourRepairStart, $bonjourRepairEnd - $bonjourRepairStart)
+$bonjourRepairResultSource = $bonjourFirewallContextSource.Substring(
+    $bonjourRepairEnd)
+$bonjourRepairSuccessDialogText = [Text.Encoding]::UTF8.GetString(
+    [Convert]::FromBase64String(
+        "0JTQvtGB0YLRg9C/IEJvbmpvdXIg0LjRgdC/0YDQsNCy0LvQtdC9"))
+$automaticBonjourServiceText = [Text.Encoding]::UTF8.GetString(
+    [Convert]::FromBase64String(
+        "QWVyb01pcnJvciDQvdC1INGD0YHRgtCw0L3QsNCy0LvQuNCy0LDQtdGCINGB0LjRgdGC0LXQvNC90YPRjiDRgdC70YPQttCx0YMg0LDQstGC0L7QvNCw0YLQuNGH0LXRgdC60Lg="))
 Assert-True (-not $bonjourAssessmentGetterSource.Contains(
         "AssessPrivateMdnsRule()") -and
     $bonjourAssessmentGetterSource.Contains(
@@ -111,6 +125,36 @@ Assert-True (-not $bonjourAssessmentGetterSource.Contains(
     $bonjourFirewallContextSource.Contains(
         "ref bonjourFirewallRepairReady")) `
     "Bonjour assessment and explicit UAC repair never wait synchronously on the WinForms thread"
+Assert-True (-not $bonjourRepairSource.Contains(
+        "MessageBoxButtons.YesNo") -and
+    $bonjourRepairSource.Contains(
+        "RepairPrivateMdnsRuleExplicitlyWithUac") -and
+    $bonjourFirewallContextSource.Contains(
+        "public bool IsBonjourFirewallRepairRequired") -and
+    $bonjourFirewallContextSource.Contains(
+        "public bool IsBonjourUnavailable") -and
+    $bonjourFirewallContextSource.Contains(
+        "public bool IsBonjourFirewallRepairRunning")) `
+    "the explicit Bonjour action proceeds directly to one UAC operation and exposes read-only UI state"
+Assert-True ($bonjourRepairResultSource.Contains(
+        "State = BonjourFirewallState.Configured") -and
+    $bonjourRepairResultSource.Contains(
+        "BeginBonjourFirewallAssessment();") -and
+    $bonjourRepairResultSource.Contains("form.SyncStatus();") -and
+    $bonjourRepairResultSource.Contains("RefreshDiscovery();") -and
+    -not $bonjourRepairResultSource.Contains(
+        $bonjourRepairSuccessDialogText)) `
+    "successful Bonjour repair updates the card and discovery without a success dialog"
+Assert-True ($settingsFormSource.Contains(
+        "context.RepairBonjourFirewall(this);") -and
+    $settingsFormSource.Contains(
+        "context.IsBonjourFirewallRepairRequired") -and
+    $settingsFormSource.Contains("context.IsBonjourUnavailable") -and
+    $settingsFormSource.Contains(
+        "bonjourFirewallRepair.Visible = false;") -and
+    $settingsFormSource.Contains(
+        $automaticBonjourServiceText)) `
+    "the main network card exposes repair only for a missing rule and never offers bundled Bonjour installation"
 $quoteArgumentStart = $source.IndexOf(
     "private static string QuoteArgument(string value)",
     [StringComparison]::Ordinal)
@@ -179,8 +223,16 @@ Assert-True ($nativePatchSource.Contains("DNSServiceProcessResult") -and
     $wrapperPatchSource.Contains("requestInterruption()")) `
     "reviewed native patches retain callback pumping, coherent identity, loop-reset command persistence, redirected pipe IPC, and graceful stop"
 Assert-True ($wrapperPatchSource.Contains(
+        '^AEROMIRROR_COMMAND video-fullscreen-set state=([01])$') -and
+    $wrapperPatchSource.Contains('request_video_fullscreen_set(state)') -and
+    -not $wrapperPatchSource.Contains(
         'AEROMIRROR_COMMAND video-fullscreen-toggle') -and
-    $wrapperPatchSource.Contains('request_video_fullscreen_toggle()') -and
+    -not $wrapperPatchSource.Contains(
+        'request_video_fullscreen_toggle') -and
+    $wrapperPatchSource.Contains(
+        'class RendererHostWindow final : public QMainWindow') -and
+    $wrapperPatchSource.Contains(
+        'applyFullscreenState(bool desired,') -and
     $wrapperPatchSource.Contains(
         'AEROMIRROR_COMMAND video-scale permille=') -and
     $wrapperPatchSource.Contains(
@@ -193,27 +245,48 @@ Assert-True ($wrapperPatchSource.Contains(
     $nativePatchSource.Contains(
         'g_source_attach(source, context)') -and
     $nativePatchSource.Contains(
-        'video_renderer_toggle_fullscreen(&fullscreen_state)') -and
+        'video_renderer_set_fullscreen(command->value != 0)') -and
     $nativePatchSource.Contains(
         'video_renderer_set_scale(command->value)') -and
     $nativePatchSource.Contains(
-        'AEROMIRROR_VIDEO_FULLSCREEN state=%d result=%s') -and
+        'int request_video_fullscreen_set(int state)') -and
     $nativePatchSource.Contains(
-        'AEROMIRROR_VIDEO_SCALE permille=%u result=%s')) `
-    "fullscreen and Photos scale commands are parsed narrowly and marshalled to the native GLib owner"
+        'if (state != 0 && state != 1) return 0;') -and
+    -not $nativePatchSource.Contains(
+        'video_renderer_toggle_fullscreen') -and
+    -not $nativePatchSource.Contains(
+        'request_video_fullscreen_toggle')) `
+    "fullscreen uses an exact state-set IPC contract marshalled to the native GUI owner"
+Assert-True ($wrapperPatchSource.Contains(
+        'AEROMIRROR_VIDEO_FULLSCREEN requested=%d actual=%d ') -and
+    $wrapperPatchSource.Contains(
+        'result=%s generation=%llu source=%s\n') -and
+    $wrapperPatchSource.Contains('"noop"') -and
+    $wrapperPatchSource.Contains('"applied" : "unavailable"') -and
+    $wrapperPatchSource.Contains('"caption"') -and
+    $wrapperPatchSource.Contains('"escape"') -and
+    $wrapperPatchSource.Contains('"alt-enter"') -and
+    $wrapperPatchSource.Contains('"lifecycle"') -and
+    $wrapperPatchSource.Contains('"initial"') -and
+    $nativePatchSource.Contains(
+        'AEROMIRROR_VIDEO_FULLSCREEN requested=%u actual=0 ') -and
+    $nativePatchSource.Contains(
+        'result=unavailable generation=0 source=ipc')) `
+    "native fullscreen acknowledgements use one closed requested/actual/result/generation/source grammar"
 Assert-True ($nativePatchSource.Contains(
-        'bool video_renderer_toggle_fullscreen(bool *fullscreen)') -and
-    $nativePatchSource.Contains(
-        '"fullscreen-toggle-mode", (guint) 6') -and
-    $nativePatchSource.Contains('"fullscreen", next') -and
+        '"fullscreen-toggle-mode", (guint) 0') -and
+    $nativePatchSource.Contains('"fullscreen", FALSE') -and
+    $nativePatchSource.Contains('"force-aspect-ratio", TRUE') -and
     $nativePatchSource.Contains(
         'bool video_renderer_set_scale(unsigned int permille)') -and
     $nativePatchSource.Contains(
         'if (permille < 1000 || permille > 5000) return false;') -and
-    $nativePatchSource.Contains('"scale-x", scale') -and
-    $nativePatchSource.Contains('"scale-y", scale') -and
-    $nativePatchSource.Contains('aeromirror_reset_present_scale();')) `
-    "the selected D3D11 sink uses property-backed fullscreen and bounded uniform zoom that resets at renderer start"
+    $nativePatchSource.Contains('"scale-x", (gfloat) 1.0') -and
+    $nativePatchSource.Contains('"scale-y", (gfloat) 1.0') -and
+    $nativePatchSource.Contains('aeromirror_reset_present_scale();') -and
+    -not $nativePatchSource.Contains(
+        'gst_video_overlay_set_render_rectangle')) `
+    "the embedded native sink contains the whole frame at neutral scale without a crop rectangle"
 Assert-True ($wrapperPatchSource.Contains(
         "QByteArray m_beaconOutputBuffer") -and
     $wrapperPatchSource.Contains(
@@ -685,6 +758,40 @@ Assert-True ($source.Contains("randomly-generated) MAC address")) `
     "the exact first-run UxPlay device ID is captured"
 Assert-True (-not [regex]::IsMatch($source, 'WaitForExit\s*\(\s*\)')) `
     "core shutdown contains no unbounded WaitForExit call"
+$downloadUpdateStart = $settingsFormSource.IndexOf(
+    "private void DownloadUpdate()", [StringComparison]::Ordinal)
+$launchUpdateStart = $settingsFormSource.IndexOf(
+    "private void LaunchVerifiedUpdateInstaller(string installerPath)",
+    [StringComparison]::Ordinal)
+$launchUpdateEnd = $settingsFormSource.IndexOf(
+    "private void DeletePendingInstaller()",
+    [Math]::Max(0, $launchUpdateStart),
+    [StringComparison]::Ordinal)
+Assert-True ($downloadUpdateStart -ge 0 -and
+    $launchUpdateStart -gt $downloadUpdateStart -and
+    $launchUpdateEnd -gt $launchUpdateStart) `
+    "the verified update launch path has deterministic source boundaries"
+$downloadUpdateSource = $settingsFormSource.Substring(
+    $downloadUpdateStart, $launchUpdateStart - $downloadUpdateStart)
+$launchUpdateSource = $settingsFormSource.Substring(
+    $launchUpdateStart, $launchUpdateEnd - $launchUpdateStart)
+Assert-True ($downloadUpdateSource.Contains(
+        "LaunchVerifiedUpdateInstaller(installerPath);") -and
+    $downloadUpdateSource.Contains(
+        "if (!ConfirmAllUnsavedChanges())") -and
+    $downloadUpdateSource.Contains("updatesBack.Enabled = false;") -and
+    $downloadUpdateSource.Contains("updatesBack.Enabled = true;") -and
+    -not $downloadUpdateSource.Contains("MessageBoxButtons.YesNo") -and
+    $launchUpdateSource.Contains("Process.Start(") -and
+    $launchUpdateSource.Contains("if (setup == null)") -and
+    $launchUpdateSource.Contains("catch (Exception ex)") -and
+    $launchUpdateSource.Contains("DeleteFileQuietly(installerPath);") -and
+    $launchUpdateSource.Contains("updatesBack.Enabled = true;") -and
+    $launchUpdateSource.Contains("checkUpdate.Enabled = true;") -and
+    $launchUpdateSource.Contains(
+        "SetPrimaryButtonState(installUpdate, true);") -and
+    $launchUpdateSource.Contains("context.QuitApplication();")) `
+    "a verified update resolves unsaved settings before download, locks navigation during handoff, and keeps retry available after failure"
 Assert-True ($source.Contains(
     "WorkingDirectory = Path.GetDirectoryName(installerPath)")) `
     "the updater launches Setup outside the installed application directory"
@@ -698,6 +805,10 @@ Assert-True ($settingsFormSource.Contains(
     $installerSource.Contains(
         "AeroMirror relaunched after automatic install.")) `
     "application updates and installed-version reinstalls run without the option form, preserve shortcut choices, retain version-independent downgrade verification, and relaunch AeroMirror"
+Assert-True ($installerSource.Contains(
+        'start.Arguments = "--loader-test";') -and
+    -not $installerSource.Contains('"--self-test"')) `
+    "Setup verifies core/runtime loader compatibility without applying the staged-bundle-only self-test to the pinned upstream runtime"
 Assert-True ($source.Contains("discoveryRefreshAfterNetworkCheck")) `
     "manual discovery refresh survives an unavailable physical network"
 $manualDiscoveryStart = $receiverContextSource.IndexOf(
@@ -1022,28 +1133,52 @@ Assert-True ($source.Contains("autoFit = MakeCheckBox(") -and
     "automatic aspect fitting retains a settings control and manual tray fallback"
 Assert-True ([regex]::Matches(
         $receiverContextSource,
+        'ShowStreamWindow\s*\(\s*true\s*\)').Count -eq 1 -and
+    $source.Contains("private void ShowStreamWindow(bool notifyIfMissing)") -and
+    $source.Contains("NativeMethods.RestoreAndActivateWindow(window)") -and
+    $source.Contains("private const int SW_RESTORE = 9;") -and
+    $source.Contains("if (IsIconic(window))") -and
+    $source.Contains("ShowWindow(window, SW_RESTORE);") -and
+    $source.Contains("SetForegroundWindow(window);")) `
+    "the tray exposes an explicit restore path for a minimized taskbar-hidden native viewer"
+Assert-True ([regex]::Matches(
+        $receiverContextSource,
         'ToggleStreamWindowFullscreen\s*\(\s*true\s*\)').Count -eq 1 -and
     $receiverContextSource.Contains('(Esc ') -and
-    $source.Contains('"video-fullscreen-toggle"') -and
+    $source.Contains('"video-fullscreen-set state=" +') -and
+    $source.Contains("ref nativeFullscreenState, 0, 0") -and
     $source.Contains('"video-scale permille=" + desired') -and
     $source.Contains("TryWriteNativeVideoCommand(") -and
     $receiverCoreSource.Contains("lock (coreCommandSync)") -and
+    $receiverCoreSource.Contains(
+        '@"^AEROMIRROR_VIDEO_FULLSCREEN requested=([01]) "') -and
+    $receiverCoreSource.Contains(
+        '@"result=(applied|noop|unavailable) "') -and
+    $receiverCoreSource.Contains(
+        '@"source=(ipc|caption|escape|alt-enter|lifecycle|initial)$"') -and
+    $receiverCoreSource.Contains(
+        'result, "unavailable", StringComparison.Ordinal') -and
+    $receiverCoreSource.Contains("generation < previousGeneration") -and
+    $receiverCoreSource.Contains(
+        "ref nativeFullscreenGeneration, generation") -and
+    $receiverCoreSource.Contains("ref nativeFullscreenState, actual") -and
     $source.Contains("ref appliedPresentationScalePermille, 0, 0") -and
     $source.Contains("ApplyNonCroppingPresentationScale(") -and
     $source.Contains("RendererPresentationPolicy.NormalScalePermille") -and
     -not $source.Contains("PresentationScaleMaximumPermille") -and
     -not $source.Contains("ResolveAutomaticPresentationScale(") -and
     $source.Contains("IsRendererFullscreenWindow(window)") -and
-    $rendererControlsSource.Contains("NativeMethods.WH_KEYBOARD_LL") -and
-    $rendererControlsSource.Contains("NativeMethods.CallNextHookEx(") -and
-    $rendererControlsSource.Contains("UninstallRendererKeyboardHook()") -and
-    $rendererControlsSource.Contains("ref rendererEscapeRequestState") -and
+    -not $source.Contains('"video-fullscreen-toggle"') -and
+    -not $source.Contains("WH_KEYBOARD_LL") -and
+    -not $source.Contains("SetWindowsHookEx") -and
+    -not $source.Contains("CallNextHookEx") -and
+    -not $source.Contains("RendererFullscreenButtonForm") -and
     -not $source.Contains("NativeMethods.IsEscapeKeyDown()") -and
     -not $source.Contains("AdjustPhotosZoom(") -and
     -not $source.Contains("ResetPhotosZoom(") -and
     -not $source.Contains("WM_SYSKEYDOWN") -and
     -not $source.Contains("PostMessage(")) `
-    "fullscreen uses bounded event-driven exits and Photos keeps every source pixel without manual zoom controls"
+    "managed fullscreen sends exact desired state, follows monotonic native acknowledgements, and owns no overlay or Escape hook"
 Assert-True ($source.Contains("internal sealed class LostConnectionForm") -and
     $lostConnectionUiSource.Contains("titleLabel.Text =") -and
     $lostConnectionUiSource.Contains("detailLabel.Text =") -and
@@ -1302,97 +1437,77 @@ $staticFlags = [Reflection.BindingFlags]::Static -bor `
     [Reflection.BindingFlags]::Public
 
 $rendererButtonType = $assembly.GetType(
-    "AirPlayReceiverMvp.RendererFullscreenButtonForm", $true)
-$calculateRendererButtonBounds = $rendererButtonType.GetMethod(
-    "CalculateBounds", $staticFlags)
-$shouldShowRendererButton = $rendererButtonType.GetMethod(
-    "ShouldShow", $staticFlags)
-$shouldCaptureRendererEscape = $contextType.GetMethod(
-    "ShouldCaptureRendererEscape", $staticFlags)
-$resolveRendererEscapeKeyState = $contextType.GetMethod(
-    "ResolveRendererEscapeKeyState", $staticFlags)
-$isStaleBorderlessTransition = $contextType.GetMethod(
-    "IsStaleBorderlessTransition", $staticFlags)
-Assert-True ($null -ne $calculateRendererButtonBounds -and
-    $null -ne $shouldShowRendererButton -and
-    $null -ne $shouldCaptureRendererEscape -and
-    $null -ne $resolveRendererEscapeKeyState -and
-    $null -ne $isStaleBorderlessTransition) `
-    "renderer fullscreen controls expose deterministic policy boundaries"
+    "AirPlayReceiverMvp.RendererFullscreenButtonForm", $false)
+$toggleStreamWindowFullscreen = $contextType.GetMethod(
+    "ToggleStreamWindowFullscreen", $instanceFlags)
+$observeNativeFullscreenState = $contextType.GetMethod(
+    "ObserveNativeFullscreenState", $instanceFlags)
+$nativeFullscreenStateField = $contextType.GetField(
+    "nativeFullscreenState", $instanceFlags)
+$nativeFullscreenGenerationField = $contextType.GetField(
+    "nativeFullscreenGeneration", $instanceFlags)
+Assert-True ($null -eq $rendererButtonType -and
+    $null -eq $contextType.GetMethod(
+        "ShouldCaptureRendererEscape", $staticFlags) -and
+    $null -eq $contextType.GetMethod(
+        "ResolveRendererEscapeKeyState", $staticFlags) -and
+    $null -eq $contextType.GetMethod(
+        "IsStaleBorderlessTransition", $staticFlags)) `
+    "compiled shell contains no managed fullscreen overlay, Escape hook policy, or stale-borderless recovery"
+Assert-True ($null -ne $toggleStreamWindowFullscreen -and
+    $toggleStreamWindowFullscreen.GetParameters().Count -eq 1 -and
+    $toggleStreamWindowFullscreen.GetParameters()[0].ParameterType -eq
+        [bool] -and
+    $null -ne $observeNativeFullscreenState -and
+    $observeNativeFullscreenState.GetParameters().Count -eq 1 -and
+    $observeNativeFullscreenState.GetParameters()[0].ParameterType -eq
+        [string] -and
+    $null -ne $nativeFullscreenStateField -and
+    $nativeFullscreenStateField.FieldType -eq [int] -and
+    $null -ne $nativeFullscreenGenerationField -and
+    $nativeFullscreenGenerationField.FieldType -eq [long]) `
+    "compiled shell exposes one native state-set request path and acknowledged state/generation fields"
 
-$rendererBounds = [Drawing.Rectangle]::new(100, 200, 800, 600)
-$normalButtonBounds = [Drawing.Rectangle]$calculateRendererButtonBounds.Invoke(
-    $null, [object[]]@($rendererBounds, $false, 96, 46))
-$fullscreenButtonBounds = [Drawing.Rectangle]$calculateRendererButtonBounds.Invoke(
-    $null, [object[]]@($rendererBounds, $true, 96, 46))
-$highDpiButtonBounds = [Drawing.Rectangle]$calculateRendererButtonBounds.Invoke(
-    $null, [object[]]@($rendererBounds, $true, 192, 92))
-$narrowButtonBounds = [Drawing.Rectangle]$calculateRendererButtonBounds.Invoke(
-    $null, [object[]]@(
-        [Drawing.Rectangle]::new(0, 0, 120, 300), $false, 96, 46))
-Assert-True ($normalButtonBounds.Width -eq 36 -and
-    $normalButtonBounds.Height -eq 28 -and
-    $normalButtonBounds.Right -le $rendererBounds.Right - (46 * 3) -and
-    $fullscreenButtonBounds.Right -lt $rendererBounds.Right -and
-    $fullscreenButtonBounds.Top -gt $rendererBounds.Top -and
-    $highDpiButtonBounds.Width -eq 72 -and
-    $highDpiButtonBounds.Height -eq 56 -and
-    $narrowButtonBounds.IsEmpty) `
-    "renderer fullscreen control is DPI-aware and never overlaps standard caption buttons"
-Assert-True ([bool]$shouldShowRendererButton.Invoke(
-        $null, [object[]]@($true, $false, $true)) -and
-    -not [bool]$shouldShowRendererButton.Invoke(
-        $null, [object[]]@($true, $false, $false)) -and
-    -not [bool]$shouldShowRendererButton.Invoke(
-        $null, [object[]]@($true, $true, $true)) -and
-    -not [bool]$shouldShowRendererButton.Invoke(
-        $null, [object[]]@($false, $false, $true))) `
-    "renderer fullscreen control stays off minimized, missing, and unrelated foreground windows"
-Assert-True ([bool]$shouldCaptureRendererEscape.Invoke(
-        $null, [object[]]@($true, 77, [uint32]77, $true)) -and
-    -not [bool]$shouldCaptureRendererEscape.Invoke(
-        $null, [object[]]@($false, 77, [uint32]77, $true)) -and
-    -not [bool]$shouldCaptureRendererEscape.Invoke(
-        $null, [object[]]@($true, 77, [uint32]78, $true)) -and
-    -not [bool]$shouldCaptureRendererEscape.Invoke(
-        $null, [object[]]@($true, 77, [uint32]77, $false))) `
-    "Escape capture requires actual fullscreen and the foreground renderer root"
-Assert-True ([int]$resolveRendererEscapeKeyState.Invoke(
-        $null, [object[]]@(0, $true)) -eq 1 -and
-    [int]$resolveRendererEscapeKeyState.Invoke(
-        $null, [object[]]@(1, $true)) -eq 1 -and
-    [int]$resolveRendererEscapeKeyState.Invoke(
-        $null, [object[]]@(1, $false)) -eq 3 -and
-    [int]$resolveRendererEscapeKeyState.Invoke(
-        $null, [object[]]@(2, $false)) -eq 0 -and
-    [int]$resolveRendererEscapeKeyState.Invoke(
-        $null, [object[]]@(3, $false)) -eq 3) `
-    "short Escape is retained through key-up and a sent held press rearms on release"
-Assert-True ([bool]$isStaleBorderlessTransition.Invoke(
-        $null, [object[]]@($true, $false, $true)) -and
-    -not [bool]$isStaleBorderlessTransition.Invoke(
-        $null, [object[]]@($true, $false, $false)) -and
-    -not [bool]$isStaleBorderlessTransition.Invoke(
-        $null, [object[]]@($true, $true, $true))) `
-    "only a fullscreen-to-borderless transition keeps the explicit exit recovery control"
-Assert-True ($rendererButtonSource.Contains("WsExNoActivate") -and
-    $rendererButtonSource.Contains("ShowWithoutActivation") -and
-    $rendererButtonSource.Contains("standardWidth * 3") -and
-    $rendererButtonSource.Contains(
-        "NativeMethods.GW_HWNDPREV") -and
-    $rendererButtonSource.Contains(
-        "topMost ? NativeMethods.HWND_TOPMOST : NativeMethods.HWND_TOP") -and
-    -not $rendererButtonSource.Contains("SetParent(") -and
-    -not $rendererButtonSource.Contains("SetWindowLongPtr(") -and
-    $rendererControlsSource.Contains("Interlocked.CompareExchange(") -and
-    $rendererControlsSource.Contains("NativeMethods.WM_KEYUP") -and
-    $rendererControlsSource.Contains(
-        "settings.AlwaysOnTop || exitMode") -and
-    $rendererControlsSource.Contains("rendererStaleBorderlessWindow") -and
-    -not $rendererControlsSource.Contains(
-        '"restore stale borderless renderer frame"') -and
-    $rendererControlsSource.Contains("NativeMethods.CallNextHookEx(")) `
-    "fullscreen control remains shell-owned and the keyboard hook always preserves the system chain"
+$fullscreenStateContext =
+    [Runtime.Serialization.FormatterServices]::GetUninitializedObject(
+        $contextType)
+$nativeFullscreenStateField.SetValue($fullscreenStateContext, 0)
+$nativeFullscreenGenerationField.SetValue($fullscreenStateContext, [long]0)
+$observeNativeFullscreenState.Invoke(
+    $fullscreenStateContext,
+    [object[]]@(
+        "AEROMIRROR_VIDEO_FULLSCREEN requested=1 actual=1 result=applied generation=2 source=caption")) |
+    Out-Null
+Assert-True (
+    [int]$nativeFullscreenStateField.GetValue($fullscreenStateContext) -eq 1 -and
+    [long]$nativeFullscreenGenerationField.GetValue(
+        $fullscreenStateContext) -eq [long]2) `
+    "a current native fullscreen acknowledgement updates managed state"
+$observeNativeFullscreenState.Invoke(
+    $fullscreenStateContext,
+    [object[]]@(
+        "AEROMIRROR_VIDEO_FULLSCREEN requested=0 actual=0 result=applied generation=1 source=escape")) |
+    Out-Null
+$observeNativeFullscreenState.Invoke(
+    $fullscreenStateContext,
+    [object[]]@(
+        "AEROMIRROR_VIDEO_FULLSCREEN requested=0 actual=0 result=unavailable generation=3 source=ipc")) |
+    Out-Null
+Assert-True (
+    [int]$nativeFullscreenStateField.GetValue($fullscreenStateContext) -eq 1 -and
+    [long]$nativeFullscreenGenerationField.GetValue(
+        $fullscreenStateContext) -eq [long]2) `
+    "stale and unavailable native acknowledgements cannot overwrite managed state"
+$observeNativeFullscreenState.Invoke(
+    $fullscreenStateContext,
+    [object[]]@(
+        "AEROMIRROR_VIDEO_FULLSCREEN requested=0 actual=0 result=noop generation=3 source=alt-enter")) |
+    Out-Null
+Assert-True (
+    [int]$nativeFullscreenStateField.GetValue($fullscreenStateContext) -eq 0 -and
+    [long]$nativeFullscreenGenerationField.GetValue(
+        $fullscreenStateContext) -eq [long]3) `
+    "a newer available acknowledgement advances managed fullscreen state"
 
 $quoteArgument = $contextType.GetMethod("QuoteArgument", $staticFlags)
 Assert-True ($null -ne $quoteArgument) `

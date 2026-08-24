@@ -94,8 +94,10 @@ For a normal review test:
 2. Exit AeroMirror from its tray menu. Closing the window may only hide it.
 3. Start the review build and note the exact local time.
 4. Accept the Windows Firewall prompt for private/local networks if it appears.
-   If Bonjour installation or a UAC prompt appears, record the choice and
-   result. Before any reboot, record whether the Bonjour service exists, its
+   If a Bonjour firewall UAC prompt appears, record the choice and result. The
+   0.12.20 headless core reports an absent Bonjour prerequisite but does not
+   offer a bundled service installation. Before any reboot, record whether the
+   Bonjour service exists, its
    state/start type, and whether its process is running. Do not remove or
    modify Bonjour manually on a daily-use PC.
 5. Do not restart the receiver yet. Wait 60 seconds, open **Control Center →
@@ -122,16 +124,19 @@ pending-reboot indicators, sockets/readiness markers, and iPhone browse result.
 Do not report the reboot as a normal installation requirement until a clean VM
 reproduces the same lifecycle.
 
-### 0.12.19 Private Bonjour firewall diagnostic
+### 0.12.20 Private Bonjour firewall diagnostic
 
 If diagnostics report that the exact Private Bonjour mDNS rule is missing, use
-**Исправить доступ Bonjour…** only after recording the existing firewall state.
-The action asks for confirmation and Windows UAC, then may add one inbound rule
+**Разрешить Bonjour** on the main network card only after recording the
+existing firewall state. Clicking that scoped action is the application-level
+confirmation; Windows then shows one UAC prompt and may add one inbound rule
 for the validated `mDNSResponder.exe`: Private profile, UDP 5353, remote
 `LocalSubnet`, no edge traversal. Declining UAC or a failed exact-path/policy
 check must leave the machine unchanged. This action does not repair the Bonjour
-service, does not run automatically, and 0.12.19 does not remove the external
-rule during uninstall. Record the before/after rule and iPhone browse result.
+service, does not run automatically, and 0.12.20 does not remove the external
+rule during uninstall. If Bonjour itself is absent, the card reports that
+prerequisite and offers no repair button. Record the before/after rule and
+iPhone browse result.
 
 ## What the review log records
 

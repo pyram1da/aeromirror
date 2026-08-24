@@ -33,6 +33,87 @@ $serviceType = $assembly.GetType(
     "AirPlayReceiverMvp.BonjourFirewallService", $true)
 $snapshotType = $assembly.GetType(
     "AirPlayReceiverMvp.FirewallRuleSnapshot", $true)
+$contextType = $assembly.GetType(
+    "AirPlayReceiverMvp.ReceiverContext", $true)
+$publicInstanceFlags = [Reflection.BindingFlags]::Instance -bor
+    [Reflection.BindingFlags]::Public
+foreach ($propertyName in @(
+    "IsBonjourFirewallRepairRequired",
+    "IsBonjourUnavailable",
+    "IsBonjourFirewallRepairRunning"
+)) {
+    $property = $contextType.GetProperty(
+        $propertyName, $publicInstanceFlags)
+    Assert-True ($null -ne $property) `
+        "ReceiverContext exposes $propertyName"
+    Assert-True ($property.PropertyType -eq [bool] -and
+        $property.CanRead -and -not $property.CanWrite) `
+        "$propertyName is a read-only Boolean UI state"
+}
+
+$sourceRoot = Join-Path $projectRoot "src"
+$contextSource = [IO.File]::ReadAllText((Join-Path $sourceRoot `
+    "Receiver\ReceiverContext.BonjourFirewall.cs"))
+$receiverCoreSource = [IO.File]::ReadAllText((Join-Path $sourceRoot `
+    "Receiver\ReceiverContext.Core.cs"))
+$settingsSource = [IO.File]::ReadAllText((Join-Path $sourceRoot `
+    "UI\SettingsForm.cs"))
+$repairStart = $contextSource.IndexOf(
+    "public void RepairBonjourFirewall(IWin32Window owner)",
+    [StringComparison]::Ordinal)
+$repairResultStart = $contextSource.IndexOf(
+    "private void HandleBonjourFirewallRepairResult()",
+    [Math]::Max(0, $repairStart),
+    [StringComparison]::Ordinal)
+Assert-True ($repairStart -ge 0 -and
+    $repairResultStart -gt $repairStart) `
+    "Bonjour repair flow has a deterministic source boundary"
+$repairSource = $contextSource.Substring(
+    $repairStart, $repairResultStart - $repairStart)
+$repairResultSource = $contextSource.Substring($repairResultStart)
+$repairSuccessDialogText = [Text.Encoding]::UTF8.GetString(
+    [Convert]::FromBase64String(
+        "0JTQvtGB0YLRg9C/IEJvbmpvdXIg0LjRgdC/0YDQsNCy0LvQtdC9"))
+$automaticBonjourServiceText = [Text.Encoding]::UTF8.GetString(
+    [Convert]::FromBase64String(
+        "QWVyb01pcnJvciDQvdC1INGD0YHRgtCw0L3QsNCy0LvQuNCy0LDQtdGCINGB0LjRgdGC0LXQvNC90YPRjiDRgdC70YPQttCx0YMg0LDQstGC0L7QvNCw0YLQuNGH0LXRgdC60Lg="))
+$bonjourUnavailableText = [Text.Encoding]::UTF8.GetString(
+    [Convert]::FromBase64String(
+        "Qm9uam91ciDQvdC10LTQvtGB0YLRg9C/0LXQvSDQuNC70Lgg0YPRgdGC0LDQvdC+0LLQu9C10L0g0L3QtdC60L7RgNGA0LXQutGC0L3Qvi4="))
+$falseBonjourDiagnosis = [Text.Encoding]::UTF8.GetString(
+    [Convert]::FromBase64String(
+        "Qm9uam91ciDQvdC1INGD0YHRgtCw0L3QvtCy0LvQtdC9Lg=="))
+Assert-True (-not $repairSource.Contains("MessageBoxButtons.YesNo") -and
+    $repairSource.Contains("RepairPrivateMdnsRuleExplicitlyWithUac")) `
+    "an explicit repair click reaches the narrow UAC operation without a second app confirmation"
+Assert-True ($repairResultSource.Contains("RefreshDiscovery();") -and
+    $repairResultSource.Contains("form.SyncStatus();") -and
+    -not $repairResultSource.Contains($repairSuccessDialogText)) `
+    "successful repair refreshes discovery and UI without a success message box"
+Assert-True ($settingsSource.Contains(
+        "context.RepairBonjourFirewall(this);") -and
+    $settingsSource.Contains("context.IsBonjourUnavailable") -and
+    $settingsSource.Contains(
+        "bonjourFirewallRepair.Visible = false;") -and
+    $settingsSource.Contains(
+        $automaticBonjourServiceText)) `
+    "the main network card distinguishes missing-rule repair from unavailable Bonjour"
+Assert-True ($contextSource.Contains(
+        "BonjourFirewallAssessmentLifetime") -and
+    $contextSource.Contains(
+        "bonjourFirewallAssessmentCompletedUtc") -and
+    $contextSource.Contains(
+        "DateTime.UtcNow - bonjourFirewallAssessmentCompletedUtc") -and
+    $contextSource.Contains(
+        "private void RefreshBonjourFirewallAssessment()") -and
+    [regex]::Matches(
+        $receiverCoreSource,
+        'RefreshBonjourFirewallAssessment\s*\(').Count -eq 3) `
+    "Bonjour assessment expires and Start, Restart, and Refresh Discovery explicitly reassess it"
+Assert-True ($settingsSource.Contains($bonjourUnavailableText) -and
+    -not $settingsSource.Contains($falseBonjourDiagnosis)) `
+    "the unavailable card does not falsely claim that Bonjour is definitely absent"
+
 $parseMethod = Get-InternalMethod $serviceType `
     "TryParseBonjourServiceImagePath"
 $matchMethod = Get-InternalMethod $serviceType `
@@ -181,4 +262,4 @@ catch {
 Assert-True $unsafeInvocationRejected `
     "command construction rejects quote-based argument injection"
 
-Write-Host "Bonjour firewall tests passed: strict ImagePath, exact rule matcher, and narrow UAC command specification."
+Write-Host "Bonjour firewall tests passed: strict ImagePath, exact rule matcher, narrow UAC command, and main-card UX state."

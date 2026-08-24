@@ -24,8 +24,6 @@ namespace AirPlayReceiverMvp
         internal delegate void WinEventProc(
             IntPtr hook, uint eventType, IntPtr window,
             int objectId, int childId, uint eventThread, uint eventTime);
-        internal delegate IntPtr LowLevelKeyboardProc(
-            int code, IntPtr message, IntPtr data);
         internal static readonly IntPtr HWND_TOP = IntPtr.Zero;
         internal static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
         internal static readonly IntPtr HWND_NOTOPMOST = new IntPtr(-2);
@@ -40,16 +38,11 @@ namespace AirPlayReceiverMvp
         internal const uint SWP_NOACTIVATE = 0x0010;
         internal const uint SWP_FRAMECHANGED = 0x0020;
         internal const uint GW_HWNDPREV = 3;
-        internal const uint GA_ROOT = 2;
-        internal const int WH_KEYBOARD_LL = 13;
-        internal static readonly IntPtr WM_KEYDOWN = new IntPtr(0x0100);
-        internal static readonly IntPtr WM_KEYUP = new IntPtr(0x0101);
-        internal const uint VK_ESCAPE = 0x1B;
+        private const int SW_RESTORE = 9;
         private const int GWL_EXSTYLE = -20;
         private const long WS_EX_TOOLWINDOW = 0x00000080L;
         private const long WS_EX_APPWINDOW = 0x00040000L;
         private const int VK_LBUTTON = 0x01;
-        private const int SM_CXSIZE = 30;
         private const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000;
         private const int JobObjectExtendedLimitInformation = 9;
 
@@ -122,32 +115,6 @@ namespace AirPlayReceiverMvp
 
         [DllImport("user32.dll")]
         internal static extern bool IsZoomed(IntPtr window);
-
-        [DllImport("user32.dll")]
-        internal static extern IntPtr GetForegroundWindow();
-
-        [DllImport("user32.dll")]
-        internal static extern IntPtr GetAncestor(IntPtr window, uint flags);
-
-        [DllImport("user32.dll", SetLastError = true)]
-        internal static extern IntPtr SetWindowsHookEx(
-            int hookId, LowLevelKeyboardProc callback,
-            IntPtr module, uint threadId);
-
-        [DllImport("user32.dll")]
-        internal static extern IntPtr CallNextHookEx(
-            IntPtr hook, int code, IntPtr message, IntPtr data);
-
-        [DllImport("user32.dll", SetLastError = true)]
-        internal static extern bool UnhookWindowsHookEx(IntPtr hook);
-
-        [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
-        private static extern IntPtr GetModuleHandle(string moduleName);
-
-        internal static IntPtr GetCurrentModuleHandle()
-        {
-            return GetModuleHandle(null);
-        }
 
         [DllImport("user32.dll")]
         internal static extern IntPtr GetWindow(IntPtr window, uint command);
@@ -330,30 +297,21 @@ namespace AirPlayReceiverMvp
         }
 
         [DllImport("user32.dll")]
-        private static extern int GetSystemMetrics(int index);
-
-        [DllImport("user32.dll")]
-        private static extern int GetSystemMetricsForDpi(int index, uint dpi);
-
-        internal static int GetCaptionButtonWidth(int dpi)
-        {
-            try
-            {
-                int width = GetSystemMetricsForDpi(
-                    SM_CXSIZE, (uint)Math.Max(48, Math.Min(768, dpi)));
-                if (width > 0)
-                    return width;
-            }
-            catch { }
-            return Math.Max(1, GetSystemMetrics(SM_CXSIZE));
-        }
-
-        [DllImport("user32.dll")]
         private static extern short GetAsyncKeyState(int virtualKey);
 
         internal static bool IsLeftMouseButtonDown()
         {
             return (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+        }
+
+        internal static bool RestoreAndActivateWindow(IntPtr window)
+        {
+            if (window == IntPtr.Zero || !IsWindow(window))
+                return false;
+            if (IsIconic(window))
+                ShowWindow(window, SW_RESTORE);
+            SetForegroundWindow(window);
+            return !IsIconic(window);
         }
 
         [DllImport("user32.dll")]

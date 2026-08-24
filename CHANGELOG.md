@@ -1,5 +1,56 @@
 # Changelog
 
+## 0.12.20 — native fullscreen ownership and quieter repair flow (review release)
+
+### Changes
+
+- Replaced the delayed shell-owned floating fullscreen button with one native
+  viewer window. Its standard caption control, Escape, Alt+Enter, and the tray
+  action share one idempotent fullscreen setter and one acknowledged state.
+- Kept Caption Close as a minimize-equivalent for an active stream. The
+  minimized viewer remains recoverable through the taskbar or the explicit
+  **Show stream window** tray action, including when the optional taskbar entry
+  is disabled. Fullscreen entry from that minimized state preserves the latest
+  normal position, while a stale fullscreen request after session stop cannot
+  resurrect an empty viewer; session stop still hides it before the next
+  stream.
+- Embedded the GStreamer video surface in that viewer and explicitly retained
+  aspect-ratio containment. AeroMirror does not set a crop rectangle; the
+  exact Photos canvas remains at neutral 100% scale and may be letterboxed
+  until AirPlay exposes trustworthy content bounds.
+- Removed the second application confirmation after a verified update has
+  downloaded. The original **Download and install** click remains the user's
+  decision. Existing unsaved settings are resolved before download, navigation
+  is locked during the handoff, and Setup still verifies its exact asset and
+  performs the existing transactional update.
+- Moved the exact Bonjour firewall prerequisite to the main network card. One
+  click starts the narrow UAC-gated Private/UDP 5353/LocalSubnet repair without
+  another application dialog, then refreshes discovery without a success
+  modal. The assessment expires after two minutes and is refreshed on receiver
+  start, restart, and manual discovery refresh. An unavailable or incorrectly
+  installed Bonjour prerequisite is reported accurately but never replaced by
+  a user-writable bundled system service.
+- Fixed native runtime discovery under Unicode application paths. GStreamer,
+  scanner, GIO, font, and PATH values now use the wide Windows environment API
+  and fail closed if Windows rejects any value. Fresh-registry `--self-test`
+  passes through both ASCII and Cyrillic application paths. Setup keeps its
+  pinned-runtime loader compatibility check before installation; the broader
+  self-test remains a staged-bundle gate because the thin network installer
+  intentionally uses the upstream runtime layout.
+
+### Evidence and status
+
+- Source targets `0.12.20`/`0.12.20.0`. Managed build, complete resilience,
+  focused Bonjour, native-host/core/lifecycle contracts, two clean 57/57
+  native builds, staged-runtime loader, corresponding-source extraction and
+  rebuild, the 13-entry review payload, and all three non-installing Setup
+  self-checks pass.
+- Physical Photos containment, native titlebar/Escape/DPI behavior, Caption
+  Close/minimize under both taskbar policies, installed update, UAC repair, and
+  long-idle iPhone visibility remain PENDING.
+- Exact-tag packaging and public-download verification are the remaining
+  release gates. The immutable public `v0.12.19` assets are not replaced.
+
 ## 0.12.19 — non-cropping gallery and accessible fullscreen (review release)
 
 ### Changes

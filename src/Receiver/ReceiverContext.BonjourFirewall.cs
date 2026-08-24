@@ -6,9 +6,13 @@ namespace AirPlayReceiverMvp
 {
     internal sealed partial class ReceiverContext
     {
+        private static readonly TimeSpan BonjourFirewallAssessmentLifetime =
+            TimeSpan.FromMinutes(2);
         private readonly object bonjourFirewallAssessmentSync = new object();
         private readonly ToolStripMenuItem bonjourFirewallItem;
         private BonjourFirewallAssessment bonjourFirewallAssessment;
+        private DateTime bonjourFirewallAssessmentCompletedUtc =
+            DateTime.MinValue;
         private int bonjourFirewallAssessmentRunning;
         private int bonjourFirewallAssessmentReady;
         private bool bonjourFirewallWarningShown;
@@ -41,7 +45,10 @@ namespace AirPlayReceiverMvp
                 }
 
                 lock (bonjourFirewallAssessmentSync)
+                {
                     bonjourFirewallAssessment = assessment;
+                    bonjourFirewallAssessmentCompletedUtc = DateTime.UtcNow;
+                }
                 Interlocked.Exchange(
                     ref bonjourFirewallAssessmentRunning, 0);
                 Interlocked.Exchange(ref bonjourFirewallAssessmentReady, 1);
@@ -75,20 +82,67 @@ namespace AirPlayReceiverMvp
                 tray.ShowBalloonTip(
                     9000,
                     AppTitle,
-                    "Windows может блокировать обнаружение AirPlay в частной сети. Откройте меню AeroMirror и выберите «Исправить доступ Bonjour…».",
+                    "Windows может блокировать обнаружение AirPlay в частной сети. Откройте AeroMirror и нажмите «Разрешить Bonjour» в карточке сети.",
                     ToolTipIcon.Warning);
             }
         }
 
         private BonjourFirewallAssessment GetBonjourFirewallAssessment()
         {
+            BonjourFirewallAssessment assessment;
+            bool refresh;
             lock (bonjourFirewallAssessmentSync)
             {
-                if (bonjourFirewallAssessment != null)
-                    return bonjourFirewallAssessment;
+                assessment = bonjourFirewallAssessment;
+                refresh = assessment == null ||
+                    bonjourFirewallAssessmentCompletedUtc == DateTime.MinValue ||
+                    DateTime.UtcNow - bonjourFirewallAssessmentCompletedUtc >=
+                        BonjourFirewallAssessmentLifetime;
+            }
+            if (refresh)
+                BeginBonjourFirewallAssessment();
+            return assessment;
+        }
+
+        private void RefreshBonjourFirewallAssessment()
+        {
+            lock (bonjourFirewallAssessmentSync)
+            {
+                bonjourFirewallAssessment = null;
+                bonjourFirewallAssessmentCompletedUtc = DateTime.MinValue;
             }
             BeginBonjourFirewallAssessment();
-            return null;
+        }
+
+        public bool IsBonjourFirewallRepairRequired
+        {
+            get
+            {
+                BonjourFirewallAssessment assessment =
+                    GetBonjourFirewallAssessment();
+                return assessment != null &&
+                    assessment.State == BonjourFirewallState.Missing;
+            }
+        }
+
+        public bool IsBonjourUnavailable
+        {
+            get
+            {
+                BonjourFirewallAssessment assessment =
+                    GetBonjourFirewallAssessment();
+                return assessment != null && assessment.State ==
+                    BonjourFirewallState.BonjourUnavailable;
+            }
+        }
+
+        public bool IsBonjourFirewallRepairRunning
+        {
+            get
+            {
+                return Interlocked.CompareExchange(
+                    ref bonjourFirewallRepairRunning, 0, 0) != 0;
+            }
         }
 
         internal string GetBonjourFirewallDiagnosticLine()
@@ -148,22 +202,13 @@ namespace AirPlayReceiverMvp
                 return;
             }
 
-            DialogResult confirmation = MessageBox.Show(
-                owner,
-                "Windows не разрешает программе Bonjour принимать mDNS-запросы в частной сети. Из-за этого приёмник может работать, но не появляться на iPhone.\r\n\r\n" +
-                "AeroMirror добавит одно входящее правило только для найденного mDNSResponder.exe: частная сеть, UDP 5353, только локальная подсеть. Публичная сеть и остальные порты не изменятся.\r\n\r\n" +
-                "Windows покажет стандартное подтверждение администратора. Продолжить?",
-                "Исправить доступ Bonjour",
-                MessageBoxButtons.YesNo,
-                MessageBoxIcon.Question);
-            if (confirmation != DialogResult.Yes)
-                return;
-
             if (Interlocked.CompareExchange(
                     ref bonjourFirewallRepairRunning, 1, 0) != 0)
                 return;
             bonjourFirewallItem.Enabled = false;
             bonjourFirewallItem.Text = "Исправляем доступ Bonjour…";
+            if (form != null && !form.IsDisposed)
+                form.SyncStatus();
             Log("Bonjour Private mDNS firewall repair requested by user.");
             ThreadPool.QueueUserWorkItem(delegate
             {
@@ -207,13 +252,23 @@ namespace AirPlayReceiverMvp
                     result + ".");
                 bonjourFirewallItem.Visible = false;
                 bonjourFirewallWarningShown = false;
+                lock (bonjourFirewallAssessmentSync)
+                {
+                    BonjourFirewallAssessment current =
+                        bonjourFirewallAssessment;
+                    bonjourFirewallAssessment =
+                        new BonjourFirewallAssessment
+                        {
+                            State = BonjourFirewallState.Configured,
+                            ExecutablePath = current == null
+                                ? "" : current.ExecutablePath,
+                            Detail = ""
+                        };
+                    bonjourFirewallAssessmentCompletedUtc = DateTime.UtcNow;
+                }
                 BeginBonjourFirewallAssessment();
-                MessageBox.Show(
-                    owner,
-                    "Доступ Bonjour исправлен. AeroMirror сейчас обновит обнаружение AirPlay.",
-                    AppTitle,
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
+                if (form != null && !form.IsDisposed)
+                    form.SyncStatus();
                 RefreshDiscovery();
                 return;
             }
@@ -230,6 +285,8 @@ namespace AirPlayReceiverMvp
                 AppTitle,
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);
+            if (form != null && !form.IsDisposed)
+                form.SyncStatus();
         }
     }
 }

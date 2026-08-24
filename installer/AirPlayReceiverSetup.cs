@@ -17,8 +17,8 @@ using Microsoft.Win32;
 [assembly: AssemblyTitle("AeroMirror Setup")]
 [assembly: AssemblyProduct("AeroMirror")]
 [assembly: AssemblyCompany("AeroMirror open-source project")]
-[assembly: AssemblyVersion("0.12.19.0")]
-[assembly: AssemblyFileVersion("0.12.19.0")]
+[assembly: AssemblyVersion("0.12.20.0")]
+[assembly: AssemblyFileVersion("0.12.20.0")]
 
 namespace AirPlayReceiverSetup
 {
@@ -432,7 +432,7 @@ namespace AirPlayReceiverSetup
 
     internal sealed class SetupForm : Form
     {
-        internal static readonly Version SetupVersion = new Version(0, 12, 19);
+        internal static readonly Version SetupVersion = new Version(0, 12, 20);
         private readonly CheckBox startMenu;
         private readonly CheckBox desktop;
         private readonly CheckBox launch;

@@ -1,25 +1,22 @@
 # AeroMirror native build information
 
-This file documents the patched native executable originally shipped by
-AeroMirror 0.11.1. The current executable keeps the same pinned upstream and
-runtime inputs and the reviewed stream-geometry, feedback, discovery, and
-selected GStreamer pipeline diagnostics. AeroMirror 0.12.6 added native HTTP
-listener reset validation and removed unsupported photo-presentation feature
-declarations. AeroMirror 0.12.7 keeps those changes, restores client-managed
-RTSP `TEARDOWN` handling, and preserves externally supplied headless renderer
-arguments before the legacy Qt settings UI can rewrite them. AeroMirror 0.12.8
-adds epoch-correlated D3D11 presentation proof for feedback-gap recovery.
-AeroMirror 0.12.13 adds bounded request-correlated DNS-SD pair refresh in the
-same process and on the same ports, including persistent owner-thread callback
-pumping and recovery across transient internal GLib-loop resets. AeroMirror
-0.12.15 expanded the libuxplay patch into a full native-core safety audit across
-worker lifecycle, socket ownership, parsers, setup/pairing, RTP/NTP, crypto,
-buffers, and both renderers. The source bundle contains the complete upstream
-trees and both patches separately and applied in place. Two clean compatible
-0.12.18 builds reproduce the executable hash recorded below after extending
-the GLib-owner Photos scale command for automatic portrait fill. The final 0.12.15 source
-archive contained 147 validated entries; its no-Git extracted tree validated
-all pinned hashes and a clean 57/57 rebuild reproduced that earlier executable.
+This file records the native executable prepared for the local AeroMirror
+0.12.20 candidate. It keeps the pinned upstream/runtime inputs and the reviewed
+stream-geometry, feedback, discovery, selected-pipeline, worker-lifecycle,
+parser, setup/pairing, RTP/NTP, crypto, buffering, and renderer hardening from
+the 0.11.1–0.12.15 line. Version 0.12.13 added bounded request-correlated
+same-PID/same-port DNS-SD refresh; 0.12.15 expanded the native safety audit;
+and 0.12.18 historically added sink fullscreen/scale commands used by the
+managed Photos cover/fill path.
+
+Version 0.12.20 replaces that fullscreen/Photos ownership model. One Qt
+top-level viewer owns one child native video surface, and the selected sink is
+embedded into that surface. Caption maximize, Escape, Alt+Enter, and the exact
+shell setter share one native GUI-thread state transition and acknowledgement.
+The sink contains the complete frame with no crop rectangle, and missing
+Bonjour in headless mode is a stable exit-code-20 prerequisite rather than an
+interactive install path. The source bundle contains the complete pinned
+upstream trees with both reviewed patches separately and already applied.
 
 ## Exact inputs
 
@@ -31,7 +28,8 @@ all pinned hashes and a clean 57/57 rebuild reproduced that earlier executable.
   `libuxplay-aeromirror.patch`
 - Patched wrapper files: `src/airplayworker.cpp`, `src/main.cpp`,
   `src/mainwindow.cpp`, and `src/mainwindow.h`
-- Patched libuxplay files: `lib/crypto.c`, `lib/crypto.h`, `lib/dnssd.c`,
+- Patched libuxplay files: `aeromirror_host_protocol.h`, `lib/crypto.c`,
+  `lib/crypto.h`, `lib/dnssd.c`,
   `lib/dnssd.h`, `lib/fairplay_playfair.c`, `lib/http_handlers.h`,
   `lib/http_request.c`, `lib/http_request.h`, `lib/http_response.c`,
   `lib/http_response.h`, `lib/httpd.c`, `lib/mirror_buffer.c`,
@@ -64,15 +62,15 @@ all pinned hashes and a clean 57/57 rebuild reproduced that earlier executable.
   managed Windows audio selection.
 - Engineering build/staging GStreamer input: 1.28.5. It is not the
   redistributed-runtime version recorded above.
-- AeroMirror 0.12.18 compatible executable SHA-256 reproduced by clean
+- AeroMirror 0.12.20 compatible executable SHA-256 reproduced by clean
   builds:
-  `C217386CBC916F8889A9C03774390FE7EC7D8C7EE0B6F64358215CACEEB35118`
+  `4336B9DBFCDE87123EC4796FE43FAA4F1952E27224932B3DD5E8FEAFBAD41832`
 - Materialized wrapper patch SHA-256:
-  `8F48A4E72D765B0549119BC6366CB970384BAB8116B4430CE60ED67228213F9C`
+  `C95721CC748F85EACFBEC20301F31E3292E82399F2152CE83E27BCC3C7A954E0`
 - Materialized libuxplay patch SHA-256:
-  `11330A0D905CF4480958DAA59B950F3A2CE2B4AD51A18563EBCC77924DD782C4`
-- Provenance still pins 37 libuxplay sources and 41 patched sources in total.
-  The 0.12.18 corresponding-source archive contains 147 entries. Its no-Git
+  `9308E476F5BEBB01C1E7752E3763A8E7B65CD0B8268D6E1CDCEABE014F9EE7A0`
+- Provenance pins 38 libuxplay sources and 42 patched sources in total. The
+  0.12.20 corresponding-source archive contains 148 entries. Its no-Git
   extracted tree passes the same input/hash validation, and a clean
   57/57 build reproduces the reviewed executable.
 - Reproducible PE timestamp (`SOURCE_DATE_EPOCH`): `1786008050`
@@ -86,14 +84,39 @@ script, packaging scripts, and verification scripts.
 The AeroMirror patches add the headless launcher integration,
 `--loader-test`, stable video-size and codec-header geometry markers, a
 feedback-health capability and one-shot recovery markers, a one-shot selected
-GStreamer decoder/videosink marker, and stable DNS-SD readiness markers. The
-0.12.18 extension accepts the same exact fullscreen/scale control lines, marshals
-them to the native GLib owner, and changes only documented properties on a
-retained selected Direct3D 11 sink. Scale is uniform, bounded to 100–500%, and
-reset at renderer start. The managed shell uses it only for deterministic
-portrait fill of the exact known Photos transport canvas; no pixels are
-inspected and no media bytes are rewritten. The
-native HTTP listener now reports initial/reset readiness with its actual port,
+GStreamer decoder/videosink marker, and stable DNS-SD readiness markers.
+
+In 0.12.20, `RendererHostWindow` is the only top-level video viewer and its
+native child widget is the only GStreamer video surface. The sink is bound to
+that child through `GstVideoOverlay` before playback, sink-owned fullscreen
+toggle handling is disabled, and `force-aspect-ratio=TRUE` is set when
+available. AeroMirror supplies no `gst_video_overlay_set_render_rectangle`,
+crop, or hidden zoom request; legacy uniform scale state is reset to `1.0`.
+This contains the complete Photos transport canvas and may letterbox when a
+portrait outer window contains the observed `3840x2160` frame.
+
+The wrapper accepts only
+`AEROMIRROR_COMMAND video-fullscreen-set state=0|1` for the shell setter.
+Caption maximize, Escape, Alt+Enter, lifecycle transitions, and that IPC path
+share the Qt GUI-thread setter. It emits
+`AEROMIRROR_VIDEO_FULLSCREEN` with requested and actual state, an
+`applied|noop|unavailable` result, a monotonic generation, and the initiating
+source. The new `aeromirror_host_protocol.h` is the private in-process contract
+for renderer show, hide, and fullscreen-set messages; it is not a second
+cross-process control surface. If Bonjour is missing in headless mode, the
+wrapper emits `AEROMIRROR_BONJOUR_MISSING action=install-required`, exits 20,
+and never opens the legacy install dialog or registers the bundled responder
+as a service.
+
+Caption Close first leaves fullscreen and then calls `showMinimized()` while
+ignoring destruction. It deliberately retains the active generation's
+requested-visibility state. A minimized HWND remains `WS_VISIBLE`, including
+under the shell's `WS_EX_TOOLWINDOW` taskbar policy, so managed tray recovery
+can still identify it. `video_renderer_stop()`/`destroy()` exclusively perform
+the 1-to-0 visibility compare-and-swap and HIDE; the next session can therefore
+perform exactly one fresh SHOW.
+
+The native HTTP listener reports initial/reset readiness with its actual port,
 checks same-port reset binding, exits for full shell recovery when a reset
 cannot restore the advertised port, and logs typed RTSP `TEARDOWN` as
 client-managed instead of forcing the whole connection closed from the server.
@@ -150,16 +173,22 @@ only byte lengths and truncation state, never the original name.
 The resulting x64 PE imports `qt_version_tag_6_10`, does not import
 `qt_version_tag_6_11`, and its `--loader-test` passed with the unchanged
 GStreamer 1.28.1 runtime from pinned `uxplay-windows` release `2.0.0.1736`.
+The same staged runtime passes `--self-test` with separate fresh registries
+through both ASCII and Cyrillic application paths after all nine runtime path
+variables moved to the wide Windows environment API.
 The build gate checks the exact runtime archive and both DLL hashes above,
 their embedded 1.28.1 version, and the wasapi2 property before staging. It
 also verifies that the separate build prefix contains GStreamer 1.28.5. The
 executable contains no
 `.debug_*` sections or local checkout path.
 
-The final staged-runtime audit covers 199 binaries and 148 staged DLLs. All 44
-requested GStreamer features resolve to 27 plug-ins, and a manual staged
-`--loader-test` exits 0. These are 0.12.15 prepackage checks; they do not imply
-that the review payload or Setup has been built.
+The final local 0.12.20 staged-runtime audit covers 199 binaries and 148 staged
+DLLs. All 44 requested GStreamer features resolve to 27 plug-ins, and the
+staged `--loader-test` exits 0. The 148-entry corresponding-source ZIP validates
+from an extracted no-Git tree and rebuilds 57/57 to the same executable hash.
+The local review payload and x64 Setup gates also pass. Physical Photos edges,
+fullscreen/Escape behavior, update/reinstall, and iPhone visibility remain
+pending; these automated results are not physical acceptance or publication.
 
 ## Rebuild from this source bundle
 
@@ -213,7 +242,7 @@ The actual `dns_sd.h` used for the interface and AeroMirror's `dnssd.def` are
 included in the source bundle. The Bluetooth beacon is reused unchanged from
 the pinned upstream runtime.
 
-The full offline runtime is not published by the AeroMirror 0.11.x review
-releases. The installer downloads the unchanged, pinned upstream runtime asset
+The full offline runtime is not published by the current AeroMirror review
+line. The installer downloads the unchanged, pinned upstream runtime asset
 directly from the upstream GitHub release and verifies its SHA-256 before
 installing it.

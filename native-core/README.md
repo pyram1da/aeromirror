@@ -1,8 +1,11 @@
-# Native headless core
+# Native receiver core and viewer host
 
 The MVP patches `leapbtw/uxplay-windows` so its linked UxPlay engine can run
 with `--headless`. In this mode the upstream Qt tray icon is not created; the
-single visible tray belongs to `AeroMirror.exe`.
+single visible tray belongs to `AeroMirror.exe`. "Headless" therefore means
+that the native wrapper has no competing control UI or tray. In 0.12.20 it
+still owns the one visible video viewer required for reliable window and input
+handling.
 
 Upstream pins:
 
@@ -77,16 +80,49 @@ transition before delivery. This is a narrow protocol-state repair, not a claim
 that the physical frozen-frame symptom is resolved; that still requires a
 0.12.15 iPhone test.
 
-The internal 0.12.18 extension keeps those protocol and lifetime changes and
-adds two presentation commands to the existing headless pipe. The wrapper
-parses exact fullscreen/scale grammar; libuxplay queues work on the active GLib
-owner; and the renderer takes a retained selected D3D11 sink reference before
-changing its documented `fullscreen`, `scale-x`, or `scale-y` properties.
-Scale is equal on both axes, limited to 100–500%, and reset on renderer start.
-The managed shell applies it automatically only when the exact known Photos
-3840×2160 transport canvas is paired with a trusted portrait device shape. It
-does not inspect pixels, rewrite media, infer arbitrary content, or claim a
-Camera-rotation fix.
+The historical 0.12.18 extension added exact fullscreen and uniform-scale
+commands to the existing headless pipe. That release let the managed shell
+drive sink fullscreen and a Photos cover/fill transform. It is retained here
+as release history, not as the current ownership model.
+
+The 0.12.20 extension replaces that product path with one Qt-owned top-level
+`RendererHostWindow` and one child native video surface. The selected
+GStreamer sink is embedded into the child HWND through `GstVideoOverlay`; sink
+fullscreen toggling is disabled, `force-aspect-ratio` is enabled when the sink
+supports it, and no render/crop rectangle is supplied. Legacy scale state is
+returned to uniform `1.0`, so the complete AirPlay transport frame is
+contained rather than enlarged by cropping. A portrait outer window can
+therefore show substantial letterboxing when Photos sends its observed
+`3840×2160` canvas; without trusted inner-photo bounds, this is the safe
+non-cropping behavior.
+
+The native frame is also the sole fullscreen owner. The standard caption
+maximize action, Escape, Alt+Enter, and the shell command
+`AEROMIRROR_COMMAND video-fullscreen-set state=<0|1>` all reach one
+idempotent Qt GUI-thread setter. Each accepted request reports the exact
+acknowledgement
+`AEROMIRROR_VIDEO_FULLSCREEN requested=<0|1> actual=<0|1>
+result=<applied|noop|unavailable> generation=<uint64>
+source=<ipc|caption|escape|alt-enter|lifecycle|initial>`. The shell consumes
+that acknowledged state instead of inferring a toggle from delayed window
+geometry. The private `aeromirror_host_protocol.h` defines only the in-process
+viewer show, hide, and fullscreen-set messages shared by the renderer thread
+and Qt host.
+
+Caption Close is intentionally a minimize-equivalent, not the renderer HIDE
+transition. It exits fullscreen, acknowledges normal state, and keeps the
+active generation's requested-visibility flag set, so a repeated codec callback
+cannot reopen the window against the user's action. Win32 keeps the minimized
+HWND visible to enumeration even when the shell applies `WS_EX_TOOLWINDOW`;
+managed tray restore/fullscreen can therefore target it. Renderer stop or
+destroy alone changes requested visibility from 1 to 0 and posts HIDE, allowing
+the following session to own the next SHOW.
+
+When Bonjour is absent, the headless wrapper emits
+`AEROMIRROR_BONJOUR_MISSING action=install-required` and exits with code 20.
+It does not open an installer prompt or register a bundled per-user executable
+as a machine-wide service. The original interactive upstream path remains
+separate from AeroMirror's headless launch.
 
 The receiver's shared AirPlay identity is canonicalized to at most 50 UTF-8
 bytes at a complete character boundary. This keeps the six-byte-MAC RAOP label
@@ -181,12 +217,21 @@ both D3D11 and D3D12 because the latency profiles select them explicitly.
 The resulting core's `--loader-test` has also passed against the unchanged
 runtime from release `2.0.0.1736`.
 
-For the 0.12.18 prepackage gate, staged inspection covered 199 binaries and
-148 DLLs; all 44 requested GStreamer features resolved to 27 plug-ins, and a
-manual staged `--loader-test` exited 0. The versioned corresponding-source ZIP
-has 147 entries. Its extracted no-Git tree validated every pinned hash and
-completed a clean
-57/57 rebuild reproducing core SHA-256
-`C217386CBC916F8889A9C03774390FE7EC7D8C7EE0B6F64358215CACEEB35118`.
-At that prepackage checkpoint, review payload and Setup verification remained
-separate pending gates; both later passed for the tagged release.
+Runtime paths are installed into the process environment with the wide Windows
+API. A fresh-registry `--self-test` against the same staged bytes passes from
+both ASCII and Cyrillic application paths. Setup uses `--loader-test` against
+the separately pinned upstream runtime before committing installation; the
+broader self-test remains a staged-bundle gate.
+
+For the local 0.12.20 candidate, staged inspection covered 199 binaries and
+148 DLLs; all 44 requested GStreamer features resolved to 27 plug-ins, and the
+staged `--loader-test` exited 0. Provenance pins 42 patched sources in total,
+including the new `libuxplay/aeromirror_host_protocol.h`. The versioned
+corresponding-source ZIP has 148 entries. Its extracted no-Git tree validated
+every pinned hash and completed a clean 57/57 rebuild reproducing core
+SHA-256
+`4336B9DBFCDE87123EC4796FE43FAA4F1952E27224932B3DD5E8FEAFBAD41832`.
+The local review payload and x64 Setup gates also pass. These automated results
+do not establish physical Photos containment, fullscreen/Escape behavior,
+installed update behavior, or iPhone visibility; those 0.12.20 checks remain
+pending, and this candidate is not yet published.

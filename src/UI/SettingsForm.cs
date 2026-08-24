@@ -30,6 +30,8 @@ namespace AirPlayReceiverMvp
         private readonly Panel networkCard;
         private readonly Label networkTitle;
         private readonly NetworkHelpGlyph networkHelp;
+        private readonly Label bonjourFirewallNotice;
+        private readonly Button bonjourFirewallRepair;
         private readonly Panel trustCard;
         private readonly Button refreshDiscovery;
         private readonly Button settingsButton;
@@ -69,6 +71,7 @@ namespace AirPlayReceiverMvp
         private readonly Button checkUpdate;
         private readonly Button installUpdate;
         private readonly Button openRelease;
+        private readonly Button updatesBack;
         private UpdateInfo availableUpdate;
         private string pendingInstallerPath = "";
         private bool suppressDirty;
@@ -166,6 +169,27 @@ namespace AirPlayReceiverMvp
             networkHelp.Location = new Point(536, 11);
             networkHelp.AccessibleName = "Подробнее о проверке сети";
             networkCard.Controls.Add(networkHelp);
+
+            bonjourFirewallNotice = MakeFixedLabel("", 16, 41, 336, 42);
+            bonjourFirewallNotice.Font = new Font(
+                "Segoe UI Semibold", 9.25F, FontStyle.Regular);
+            bonjourFirewallNotice.Visible = false;
+            networkCard.Controls.Add(bonjourFirewallNotice);
+
+            bonjourFirewallRepair = MakeButton(
+                "Разрешить Bonjour", 372, 43, 180, 34, true);
+            bonjourFirewallRepair.AccessibleName =
+                "Разрешить обнаружение AirPlay через Bonjour";
+            bonjourFirewallRepair.Visible = false;
+            bonjourFirewallRepair.Click += delegate
+            {
+                context.RepairBonjourFirewall(this);
+                SyncStatus();
+            };
+            toolTips.SetToolTip(
+                bonjourFirewallRepair,
+                "Добавить только узкое правило Private UDP 5353 для Bonjour. Windows покажет одно подтверждение администратора.");
+            networkCard.Controls.Add(bonjourFirewallRepair);
 
             trustCard = new Panel();
             trustCard.Location = new Point(24, 178);
@@ -534,7 +558,7 @@ namespace AirPlayReceiverMvp
             updatesPage.Visible = false;
             Controls.Add(updatesPage);
 
-            var updatesBack = MakeBackButton(20, 14);
+            updatesBack = MakeBackButton(20, 14);
             updatesBack.Click += delegate { ShowHomePage(); };
             updatesPage.Controls.Add(updatesBack);
 
@@ -643,6 +667,11 @@ namespace AirPlayReceiverMvp
                 context.CurrentSettings.PairingMode == "none";
             bool dark = appliedDarkTheme ??
                 ThemeHelper.IsDark(context.CurrentSettings.ThemeMode);
+            bool bonjourFirewallMissing =
+                context.IsBonjourFirewallRepairRequired;
+            bool bonjourUnavailable = context.IsBonjourUnavailable;
+            bool bonjourFirewallRepairRunning =
+                context.IsBonjourFirewallRepairRunning;
             bool receiverReady = context.IsCoreRunning &&
                 context.IsReceiverReady;
             if (receiverReady)
@@ -755,10 +784,59 @@ namespace AirPlayReceiverMvp
                     ? Color.FromArgb(111, 190, 255)
                     : Color.FromArgb(0, 80, 145);
             }
+
+            bool showBonjourNotice =
+                bonjourFirewallMissing || bonjourUnavailable;
+            networkCard.Height = showBonjourNotice ? 94 : 46;
+            bonjourFirewallNotice.Visible = showBonjourNotice;
+            if (bonjourUnavailable)
+            {
+                networkCard.BackColor = dark
+                    ? Color.FromArgb(72, 36, 36)
+                    : Color.FromArgb(255, 235, 235);
+                networkTitle.ForeColor = dark
+                    ? Color.FromArgb(255, 166, 166)
+                    : Color.FromArgb(150, 45, 45);
+                bonjourFirewallNotice.Text =
+                    "Bonjour недоступен или установлен некорректно. Проверьте установку, чтобы iPhone находил AeroMirror.";
+                bonjourFirewallNotice.Size = new Size(536, 42);
+                bonjourFirewallNotice.ForeColor = networkTitle.ForeColor;
+                bonjourFirewallRepair.Visible = false;
+                networkDetails +=
+                    "\r\nBonjour не найден или путь службы небезопасен. AeroMirror не устанавливает системную службу автоматически.";
+            }
+            else if (bonjourFirewallMissing)
+            {
+                networkCard.BackColor = dark
+                    ? Color.FromArgb(73, 57, 24)
+                    : Color.FromArgb(255, 244, 215);
+                networkTitle.ForeColor = dark
+                    ? Color.FromArgb(255, 197, 92)
+                    : Color.FromArgb(133, 78, 0);
+                bonjourFirewallNotice.Text =
+                    "Windows может блокировать обнаружение AirPlay через Bonjour.";
+                bonjourFirewallNotice.Size = new Size(336, 42);
+                bonjourFirewallNotice.ForeColor = networkTitle.ForeColor;
+                bonjourFirewallRepair.Visible = true;
+                bonjourFirewallRepair.Enabled =
+                    !bonjourFirewallRepairRunning;
+                bonjourFirewallRepair.Text = bonjourFirewallRepairRunning
+                    ? "Настраиваем…" : "Разрешить Bonjour";
+                networkDetails +=
+                    "\r\nНет точного правила для Bonjour: Private, UDP 5353, только локальная подсеть.";
+            }
+            else
+            {
+                bonjourFirewallNotice.Text = "";
+                bonjourFirewallRepair.Visible = false;
+                bonjourFirewallRepair.Enabled = true;
+                bonjourFirewallRepair.Text = "Разрешить Bonjour";
+            }
             networkHelp.ForeColor = networkTitle.ForeColor;
             networkHelp.AccessibleDescription = networkDetails;
             networkHelp.Invalidate();
             toolTips.SetToolTip(networkHelp, networkDetails);
+            toolTips.SetToolTip(bonjourFirewallNotice, networkDetails);
 
             homeQuality.Text = "Качество: " +
                 QualityDisplayName(context.CurrentSettings.QualityPreset) +
@@ -822,14 +900,15 @@ namespace AirPlayReceiverMvp
         private void LayoutHome(bool showTrustCard)
         {
             int actionTop;
+            int contentTop = networkCard.Bottom + 16;
             if (showTrustCard)
             {
-                trustCard.Location = new Point(24, 174);
-                actionTop = 282;
+                trustCard.Location = new Point(24, contentTop);
+                actionTop = trustCard.Bottom + 14;
             }
             else
             {
-                actionTop = 174;
+                actionTop = contentTop;
             }
             refreshDiscovery.Location = new Point(24, actionTop);
             startStop.Location = new Point(260, actionTop);
@@ -990,6 +1069,9 @@ namespace AirPlayReceiverMvp
         {
             if (availableUpdate == null || !availableUpdate.IsNewer)
                 return;
+            if (!ConfirmAllUnsavedChanges())
+                return;
+            updatesBack.Enabled = false;
             SetPrimaryButtonState(installUpdate, false);
             checkUpdate.Enabled = false;
             updateState.Text =
@@ -1010,36 +1092,7 @@ namespace AirPlayReceiverMvp
                     }
                     BeginInvoke((MethodInvoker)delegate
                     {
-                        updateState.Text =
-                            "Установщик загружен и проверен.";
-                        DialogResult answer = MessageBox.Show(
-                            this,
-                            "Запустить обновление до версии " +
-                            availableUpdate.Version.ToString(3) +
-                            "?\r\n\r\nПриложение закроется, обновится без " +
-                            "повторного выбора ярлыков и запустится снова. " +
-                            "Текущие настройки и ярлыки сохранятся.",
-                            "AeroMirror",
-                            MessageBoxButtons.YesNo,
-                            MessageBoxIcon.Question);
-                        if (answer == DialogResult.Yes)
-                        {
-                            Process.Start(new ProcessStartInfo(installerPath)
-                            {
-                                Arguments = "/update /delete-source",
-                                WorkingDirectory = Path.GetDirectoryName(installerPath),
-                                UseShellExecute = true
-                            });
-                            pendingInstallerPath = "";
-                            context.QuitApplication();
-                        }
-                        else
-                        {
-                            DeleteFileQuietly(installerPath);
-                            pendingInstallerPath = "";
-                            checkUpdate.Enabled = true;
-                            SetPrimaryButtonState(installUpdate, true);
-                        }
+                        LaunchVerifiedUpdateInstaller(installerPath);
                     });
                 }
                 catch (Exception ex)
@@ -1050,6 +1103,7 @@ namespace AirPlayReceiverMvp
                         return;
                     BeginInvoke((MethodInvoker)delegate
                     {
+                        updatesBack.Enabled = true;
                         checkUpdate.Enabled = true;
                         updateState.Text =
                             "Обновление не скачано: " + ex.Message;
@@ -1057,6 +1111,50 @@ namespace AirPlayReceiverMvp
                     });
                 }
             });
+        }
+
+        private void LaunchVerifiedUpdateInstaller(string installerPath)
+        {
+            updateState.Text =
+                "Установщик загружен и проверен. Запускаем обновление…";
+            try
+            {
+                using (Process setup = Process.Start(
+                    new ProcessStartInfo(installerPath)
+                    {
+                        Arguments = "/update /delete-source",
+                        WorkingDirectory = Path.GetDirectoryName(installerPath),
+                        UseShellExecute = true
+                    }))
+                {
+                    if (setup == null)
+                    {
+                        throw new InvalidOperationException(
+                            "Windows не вернула запущенный процесс установщика.");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                ReceiverContext.Log(
+                    "Verified Setup launch failed: " + ex);
+                DeleteFileQuietly(installerPath);
+                if (string.Equals(
+                    pendingInstallerPath, installerPath,
+                    StringComparison.OrdinalIgnoreCase))
+                {
+                    pendingInstallerPath = "";
+                }
+                updatesBack.Enabled = true;
+                checkUpdate.Enabled = true;
+                updateState.Text =
+                    "Не удалось запустить обновление: " + ex.Message;
+                SetPrimaryButtonState(installUpdate, true);
+                return;
+            }
+
+            pendingInstallerPath = "";
+            context.QuitApplication();
         }
 
         private void DeletePendingInstaller()

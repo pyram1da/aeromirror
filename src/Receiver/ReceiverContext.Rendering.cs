@@ -73,7 +73,6 @@ namespace AirPlayReceiverMvp
 
         private void ResetRendererMoveSizeTracking()
         {
-            ResetRendererControls(false);
             IntPtr hook = rendererMoveSizeHook;
             IntPtr showHook = rendererWindowShowHook;
             rendererMoveSizeHook = IntPtr.Zero;
@@ -720,21 +719,15 @@ namespace AirPlayReceiverMvp
         {
             if (!IsCoreRunning)
             {
-                ResetRendererControls(false);
                 return;
             }
             IntPtr previousWindow = fittedStreamWindow;
             IntPtr window;
             if (!TryGetRendererWindow(out window))
             {
-                ResetRendererControls(false);
                 return;
             }
-            bool wasFullscreen = rendererFullscreenActive;
             bool fullscreen = UpdateRendererFullscreenState(window);
-            bool staleBorderless = HandleStaleBorderlessRenderer(
-                window, wasFullscreen, fullscreen);
-            UpdateRendererControls(window, fullscreen, staleBorderless);
             if (fullscreen)
             {
                 // If fullscreen was reached before the first supervision pass,
@@ -1029,6 +1022,41 @@ namespace AirPlayReceiverMvp
                  showInTaskbar != previousShowInTaskbar);
         }
 
+        private void ShowStreamWindow(bool notifyIfMissing)
+        {
+            if (!IsCoreRunning)
+            {
+                if (notifyIfMissing && settings.Notify)
+                    tray.ShowBalloonTip(3000, AppTitle,
+                        "Сначала подключите iPhone: окно трансляции пока не открыто.",
+                        ToolTipIcon.Info);
+                return;
+            }
+
+            IntPtr window = IntPtr.Zero;
+            for (int attempt = 0; attempt < 5; attempt++)
+            {
+                if (TryGetRendererWindow(out window))
+                    break;
+                if (attempt < 4)
+                    Thread.Sleep(150);
+            }
+
+            if (window != IntPtr.Zero &&
+                NativeMethods.RestoreAndActivateWindow(window))
+            {
+                Log("Renderer window restored and activated explicitly.");
+                return;
+            }
+
+            Log("Renderer window restore skipped: no visible renderer " +
+                "window could be restored.");
+            if (notifyIfMissing && settings.Notify)
+                tray.ShowBalloonTip(3000, AppTitle,
+                    "Окно трансляции пока не найдено. Подключите iPhone и повторите.",
+                    ToolTipIcon.Info);
+        }
+
         private void FitStreamWindow(bool notifyIfMissing)
         {
             if (!IsCoreRunning)
@@ -1120,14 +1148,26 @@ namespace AirPlayReceiverMvp
 
             if (window != IntPtr.Zero)
             {
-                if (!IsRendererFullscreenWindow(window))
+                bool fullscreenSnapshot =
+                    IsRendererFullscreenWindow(window);
+                if (!fullscreenSnapshot)
                     ApplyPresentationScale(
                         RendererPresentationPolicy.NormalScalePermille,
                         "fullscreen entry");
+                bool enterFullscreen =
+                    Interlocked.CompareExchange(
+                        ref nativeFullscreenState, 0, 0) == 0;
+                string command = "video-fullscreen-set state=" +
+                    (enterFullscreen ? "1" : "0");
                 if (TryWriteNativeVideoCommand(
-                        "video-fullscreen-toggle", "fullscreen toggle"))
+                        command,
+                        enterFullscreen
+                            ? "fullscreen entry"
+                            : "fullscreen exit"))
                 {
-                    Log("Requested renderer fullscreen toggle.");
+                    Log(enterFullscreen
+                        ? "Requested renderer fullscreen entry."
+                        : "Requested renderer fullscreen exit.");
                     return;
                 }
             }

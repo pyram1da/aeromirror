@@ -2,7 +2,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$UpstreamRoot,
 
-    [string]$Version = "0.12.19"
+    [string]$Version = "0.12.20"
 )
 
 $ErrorActionPreference = "Stop"
@@ -181,6 +181,7 @@ $libModified = @(
         status --short --untracked-files=all
 )
 $expectedLibModified = @(
+    "?? aeromirror_host_protocol.h",
     " M lib/crypto.c",
     " M lib/crypto.h",
     " M lib/dnssd.c",
@@ -274,6 +275,7 @@ try {
     }
     & git -c ("safe.directory=" + $libuxplay) -C $libuxplay `
         add -N -- `
+        "aeromirror_host_protocol.h" `
         "lib/mirror_payload_parser.c" `
         "lib/mirror_payload_parser.h" `
         "lib/worker_lifecycle.c" `
@@ -284,6 +286,7 @@ try {
     & git -c ("safe.directory=" + $libuxplay) -C $libuxplay `
         diff --binary --no-ext-diff `
         ("--output=" + $actualLibPatch) -- `
+        "aeromirror_host_protocol.h" `
         "lib/crypto.c" `
         "lib/crypto.h" `
         "lib/dnssd.c" `
@@ -404,6 +407,7 @@ try {
             -Destination (Join-Path $sourceRoot $relative) -Force
     }
     foreach ($relative in @(
+        "aeromirror_host_protocol.h",
         "lib\crypto.c",
         "lib\crypto.h",
         "lib\dnssd.c",

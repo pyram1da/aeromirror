@@ -26,6 +26,7 @@ namespace AirPlayReceiverMvp
         private const int IdleDiscoveryRecurringRenewalMinutes = 20;
         private const int IdleDiscoveryUnlockRetryCooldownMinutes = 10;
         private const int IdleDiscoveryLegacyRestartLimit = 2;
+        private const int MissingBonjourExitCode = 20;
 
         private enum LostConnectionRecoveryAction
         {
@@ -60,6 +61,7 @@ namespace AirPlayReceiverMvp
         {
             ResetRapidExitWindow();
             ResetSharedAutomaticRecoveryBudget();
+            RefreshBonjourFirewallAssessment();
             if (!networkProfileKnown)
             {
                 startAfterNetworkCheck = true;
@@ -293,6 +295,7 @@ namespace AirPlayReceiverMvp
         public void RestartCore()
         {
             ResetRapidExitWindow();
+            RefreshBonjourFirewallAssessment();
             RestartCore(true);
         }
 
@@ -408,6 +411,7 @@ namespace AirPlayReceiverMvp
         {
             ResetRapidExitWindow();
             ResetSharedAutomaticRecoveryBudget();
+            RefreshBonjourFirewallAssessment();
             ResetIdleDiscoveryRenewalSchedule();
             Log("Manual AirPlay discovery refresh requested.");
             Interlocked.Exchange(
@@ -684,6 +688,7 @@ namespace AirPlayReceiverMvp
 
             ObserveClientFeedbackHealth(processId, line);
             ObserveRecoveredVideoPresentation(processId, line);
+            ObserveNativeFullscreenState(line);
 
             Match chosenDeviceId = Regex.Match(
                 line,
@@ -2043,6 +2048,47 @@ namespace AirPlayReceiverMvp
                 ref appliedPresentationScalePermille,
                 RendererPresentationPolicy.NormalScalePermille);
             rendererFullscreenActive = false;
+            Interlocked.Exchange(ref nativeFullscreenState, 0);
+            Interlocked.Exchange(ref nativeFullscreenGeneration, 0);
+        }
+
+        private void ObserveNativeFullscreenState(string line)
+        {
+            Match marker = Regex.Match(
+                line,
+                @"^AEROMIRROR_VIDEO_FULLSCREEN requested=([01]) " +
+                    @"actual=([01]) " +
+                    @"result=(applied|noop|unavailable) " +
+                    @"generation=(\d+) " +
+                    @"source=(ipc|caption|escape|alt-enter|lifecycle|initial)$",
+                RegexOptions.CultureInvariant);
+            if (!marker.Success)
+                return;
+
+            long generation;
+            if (!long.TryParse(marker.Groups[4].Value, out generation) ||
+                generation < 0)
+                return;
+
+            string result = marker.Groups[3].Value;
+            int actual = marker.Groups[2].Value == "1" ? 1 : 0;
+            if (!string.Equals(
+                    result, "unavailable", StringComparison.Ordinal))
+            {
+                long previousGeneration = Interlocked.Read(
+                    ref nativeFullscreenGeneration);
+                if (generation < previousGeneration)
+                    return;
+                Interlocked.Exchange(
+                    ref nativeFullscreenGeneration, generation);
+                Interlocked.Exchange(ref nativeFullscreenState, actual);
+            }
+
+            Log("Native fullscreen acknowledged: requested=" +
+                marker.Groups[1].Value + ", actual=" +
+                marker.Groups[2].Value + ", result=" + result +
+                ", generation=" + generation + ", source=" +
+                marker.Groups[5].Value + ".");
         }
 
         private void ResetIdleDiscoveryRenewalSchedule()
@@ -3172,16 +3218,21 @@ namespace AirPlayReceiverMvp
                 uint status = unchecked((uint)code);
                 string codeHex = "0x" + status.ToString("X8");
                 Log("Core exited with code " + code + " (" + codeHex + ").");
-                DateTime now = DateTime.UtcNow;
-                if (rapidExitWindowStartedAt == DateTime.MinValue ||
-                    (now - rapidExitWindowStartedAt).TotalSeconds > 60)
+                bool bonjourPrerequisiteMissing =
+                    code == MissingBonjourExitCode;
+                if (!bonjourPrerequisiteMissing)
                 {
-                    rapidExitWindowStartedAt = now;
-                    rapidExitCount = 1;
-                }
-                else
-                {
-                    rapidExitCount++;
+                    DateTime now = DateTime.UtcNow;
+                    if (rapidExitWindowStartedAt == DateTime.MinValue ||
+                        (now - rapidExitWindowStartedAt).TotalSeconds > 60)
+                    {
+                        rapidExitWindowStartedAt = now;
+                        rapidExitCount = 1;
+                    }
+                    else
+                    {
+                        rapidExitCount++;
+                    }
                 }
                 DetachCoreProcessForLifecycle(exitedProcess);
                 Interlocked.Exchange(ref activeCorePid, 0);
@@ -3195,7 +3246,20 @@ namespace AirPlayReceiverMvp
                     status == 0xC0000135 ||
                     status == 0xC0000139 ||
                     status == 0xC000007B;
-                if (loaderFailure)
+                if (bonjourPrerequisiteMissing)
+                {
+                    rapidExitCount = 0;
+                    rapidExitWindowStartedAt = DateTime.MinValue;
+                    SetState(false, "Bonjour не установлен");
+                    Log("Automatic restart disabled because the native core " +
+                        "reported the missing Bonjour prerequisite.");
+                    BeginBonjourFirewallAssessment();
+                    if (settings.Notify)
+                        tray.ShowBalloonTip(7000, AppTitle,
+                            "Для обнаружения iPhone требуется Bonjour. Установите Bonjour и снова включите приёмник.",
+                            ToolTipIcon.Warning);
+                }
+                else if (loaderFailure)
                 {
                     SetState(false, "Несовместимые или отсутствующие DLL ядра");
                     Log("Automatic restart disabled for permanent Windows " +

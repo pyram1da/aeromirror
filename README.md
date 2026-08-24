@@ -69,13 +69,15 @@ Apple. AirPlay, iPhone, and Apple are trademarks of Apple Inc.
   move; the window also adapts on real portrait/landscape changes, and
   automatic fitting restores the learned proportions after a manual resize
   unless the user turns it off; for the exact correlated Photos/media
-  signature, the 0.12.19 release keeps the trusted phone shape (or a
+  signature, the 0.12.20 source keeps the trusted phone shape (or a
   conservative portrait fallback when Photos arrives first) but contains the
   complete frame at normal scale instead of using the unverified 0.12.18 cover
-  transform; the former schema-12 Photos A/B key and the 0.12.17 incremental
-  zoom controls are retired; property-backed fullscreen suspends every shell
-  resize/save path, has a shell-owned no-activate enter/exit control, and uses
-  bounded event-driven foreground Escape;
+  transform; the native viewer explicitly retains aspect ratio and receives no
+  crop rectangle, so a portrait outer window can show letterboxing; the former
+  schema-12 Photos A/B key and the 0.12.17 incremental zoom controls are
+  retired; property-backed fullscreen suspends every shell resize/save path,
+  while the native viewer's caption action, Escape, Alt+Enter, and tray request
+  share one acknowledged idempotent state setter instead of a floating overlay;
   the last normal position, size, and DPI are restored on the next session and
   clamped into an available monitor; saved bounds are applied from the early
   window-show event, unchanged native-window policy is cached, and the window
@@ -161,6 +163,42 @@ not the runtime downloaded by the public network installer. Qt 6.10.1
 officially supports Windows 10 1809 x64 and newer. Windows 10 is outside Microsoft's normal consumer support lifecycle,
 but remains an explicit application target. ARM64 and 32-bit packages are not
 included.
+
+## 0.12.20 review release
+
+The current source replaces the public 0.12.19 floating fullscreen overlay
+with one native framed viewer and embedded video surface. The normal Windows
+caption action, Escape, Alt+Enter, and the tray command use the same
+acknowledged fullscreen state. Photos remains at neutral scale with explicit
+aspect-ratio containment and no crop rectangle; retaining the portrait outer
+window can therefore show letterboxing until a trustworthy inner-photo
+rectangle exists.
+
+Caption Close keeps the active stream alive by minimizing its viewer. The
+taskbar restores it normally; if the optional taskbar entry is disabled, use
+**Show stream window** in the AeroMirror tray menu.
+
+The verified update flow now treats **Download and install** as the one
+application confirmation. It resolves existing unsaved settings before the
+download and locks update-page navigation during the installer handoff. A
+missing exact Bonjour firewall prerequisite is shown on the main network card
+and proceeds to one Windows UAC prompt. That assessment is refreshed on
+receiver start/restart/manual discovery refresh and after a short cache
+lifetime; unavailable or incorrectly installed Bonjour is reported without an
+automatic bundled service install.
+
+Native runtime paths now use the wide Windows environment API, so Cyrillic
+Windows-profile and installation paths do not corrupt GStreamer discovery.
+Fresh-registry runtime self-tests pass through both ASCII and Cyrillic paths;
+Setup separately checks that the reviewed core loads against its pinned
+upstream runtime before it commits an installation.
+
+Managed, native, corresponding-source, package, and non-installing Setup gates
+pass. This version is prepared for the normal updater-visible review channel;
+the physical Windows/iPhone matrix remains pending in the
+[0.12.20 test plan](docs/releases/0.12.20/TEST_PLAN.md) and
+[release notes](docs/releases/0.12.20/RELEASE_NOTES.md). The public `v0.12.19`
+tag and its assets remain immutable.
 
 ## Latest public 0.12.19 review release
 
@@ -394,12 +432,12 @@ not mirror or silently fall back to another runtime.
 AeroMirror Setup extracts the pinned portable Qt/GStreamer application
 runtime, but installs no system-wide .NET/VC++ redistributable, driver, or
 framework prerequisite; a full Windows reboot is not an expected normal
-completion step. Bonjour is a separate machine-wide discovery service and may
-prompt for elevation when it is absent. One Windows 10 first-install report
-worked only after reboot, but the cause was not retained; a stopped or stale
-Bonjour lifecycle is only a hypothesis. The 0.12.9 release does not mutate
-that service. Diagnose a repeat on a clean Windows 10 VM before rebooting, as
-described in
+completion step. Bonjour is a separate machine-wide discovery service. The
+0.12.20 headless core reports when it is absent but does not offer to register
+the bundled per-user responder as a system service. One Windows 10 first-
+install report worked only after reboot, but the cause was not retained; a
+stopped or stale Bonjour lifecycle is only a hypothesis. Diagnose a repeat on
+a clean Windows 10 VM before rebooting, as described in
 [troubleshooting](docs/TROUBLESHOOTING.md).
 
 The installer is currently unsigned, so Windows SmartScreen may display an
@@ -423,8 +461,9 @@ deleting or cleaning its folder deletes the program.
 1. Extract the whole ZIP to a normal folder. Do not run it from inside the ZIP.
 2. Start `AeroMirror.exe`.
 3. Allow network access if Windows Firewall asks.
-4. If Bonjour is missing, the bundled core may ask for administrator
-   permission to install its mDNS service.
+4. If Bonjour is missing, install it from a trusted system/vendor source; the
+   0.12.20 headless core reports the prerequisite and does not register its
+   bundled per-user responder as a system service.
 5. Put the iPhone and PC on the same local network.
 6. On iPhone, open **Control Center → Screen Mirroring** and select the PC name.
 7. Use the tray icon to change settings or stop the receiver.

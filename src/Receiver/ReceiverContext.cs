@@ -135,6 +135,8 @@ namespace AirPlayReceiverMvp
         private int appliedPresentationScalePermille =
             RendererPresentationPolicy.NormalScalePermille;
         private bool rendererFullscreenActive;
+        private int nativeFullscreenState;
+        private long nativeFullscreenGeneration;
         private bool rendererPolicyShowInTaskbar;
         private IntPtr rendererMoveSizeWindow = IntPtr.Zero;
         private Size rendererMoveSizeStartClientSize = Size.Empty;
@@ -221,6 +223,10 @@ namespace AirPlayReceiverMvp
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(autoStartItem);
             menu.Items.Add(topMostItem);
+            menu.Items.Add("Показать окно трансляции", null, delegate
+            {
+                ShowStreamWindow(true);
+            });
             menu.Items.Add("Восстановить пропорции окна", null, delegate { FitStreamWindow(true); });
             menu.Items.Add("Полный экран (Esc — выйти)", null, delegate
             {

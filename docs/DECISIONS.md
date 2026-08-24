@@ -178,12 +178,14 @@ helper in place. Those require physical evidence or separate architecture.
 
 **Status:** accepted
 
-The application asks for update confirmation before launching the verified
-Setup asset. After that confirmation, Setup must not ask again for Start menu,
-desktop, or post-install launch choices. A manually opened newer Setup and a
-same-version reinstall follow the same unattended path when an installed copy
-is detected. Setup preserves the shortcut state already chosen by the user and
-relaunches AeroMirror after successful replacement.
+The explicit **Download and install** action is the application's update
+confirmation. After the exact Setup asset is downloaded and digest-verified,
+AeroMirror launches it directly instead of asking the same question again.
+Setup must not ask again for Start menu, desktop, or post-install launch
+choices. A manually opened newer Setup and a same-version reinstall follow the
+same unattended path when an installed copy is detected. Setup preserves the
+shortcut state already chosen by the user and relaunches AeroMirror after
+successful replacement.
 
 A clean first install remains interactive because no prior shortcut preference
 exists. A newer installed version is excluded from the unattended path so a
@@ -202,10 +204,22 @@ scale neutral and contains the complete frame unless a future versioned native
 contract supplies trustworthy content bounds. Letterboxing is preferable to
 silently losing real image pixels.
 
-Fullscreen remains a native renderer operation. The shell may add a
-non-activating visible control and an event-driven foreground Escape path, but
-it must not subclass the foreign window, consume the key, or infer fullscreen
-solely from a managed toggle flag.
+Fullscreen and the visible video window have one native owner. The GStreamer
+surface is embedded into that viewer without a crop rectangle and keeps
+aspect-ratio containment. The standard caption fullscreen control, Escape,
+Alt+Enter, and the shell's tray action all use one idempotent setter. The shell
+must not create a second top-level overlay or keyboard hook and must use the
+native acknowledged state instead of inferring the next toggle from delayed
+window geometry.
+
+Caption Close is a minimize-equivalent while a renderer generation is active.
+It must not clear native requested visibility: doing so would let a repeated
+codec-selection SHOW immediately undo the user's dismissal. A minimized HWND
+remains discoverable by the shell even when the taskbar setting gives it
+`WS_EX_TOOLWINDOW`; the explicit tray restore action uses
+`ShowWindow(SW_RESTORE)` to return it. Only renderer stop/destroy clears
+requested visibility and hides the host, so the next session can SHOW it once
+without retaining stale state.
 
 ## D-015 — Keep Bonjour firewall repair exact, explicit, and separate from service ownership
 
@@ -213,11 +227,19 @@ solely from a managed toggle flag.
 
 Bonjour is an external machine-wide service. AeroMirror may diagnose whether
 its exact `mDNSResponder.exe` lacks a narrowly scoped inbound Windows Firewall
-rule, but ordinary startup must remain read-only. Repair requires explicit
-user confirmation and Windows administrator approval and is limited to the
-exact executable, Private profile, UDP local port 5353, remote `LocalSubnet`,
-and no edge traversal. Public, TCP, arbitrary-address, broad application, and
-automatic Bonjour-service changes are prohibited.
+rule, but ordinary startup must remain read-only. Clicking the visible repair
+action on the network card is the explicit user decision; no duplicate
+application confirmation follows. Windows administrator approval is still
+required. Repair is limited to the exact executable, Private profile, UDP
+local port 5353, remote `LocalSubnet`, and no edge traversal. Public, TCP,
+arbitrary-address, broad application, and automatic Bonjour-service changes
+are prohibited.
+
+If Bonjour is absent or its service path cannot be validated, the application
+shows that prerequisite instead of offering the firewall action. The native
+core must exit with a stable prerequisite code in headless mode; it must not
+register a bundled executable from the per-user installation directory as a
+machine-wide service.
 
 Version 0.12.19 does not wire removal of this external rule into uninstall and
 must not promise automatic cleanup.

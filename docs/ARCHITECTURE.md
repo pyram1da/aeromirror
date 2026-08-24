@@ -270,21 +270,25 @@ a cached browse result. Bonjour remains an external machine-wide service. The
 receiver observes its state but does not start, stop, repair, uninstall, or
 otherwise mutate that service.
 
-Version 0.12.19 separately assesses one exact external Windows Firewall
+Version 0.12.20 assesses one exact external Windows Firewall
 condition: an enabled inbound Allow rule for the validated Bonjour
 `mDNSResponder.exe`, Private profile, UDP 5353, remote `LocalSubnet`, with edge
 traversal disabled. AeroMirror changes nothing automatically. Only the explicit
-**Исправить доступ Bonjour…** action, user confirmation, and Windows UAC may add
-that narrow rule. It does not repair or reconfigure the Bonjour service, open
-Public/TCP/Any traffic, or provide uninstall cleanup for the external rule.
+main-card action and Windows UAC may add that narrow rule; the click itself is
+the application-level confirmation. It does not repair or reconfigure the
+Bonjour service, open Public/TCP/Any traffic, or provide uninstall cleanup for
+the external rule.
 
-Version 0.12.19 separately inspects the Windows Firewall boundary around that
-external service. A background read-only assessment resolves the strict
+The background read-only assessment resolves the strict
 `mDNSResponder.exe` service path and accepts only an enabled inbound Allow rule
 for that exact executable, the Private profile, UDP local port 5353, remote
 `LocalSubnet`, and no edge traversal. Ordinary startup never changes the
-firewall. If the exact rule is missing, a visible tray action explains the
-scope, asks the user, and invokes one UAC-gated system `netsh.exe` command.
+firewall. If the exact rule is missing, the main network card explains the
+scope and invokes one UAC-gated system `netsh.exe` command when clicked.
+Success updates the card and refreshes discovery without another modal. If
+Bonjour itself is missing, the card reports that prerequisite and offers no
+firewall action; the headless core emits a stable marker and exits without
+interactive dialogs or installing its bundled responder as a system service.
 Public, TCP, arbitrary-port/address, Bonjour-service, and automatic-startup
 mutation remain outside this path. Local rule presence is still not proof of
 current iPhone browse visibility.
@@ -449,35 +453,37 @@ content rectangle. No pixel classification or generic crop inference is used.
 
 Presentation commands share the redirected standard-input control channel with
 discovery commands. The shell serializes writes and revalidates current process
-identity; the wrapper accepts exact fullscreen/scale grammar; libuxplay attaches
-the work to its active GLib owner and takes a retained selected-sink reference
-before changing D3D11 properties. The control is deliberately not a general
-window-input injection path.
+identity. Version 0.12.20 accepts only exact
+`video-fullscreen-set state=0|1` and bounded scale grammar. Libuxplay marshals
+work to its GLib owner; Qt viewer work is queued to the GUI thread.
 
-Fullscreen is detected from the actual renderer HWND rather than from only a
-managed toggle flag, because Alt+Enter can change native state independently.
-The shell requires a monitor-sized outer rectangle and a matching borderless
-client area. While that state is active, supervision skips policy mutation,
-saved-placement restore/write, automatic/manual fitting, and continuity-bounds
-  capture. Version 0.12.19 installs a low-level keyboard hook only while actual
-  fullscreen exists; capture additionally requires that renderer PID/root to
-  own foreground. The callback queues one Escape edge and immediately
-  continues the Windows hook chain; the WinForms
-supervision pass sends the native toggle and removes the hook after exit.
+The native wrapper owns one framed viewer and one child video-surface HWND.
+The selected GStreamer sink binds through `GstVideoOverlay`, explicitly keeps
+`force-aspect-ratio` enabled when supported, and never sets a crop/render
+rectangle. The normal viewer remains movable, resizable, and minimizable with
+standard Windows chrome. Caption Close is deliberately a minimize-equivalent:
+it first leaves fullscreen and acknowledges normal state, then minimizes
+without hiding the HWND or clearing the active renderer generation. This keeps
+the current stream alive and prevents a repeated codec-selection callback from
+stealing focus by reopening a window the user dismissed.
 
-A small shell-owned, non-activating tool window provides the visible
-fullscreen control without subclassing or injecting into the native renderer.
-In a framed window it sits to the left of the three standard caption buttons;
-in fullscreen it remains a top-right exit affordance. It is hidden when the
-  renderer is absent, invisible, minimized, or another application owns the
-  foreground, including when the renderer policy is always-on-top. If a media transition
-  leaves the same renderer non-monitor-sized but still borderless immediately
-  after actual fullscreen, the shell keeps the explicit exit control available.
-  It does not send an automatic second toggle because that operation is not
-  idempotent and could re-enter fullscreen. A future
-versioned IPC contract should replace stdout/window heuristics and expose
-explicit stream, orientation, fullscreen, and content-layout events before any
-automatic crop or rotation policy is considered.
+A minimized top-level HWND remains `WS_VISIBLE`. The shell therefore still
+finds it when `ShowStreamInTaskbar=false` changes only its extended style to
+`WS_EX_TOOLWINDOW`; the explicit **Show stream window** tray action restores it
+with `ShowWindow(SW_RESTORE)` and activates it. Tray fullscreen remains a
+separate state-set path. Renderer stop/destroy, not Caption Close, owns the
+`visible=1 -> 0` compare-and-swap and final HIDE. The next renderer session then
+owns the next SHOW. The maximize caption action means fullscreen. Escape and
+Alt+Enter are handled by that same native viewer.
+
+Every caption, Escape, Alt+Enter, or shell request reaches one idempotent native
+setter. The core reports exact requested/actual state, result, generation, and
+source; the shell uses the last acknowledged state for its tray action. This
+removes the delayed top-level overlay and process-wide keyboard hook. Managed
+geometry detection remains a supervision guard while fullscreen is active, not
+the command's source of truth. A future versioned IPC contract should extend
+the same ownership model to explicit stream, orientation, and content-layout
+events before any automatic crop or rotation policy is considered.
 
 ## Renderer pipeline selection
 

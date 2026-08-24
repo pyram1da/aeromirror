@@ -1,6 +1,6 @@
 # Third-party notices
 
-This MVP combines a Windows launcher/settings shell with a minimally patched
+This MVP combines a Windows launcher/settings shell with a patched
 build of `leapbtw/uxplay-windows`. The patch adds a headless mode, direct
 argument passing, stable native `argv` storage, and a non-streaming loader
 compatibility check. AeroMirror 0.11 also adds a diagnostic video-size marker
@@ -66,6 +66,19 @@ canvas; no mirrored pixels are inspected, no media bytes are rewritten, and no
 general rotation heuristic is introduced. The pinned upstream revisions,
 redistributed runtime, and license scope remain unchanged.
 
+The local 0.12.20 extension replaces the sink-owned fullscreen path with one
+Qt-owned top-level viewer and one child video surface embedded through
+`GstVideoOverlay`. Caption maximize, Escape, Alt+Enter, lifecycle events, and
+the exact shell state setter share one native GUI-thread fullscreen owner. The
+selected sink explicitly contains the full frame when supported; AeroMirror
+does not request a crop/render rectangle and resets legacy scale to 100%.
+Headless startup reports an absent Bonjour prerequisite with a stable marker
+and exit code 20 instead of opening the upstream install dialog or registering
+the bundled responder as a system service. The new private
+`aeromirror_host_protocol.h` is included in corresponding source. These are
+local GPL-covered changes; upstream revisions, redistributed runtime,
+dependencies, and third-party license scope remain unchanged.
+
 The AeroMirror 0.11 network review installer does **not** mirror the full
 third-party runtime. During installation it downloads this unchanged upstream
 asset directly from GitHub and verifies it before extraction:
@@ -77,17 +90,15 @@ asset directly from GitHub and verifies it before extraction:
 - Exact upstream source:
   `https://github.com/leapbtw/uxplay-windows/tree/8cf3424b438424bc99a89155bd29a789f48a43c0`
 
-The AeroMirror 0.12.9 public release set pairs Setup with the exact AeroMirror
-and patched native corresponding source:
+Each published AeroMirror review release pairs Setup with that version's exact
+AeroMirror and patched native corresponding-source archives. The current local
+0.12.20 candidate would use `AeroMirror-source-0.12.20.zip` and
+`AeroMirror-native-source-0.12.20.zip`; neither is public yet.
 
-- `AeroMirror-source-0.12.9.zip`
-- `AeroMirror-native-source-0.12.9.zip`
-
-Published `v0.12.7` assets remain immutable, and the untagged 0.12.8 candidate
-produced no public assets. Every later release must use its own versioned
-filenames rather than replace an earlier asset. The native archive is a
-prepared source tree with both AeroMirror patches included separately and
-already applied.
+All previously published assets remain immutable. Every later release must use
+its own versioned filenames rather than replace an earlier asset. The native
+archive is a prepared source tree with both AeroMirror patches included
+separately and already applied.
 Its `source-provenance.json` records the reviewed patch, modified-source,
 Bonjour-header, `dnssd.def`, and resulting-core hashes. The included build
 script validates those inputs and generates the x64 `dnssd.lib` import library

@@ -36,13 +36,16 @@ current setup:
 5. removes the backup only after success;
 6. restores the previous directory if installation fails.
 
-When AeroMirror launches Setup with `/update`, Setup reads the existing Start
-menu and desktop shortcuts before replacing files and runs without an option
-form. Opening a newer Setup over an installed copy or reinstalling the same
-version uses the same unattended path. Only the shortcuts that existed are
-recreated, legacy names are migrated to the current AeroMirror name, and the
-installed shell is launched after success. A clean first install retains the
-interactive options. An older Setup never silently downgrades a newer install.
+The **Download and install** click is the application's one confirmation. After
+the exact asset name and SHA-256 digest are verified, AeroMirror launches Setup
+with `/update` directly instead of asking a second Yes/No. Setup reads the
+existing Start menu and desktop shortcuts before replacing files and runs
+without an option form. Opening a newer Setup over an installed copy or
+reinstalling the same version uses the same unattended path. Only the shortcuts
+that existed are recreated, legacy names are migrated to the current
+AeroMirror name, and the installed shell is launched after success. A clean
+first install retains the interactive options. An older Setup never silently
+downgrades a newer install.
 
 User settings, logs, the persistent receiver key, and trusted-iPhone register
 are stored separately under `%LOCALAPPDATA%\AirPlayReceiverMvp` and survive
@@ -97,7 +100,14 @@ corresponding-source validation before publication, and publication still
 requires explicit user authorization. A normal Release may be labelled as a
 review candidate so installed clients can participate in physical testing,
 but it must not be described as accepted until its versioned physical plan
-passes. The 0.12.19 gallery/fullscreen/Bonjour-prerequisite review build is the
+passes. Publication of the 0.12.20 native-viewer/setup review candidate is
+explicitly authorized. Its managed, native, corresponding-source, package, and
+non-installing Setup gates pass locally; exact-tag/public-download gates and
+the physical matrix remain pending in
+[`releases/0.12.20/TEST_PLAN.md`](releases/0.12.20/TEST_PLAN.md). Public
+`v0.12.19` remains immutable and updater-visible until the authorized
+publication run completes. The 0.12.19 gallery/fullscreen/Bonjour-prerequisite
+review build is the
 immutable normal latest Release. Annotated tag `v0.12.19`, GitHub Release
 `375664260`,
 the exact four-asset set, checksums, API digests, canonical/legacy latest

@@ -265,6 +265,13 @@ missing Private/UDP 5353/LocalSubnet rule for the validated
 and approve Windows UAC. This does not change Bonjour service ownership and is
 not evidence that an iPhone currently sees the receiver.
 
+The local 0.12.20 candidate makes that repair visible on the main network card.
+Clicking the scoped action is the application confirmation and proceeds to one
+Windows UAC prompt; success refreshes discovery without a success modal. An
+absent Bonjour service exposes only prerequisite guidance. The headless native
+core no longer offers to register its bundled per-user responder as a machine-
+wide service.
+
 - [ ] Add a versioned local IPC contract, preferably JSON Lines over a
   per-user Windows named pipe.
 - [ ] Emit explicit core states such as `starting`, `mdnsReady`, `ready`,
@@ -331,6 +338,8 @@ not evidence that an iPhone currently sees the receiver.
 - [x] Skip the shortcut/launch option form for updates and same-version
   reinstalls, preserve the installed shortcut state, relaunch after success,
   and retain an explicit downgrade boundary.
+- [x] Treat **Download and install** as the sole application confirmation and
+  launch the exact digest-verified Setup without a second Yes/No.
 - [ ] Run a real installed update and same-version reinstall, retaining Setup
   logs and verifying shortcut absence/presence, settings, identity, autostart,
   relaunch, and rollback on a controlled failure.
@@ -580,6 +589,20 @@ assets, API digests, checksums, canonical/legacy latest routes, and fresh
 public download equality pass. Installed behavior and the physical rows above
 remain pending; published tag/assets are immutable.
 
+The local 0.12.20 candidate removes the shell-owned overlay and global keyboard
+hook. One native Qt viewer owns the framed window and child GStreamer surface;
+caption fullscreen, Escape, Alt+Enter, and the shell's exact state request use
+one GUI-thread setter with explicit acknowledgements. The sink keeps aspect-
+ratio containment, neutral scale, and no crop/render rectangle. This preserves
+the portrait outer-window request but can produce substantial letterboxing for
+the full `3840x2160` Photos canvas. Caption Close intentionally minimizes the
+active viewer rather than clearing its renderer-generation visibility; the
+explicit tray restore action returns that visible minimized HWND even when the
+taskbar option uses `WS_EX_TOOLWINDOW`. Physical size, edge, minimize/close,
+and both taskbar-policy paths remain pending; content-aware enlargement still
+requires trustworthy bounds. Two clean native builds, extracted corresponding-
+source rebuild, package, and non-installing Setup gates pass.
+
 - [ ] Log source dimensions, pixel aspect ratio, rotation metadata, and
   renderer dimensions for orientation transitions.
 - [x] Suppress a different Photos/media canvas ratio after a device-frame
@@ -620,6 +643,9 @@ remain pending; published tag/assets are immutable.
   trustworthy content rectangle exists.
 - [x] Add a shell-owned non-activating fullscreen control and event-driven
   foreground Escape path with bounded hook lifetime and unchanged Alt+Enter.
+- [x] Replace that interim overlay/hook with one native framed viewer, embedded
+  video surface, standard caption fullscreen action, deterministic Escape, and
+  an acknowledged idempotent state setter shared with Alt+Enter and tray.
 - [ ] Expose a trustworthy content rectangle/crop signal or validate a
   conservative pixel-analysis design for Photos canvases that contain their
   own encoded black bars; do not crop real dark content by guesswork.
@@ -637,6 +663,10 @@ remain pending; published tag/assets are immutable.
   portrait/landscape transitions on displays with different DPI scaling,
   including repeated tray/Alt+Enter/Esc exits and entry/exit from Photos while
   fullscreen.
+- [ ] With **Show stream in taskbar** both enabled and disabled, press Caption
+  Close during normal and fullscreen playback, verify that the stream remains
+  alive, restore it through the taskbar or **Show stream window** as applicable,
+  then confirm stop hides it and the next session shows exactly once.
 
 Acceptance target: photos and videos keep their correct proportions and remain
 legible while the viewer changes orientation only when the incoming stream

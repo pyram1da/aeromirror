@@ -230,7 +230,6 @@ namespace AirPlayReceiverMvp
                 Interlocked.Exchange(ref restartStopCompleted, 0);
             }
             StopCoreInternal("application exit", true, true);
-            ResetRendererControls(true);
             Log("=== AeroMirror session ended ===");
             FlushLog(1000);
             tray.Visible = false;

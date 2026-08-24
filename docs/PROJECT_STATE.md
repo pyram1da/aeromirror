@@ -1,10 +1,88 @@
 # Project state
 
-Last updated: 2026-08-24
+Last updated: 2026-08-25
 
 This is the single current-state handoff for AeroMirror. Keep it concise and
 update it whenever release status, accepted tests, blockers, or the immediate
 next step changes.
+
+## Authorized review release candidate — 0.12.20
+
+- Trigger: physical testing of public 0.12.19 confirmed that its separate
+  shell-owned fullscreen control visibly lagged during window movement,
+  appeared inconsistently, and did not make Escape dependable. The same run
+  described the portrait Photos presentation as cropped and the update/repair
+  confirmation flow as too repetitive.
+- Viewer ownership: the separate top-level overlay and managed keyboard hook
+  are removed. The native Qt wrapper owns one framed viewer and child video
+  surface. Caption fullscreen, Escape, Alt+Enter, and exact shell requests use
+  one idempotent GUI-thread setter and emit requested/actual/result/generation/
+  source acknowledgements. Caption Close is a minimize-equivalent for the
+  active renderer generation; the minimized HWND remains discoverable by the
+  explicit tray restore action even when taskbar policy uses
+  `WS_EX_TOOLWINDOW`. Fullscreen entry from minimized captures Qt's current
+  normal geometry, and a delayed fullscreen request cannot show a lifecycle-
+  hidden empty host. Stop/destroy alone clears requested visibility and hides
+  the host before the next session.
+- Photos boundary: the exact `3840x2160` canvas remains non-authoritative and
+  neutral scale. The native sink explicitly keeps aspect-ratio containment and
+  receives no render/crop rectangle. Keeping a portrait outer window can
+  produce substantial letterboxing; a large guaranteed non-cropped portrait
+  photo still requires trustworthy content bounds that AirPlay has not exposed.
+- Latest user annotation shows the symptom more precisely: a portrait outer
+  viewer contains a horizontal inner Photos region, and phone-side zoom remains
+  constrained to that region. This is useful physical evidence, but the exact
+  public 0.12.20 Setup still needs to be retested before any Photos acceptance
+  claim.
+- Update UX: the user's **Download and install** click is the sole application
+  confirmation. Existing unsaved settings are resolved before the download,
+  update-page navigation is locked during handoff, and exact-name/digest
+  verification remains, but no second Yes/No appears before the existing
+  unattended Setup transaction.
+- Bonjour UX/security: a missing exact firewall rule appears on the main
+  network card and proceeds directly to one Windows UAC prompt. Success
+  refreshes discovery without a success modal. The assessment expires after
+  two minutes and is refreshed on receiver start, restart, and manual discovery
+  refresh. Unavailable or incorrectly installed Bonjour is reported as a
+  prerequisite; the headless core does not show install dialogs or register a
+  bundled per-user executable as a system service.
+- Unicode runtime: all nine GStreamer/scanner/GIO/font/PATH values are written
+  with `SetEnvironmentVariableW`; rejection emits one stable marker and exits
+  instead of starting a partial runtime. The same staged bytes pass
+  `--self-test` with separate fresh registries from both ASCII and Cyrillic
+  application paths. Setup runs `--loader-test` before committing installation;
+  the broader self-test is scoped to the staged bundle rather than the thinner
+  upstream-runtime layout assembled by the network installer.
+- Version: shell/Setup source targets `0.12.20.0`, Setup comparison 0.12.20,
+  and exactly five script defaults target 0.12.20.
+- Automated status: managed build, complete resilience, focused Bonjour,
+  native-host/core/lifecycle contracts, and `git diff --check` pass. Two clean
+  CRLF native builds complete all 57 targets and reproduce core SHA-256
+  `4336B9DBFCDE87123EC4796FE43FAA4F1952E27224932B3DD5E8FEAFBAD41832`.
+  Runtime staging inspects 199 binaries and copies 148 DLLs; its full
+  self-test passes, while Setup `/verify-runtime` checks loader compatibility.
+  The 148-entry corresponding-source ZIP extracts without Git
+  metadata and rebuilds 57/57 to the same core hash. The final review payload,
+  x64 Setup, embedded equality, shortcut-selection, and update-lifecycle gates
+  pass locally.
+- Discovery log review: the installed public build kept PID 1136 and AirPlay
+  port 62004 while idle renewals 6 through 11 completed `READY` from 17:10
+  through 18:50 on 2026-08-24, each followed by `AEROMIRROR_DNSSD_READY`, with
+  no error/fatal/crash line in that interval. This proves local renewal
+  completion, not that the iPhone received the multicast advertisements.
+- Physical status: Photos edges/letterboxing, caption/Escape/Alt+Enter/tray,
+  Caption Close/minimize with both taskbar policies, DPI/multi-monitor restore,
+  installed update/reinstall, UAC decline/approval, and long-idle iPhone
+  visibility remain PENDING in
+  `docs/releases/0.12.20/TEST_PLAN.md`.
+- Publication: explicitly authorized. Exact-tag packaging, the normal GitHub
+  Release, latest-route verification, and fresh public downloads remain
+  PENDING; immutable public `v0.12.19` remains updater-visible until that run
+  completes.
+- Immediate next step: create the reviewed commit and immutable annotated tag,
+  run the clean exact-tag release pipeline, publish the four-asset normal review
+  Release, and then test that public Setup against the Photos/fullscreen/update
+  matrix plus long-idle iPhone browse checks.
 
 ## Latest public review release — 0.12.19
 
