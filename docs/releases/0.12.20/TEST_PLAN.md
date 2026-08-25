@@ -23,12 +23,15 @@ keeps automated evidence separate from real Windows/iPhone acceptance.
 | Installed update/reinstall | PENDING | One app decision, no shortcut form, preserved shortcuts/settings, relaunch |
 | Bonjour UAC flow | PENDING | Visible card, one UAC, exact rule, decline/failure/success, no bundled service install |
 | Long-idle discovery | PENDING | Repeated first-open iPhone browse checks across idle/unlock/sleep/network change |
-| Tag and publication | PENDING | Authorization is recorded; exact tag, four assets, latest routes, API digests, and fresh downloads still require verification |
+| Tag and publication | PASS | Immutable annotated tag, exact four assets, latest routes, API digests, and fresh public downloads verified |
 
 The reproducible native executable is 1,178,345 bytes with SHA-256
 `4336B9DBFCDE87123EC4796FE43FAA4F1952E27224932B3DD5E8FEAFBAD41832`.
-The current local Setup identity must be taken from the final packaging run;
-no local artifact is a public release asset yet.
+The public x64 Setup is 1,431,040 bytes with SHA-256
+`A4071C3B875484A154EFBE9EE11CB23CB1EE2C21A0840060A8ADDB97F923379D`
+and file version `0.12.20.0`. Publication evidence is recorded in
+[`BUILD_REPORT.md`](BUILD_REPORT.md); these release gates do not change the
+physical PENDING rows above.
 
 ## Automated acceptance
 

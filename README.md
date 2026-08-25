@@ -164,9 +164,9 @@ officially supports Windows 10 1809 x64 and newer. Windows 10 is outside Microso
 but remains an explicit application target. ARM64 and 32-bit packages are not
 included.
 
-## 0.12.20 review release
+## Latest public 0.12.20 review release
 
-The current source replaces the public 0.12.19 floating fullscreen overlay
+The public release replaces the 0.12.19 floating fullscreen overlay
 with one native framed viewer and embedded video surface. The normal Windows
 caption action, Escape, Alt+Enter, and the tray command use the same
 acknowledged fullscreen state. Photos remains at neutral scale with explicit
@@ -194,13 +194,16 @@ Setup separately checks that the reviewed core loads against its pinned
 upstream runtime before it commits an installation.
 
 Managed, native, corresponding-source, package, and non-installing Setup gates
-pass. This version is prepared for the normal updater-visible review channel;
-the physical Windows/iPhone matrix remains pending in the
+pass. Annotated tag `v0.12.20` resolves to commit
+`288b8976d413861ab77bf1721e20f047e0480952`; normal GitHub Release
+`376224221` is the updater-visible latest release with exactly four verified
+assets. The physical Windows/iPhone matrix remains pending in the
 [0.12.20 test plan](docs/releases/0.12.20/TEST_PLAN.md) and
-[release notes](docs/releases/0.12.20/RELEASE_NOTES.md). The public `v0.12.19`
-tag and its assets remain immutable.
+[release notes](docs/releases/0.12.20/RELEASE_NOTES.md); exact public identities
+are in the [build report](docs/releases/0.12.20/BUILD_REPORT.md). The public
+`v0.12.19` tag and its assets remain immutable.
 
-## Latest public 0.12.19 review release
+## Previous public 0.12.19 review release
 
 The public release keeps every pixel of the encoded Photos frame, adds a
 shell-owned fullscreen/exit control for both framed and actual fullscreen
@@ -211,10 +214,10 @@ service or remove that external rule during uninstall.
 
 Annotated tag `v0.12.19` resolves to commit
 `997e29324ec092ad46ae83a00fa6d08525c1b863`. Normal GitHub Release
-`375664260` is the updater-visible latest release with exactly four verified
-assets. Automated, exact-tag, Setup, API digest, latest-route, and fresh public
-download gates pass; physical Photos, fullscreen, DPI, firewall, and long-idle
-iPhone rows remain PENDING.
+`375664260` was the previous updater-visible review release with exactly four
+verified assets. Its automated, exact-tag, Setup, API digest, latest-route, and
+fresh public-download gates passed; physical Photos, fullscreen, DPI, firewall,
+and long-idle iPhone rows remain historical PENDING evidence.
 
 See the [0.12.19 release notes](docs/releases/0.12.19/RELEASE_NOTES.md) and
 [test plan](docs/releases/0.12.19/TEST_PLAN.md); exact public identities are in

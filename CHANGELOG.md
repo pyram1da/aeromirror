@@ -48,8 +48,10 @@
 - Physical Photos containment, native titlebar/Escape/DPI behavior, Caption
   Close/minimize under both taskbar policies, installed update, UAC repair, and
   long-idle iPhone visibility remain PENDING.
-- Exact-tag packaging and public-download verification are the remaining
-  release gates. The immutable public `v0.12.19` assets are not replaced.
+- Annotated tag `v0.12.20` and normal GitHub Release `376224221` are public
+  with exactly four assets. Exact-tag packaging, API digests, both latest
+  routes, and fresh public-download equality pass; the immutable `v0.12.19`
+  assets were not replaced.
 
 ## 0.12.19 — non-cropping gallery and accessible fullscreen (review release)
 

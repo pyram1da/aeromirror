@@ -6,7 +6,7 @@ This is the single current-state handoff for AeroMirror. Keep it concise and
 update it whenever release status, accepted tests, blockers, or the immediate
 next step changes.
 
-## Authorized review release candidate — 0.12.20
+## Latest public review release — 0.12.20
 
 - Trigger: physical testing of public 0.12.19 confirmed that its separate
   shell-owned fullscreen control visibly lagged during window movement,
@@ -64,7 +64,9 @@ next step changes.
   The 148-entry corresponding-source ZIP extracts without Git
   metadata and rebuilds 57/57 to the same core hash. The final review payload,
   x64 Setup, embedded equality, shortcut-selection, and update-lifecycle gates
-  pass locally.
+  pass. Exact-tag Setup remains x64 `0.12.20.0`; the final corresponding-source
+  archive also rebuilds 57/57 from an extracted no-Git tree to the same core
+  hash.
 - Discovery log review: the installed public build kept PID 1136 and AirPlay
   port 62004 while idle renewals 6 through 11 completed `READY` from 17:10
   through 18:50 on 2026-08-24, each followed by `AEROMIRROR_DNSSD_READY`, with
@@ -75,16 +77,23 @@ next step changes.
   installed update/reinstall, UAC decline/approval, and long-idle iPhone
   visibility remain PENDING in
   `docs/releases/0.12.20/TEST_PLAN.md`.
-- Publication: explicitly authorized. Exact-tag packaging, the normal GitHub
-  Release, latest-route verification, and fresh public downloads remain
-  PENDING; immutable public `v0.12.19` remains updater-visible until that run
-  completes.
-- Immediate next step: create the reviewed commit and immutable annotated tag,
-  run the clean exact-tag release pipeline, publish the four-asset normal review
-  Release, and then test that public Setup against the Photos/fullscreen/update
-  matrix plus long-idle iPhone browse checks.
+- Post-freeze observation: with AirPlay still active, the phone was locked and
+  the viewer was then closed; later connection-loss/recovery events showed the
+  window again several times. This has not yet been reproduced against the
+  exact public Setup. A future correction should evaluate a per-session
+  user-dismiss latch that only a new session or explicit **Show stream window**
+  action clears; no such change is included in the immutable 0.12.20 tag.
+- Publication: annotated tag `v0.12.20` resolves to commit
+  `288b8976d413861ab77bf1721e20f047e0480952`. Normal GitHub Release
+  `376224221` is `draft=false`, `prerelease=false`, and updater-visible latest.
+  Exactly four assets, `SHA256SUMS.txt`, GitHub API digests, canonical/legacy
+  latest routes, and fresh public re-download equality pass. Exact evidence is
+  in `docs/releases/0.12.20/BUILD_REPORT.md`; immutable public `v0.12.19`
+  remains unchanged.
+- Immediate next step: install the public Setup and run the
+  Photos/fullscreen/close/update matrix plus long-idle iPhone browse checks.
 
-## Latest public review release — 0.12.19
+## Previous public review release — 0.12.19
 
 - Trigger: physical testing on another PC reports that 0.12.18 can crop the
   Photos image, a normal Escape press can be missed, and fullscreen has no
