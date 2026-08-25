@@ -272,6 +272,29 @@ absent Bonjour service exposes only prerequisite guidance. The headless native
 core no longer offers to register its bundled per-user responder as a machine-
 wide service.
 
+The first public 0.12.20 in-place update on 2026-08-25 completed successfully
+and relaunched the exact released shell, but the receiver was not visible on the
+iPhone. Read-only evidence isolates an external prerequisite failure rather
+than an updater failure: `Bonjour Service` had already crashed, remained
+`Stopped` with Windows exit code 1067, and every post-update DNS-SD registration
+failed with `error=-65563`. The TCP listener and BLE helper were locally ready,
+but they did not make the AirPlay receiver browsable without Bonjour.
+
+- [ ] On both post-update relaunch and ordinary startup, reassess the external
+  Bonjour service before treating listener/BLE readiness as a usable receiver.
+  Surface the blocking stopped/crashed state immediately on the main card.
+- [ ] When Bonjour is known to be stopped, avoid presenting repeated native
+  DNS-SD retries or core restarts as recovery. Keep the listener safe, retain
+  bounded diagnostics, and wait for an explicit prerequisite-state change.
+- [ ] Reproduce and diagnose the observed `mDNSResponder.exe` `BEX64`/
+  `c0000409` crash before choosing a recovery action. Design one explicit,
+  UAC-gated user path to restore or repair the external prerequisite without
+  registering AeroMirror's bundled per-user responder as a system service.
+- [ ] Physically verify the recovery path after an installed update: once
+  Bonjour is healthy, paired DNS-SD reaches `AEROMIRROR_DNSSD_READY` and the
+  receiver appears on the iPhone without requiring the user to discover the
+  hidden service dependency manually.
+
 - [ ] Add a versioned local IPC contract, preferably JSON Lines over a
   per-user Windows named pipe.
 - [ ] Emit explicit core states such as `starting`, `mdnsReady`, `ready`,

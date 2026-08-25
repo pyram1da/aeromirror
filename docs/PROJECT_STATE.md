@@ -72,6 +72,15 @@ next step changes.
   through 18:50 on 2026-08-24, each followed by `AEROMIRROR_DNSSD_READY`, with
   no error/fatal/crash line in that interval. This proves local renewal
   completion, not that the iPhone received the multicast advertisements.
+- Current post-update discovery blocker: the public 0.12.20 in-place update
+  completed successfully at 11:51 on 2026-08-25 and relaunched the exact
+  `0.12.20.0` shell, but `Bonjour Service` had already crashed and remained
+  `Stopped` with Windows exit code 1067. The new core opened its TCP listener
+  and the BLE helper reported ready, while every DNS-SD attempt returned
+  `error=-65563` and `AEROMIRROR_DNSSD_DEGRADED`; the receiver was not visible
+  on the iPhone. This is not evidence that the updater caused the failure, but
+  it confirms that post-update/startup UX needs an explicit safe path for a
+  crashed external Bonjour prerequisite rather than relying on core restarts.
 - Physical status: Photos edges/letterboxing, caption/Escape/Alt+Enter/tray,
   Caption Close/minimize with both taskbar policies, DPI/multi-monitor restore,
   installed update/reinstall, UAC decline/approval, and long-idle iPhone
@@ -90,8 +99,10 @@ next step changes.
   latest routes, and fresh public re-download equality pass. Exact evidence is
   in `docs/releases/0.12.20/BUILD_REPORT.md`; immutable public `v0.12.19`
   remains unchanged.
-- Immediate next step: install the public Setup and run the
-  Photos/fullscreen/close/update matrix plus long-idle iPhone browse checks.
+- Immediate next step: retain the current failure evidence, diagnose the
+  external `mDNSResponder.exe` crash and define a safe explicit recovery path;
+  then continue the Photos/fullscreen/close/update matrix plus long-idle iPhone
+  browse checks against the public Setup.
 
 ## Previous public review release — 0.12.19
 
