@@ -23,12 +23,12 @@ namespace AirPlayReceiverMvp
         private const string AppTitle = "AeroMirror";
         private const int ConnectionRequestGraceSeconds = 30;
         private const int PinEntryGraceSeconds = 60;
+        private const int CoreStopCompletionWaitMilliseconds = 7000;
         private readonly NotifyIcon tray;
         private readonly ToolStripMenuItem statusItem;
         private readonly ToolStripMenuItem startStopItem;
         private readonly ToolStripMenuItem autoStartItem;
         private readonly ToolStripMenuItem topMostItem;
-        private readonly ToolStripMenuItem networkWarningItem;
         private readonly System.Windows.Forms.Timer monitorTimer;
         private readonly EventWaitHandle showEvent;
         private AppSettings settings;
@@ -39,7 +39,6 @@ namespace AirPlayReceiverMvp
         private SettingsForm form;
         private bool quitting;
         private bool publicNetwork;
-        private bool networkWarningShown;
         private bool networkProfileKnown;
         private string networkProfileName = "";
         private string networkInterfaceName = "";
@@ -60,8 +59,12 @@ namespace AirPlayReceiverMvp
         private string restartReason = "";
         private int restartStopInProgress;
         private int restartStopCompleted;
+        private int restartStopSucceeded;
+        private int blockAutomaticRestartAfterUnconfirmedStop;
         private int restartDelayAfterStop;
         private bool restartAfterStop;
+        private Func<Process, IntPtr, string, bool, bool>
+            detachedCoreStopOperation = StopDetachedCore;
         private readonly ManualResetEvent restartStopDone =
             new ManualResetEvent(true);
         private bool coreReadyPending;
@@ -73,6 +76,10 @@ namespace AirPlayReceiverMvp
         private int coreSocketsReady;
         private long coreSocketsReadyDueTicks;
         private int coreDnsSdStatus;
+        private int coreBonjourUnavailable;
+        private int coreBonjourStateChanged;
+        private long coreBonjourServiceCheckDueTicks;
+        private int coreBonjourRecoveryAttempted;
         private int coreDiscoveryRefreshCapability;
         private long coreDiscoveryRefreshRequestSequence;
         private long coreDiscoveryRefreshPendingRequest;
@@ -170,7 +177,6 @@ namespace AirPlayReceiverMvp
         private int feedbackVideoRecoveryHintCount;
         private bool startAfterNetworkCheck;
         private int discoveryRefreshAfterNetworkCheck;
-        private bool resumeAfterSafeNetwork;
         private string receiverStateText = "Приёмник остановлен";
         private int receiverReady;
 
@@ -192,7 +198,8 @@ namespace AirPlayReceiverMvp
             settings = AppSettings.Load();
             settings.Save();
             ApplyAutostart(settings.AutoStartWindows);
-            SanitizeExistingLogs(settings.FixedPin);
+            SanitizeExistingLogs(
+                settings.LegacyFixedPinForSanitization);
 
             statusItem = new ToolStripMenuItem("● Приёмник остановлен");
             statusItem.Enabled = false;
@@ -201,21 +208,8 @@ namespace AirPlayReceiverMvp
             autoStartItem.Checked = IsAutostartEnabled();
             topMostItem = new ToolStripMenuItem("Окно трансляции поверх остальных", null, OnAlwaysOnTop);
             topMostItem.Checked = settings.AlwaysOnTop;
-            networkWarningItem = new ToolStripMenuItem(
-                "⚠ Публичная сеть без PIN — открыть настройки", null,
-                delegate { ShowSettings(); });
-            networkWarningItem.ForeColor = Color.FromArgb(154, 92, 0);
-            networkWarningItem.Visible = false;
-            bonjourFirewallItem = new ToolStripMenuItem(
-                "Исправить доступ Bonjour…", null,
-                delegate { RepairBonjourFirewall(null); });
-            bonjourFirewallItem.ForeColor = Color.FromArgb(154, 92, 0);
-            bonjourFirewallItem.Visible = false;
-
             var menu = new ContextMenuStrip();
             menu.Items.Add(statusItem);
-            menu.Items.Add(networkWarningItem);
-            menu.Items.Add(bonjourFirewallItem);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("Открыть настройки", null, delegate { ShowSettings(); });
             menu.Items.Add(startStopItem);
@@ -277,6 +271,7 @@ namespace AirPlayReceiverMvp
                 "; startup: " + startup + ".");
             Log("Executable: " +
                 Path.GetFileName(Assembly.GetExecutingAssembly().Location));
+            BeginAutomaticUpdateCheck();
             BeginNetworkProfileRefresh();
             BeginBonjourFirewallAssessment();
             if (settings.AutoStartReceiver)
@@ -392,11 +387,10 @@ namespace AirPlayReceiverMvp
                 startAfterNetworkCheck = false;
                 Interlocked.Exchange(
                     ref discoveryRefreshAfterNetworkCheck, 0);
-                resumeAfterSafeNetwork = false;
                 if (IsCoreRunning)
                     StopCore();
             }
-            else if (!publicNetwork || settings.PairingMode != "none")
+            else
             {
                 if (wasRunning && IsCoreRunning &&
                     restartIfCoreArgumentsChanged && argumentsChanged)
@@ -483,17 +477,10 @@ namespace AirPlayReceiverMvp
             publicNonPhysicalProfileCount =
                 profile.PublicNonPhysicalProfileCount;
             networkSignature = profile.Signature;
-            bool physicalNetworkUnsafe =
-                !profile.IsKnown || profile.IsPublic;
-            bool unsafeAccess =
-                settings.PairingMode == "none" && physicalNetworkUnsafe;
+            // Every connection now uses per-device PIN trust, so Windows'
+            // Public/Private label is informational rather than an access-
+            // control choice. A usable physical IPv4 is still required.
             bool receiverStartedByProfile = false;
-            networkWarningItem.Visible = unsafeAccess;
-            networkWarningItem.Text = profile.IsKnown
-                ? (profile.NonPhysicalProfileCount > 0
-                    ? "⚠ Wi-Fi/Ethernet публичная · VPN/виртуальная сеть обнаружена"
-                    : "⚠ Публичная сеть без PIN — открыть настройки")
-                : "⚠ Профиль сети не определён — включить PIN";
             bool changed = previousSignature.Length > 0 &&
                 !string.Equals(previousSignature, networkSignature,
                     StringComparison.Ordinal);
@@ -509,51 +496,8 @@ namespace AirPlayReceiverMvp
                     profile.NonPhysicalProfileCount +
                     " (public " +
                     profile.PublicNonPhysicalProfileCount + ")" +
-                    "; access: " + settings.PairingMode +
+                    "; access: per-device trust" +
                     "; changed: " + changed + ".");
-            }
-
-            if (unsafeAccess && IsCoreRunning)
-            {
-                bool shouldResume = settings.AutoStartReceiver;
-                StopCore();
-                resumeAfterSafeNetwork = shouldResume;
-                SetState(false, profile.IsKnown
-                    ? "Публичная сеть · включите PIN"
-                    : "Сеть не определена · включите PIN");
-                Log(profile.IsKnown
-                    ? "Receiver paused: a public network requires PIN protection."
-                    : "Receiver paused: the physical network profile is unknown.");
-            }
-            else if (unsafeAccess)
-            {
-                SetState(false, profile.IsKnown
-                    ? "Публичная сеть · включите PIN"
-                    : "Сеть не определена · включите PIN");
-            }
-
-            if (unsafeAccess && notify && settings.Notify && !networkWarningShown)
-            {
-                networkWarningShown = true;
-                tray.ShowBalloonTip(7000, AppTitle,
-                    profile.IsKnown
-                        ? (profile.NonPhysicalProfileCount > 0
-                            ? "Приёмник приостановлен: Windows считает физическую сеть публичной. VPN или виртуальная сеть обнаружены, но не используются для определения доверия. Включите PIN или проверьте профиль Wi-Fi/Ethernet."
-                            : "Приёмник приостановлен: публичная сеть требует PIN. Нажмите уведомление, чтобы включить защиту.")
-                        : "Приёмник приостановлен: Windows не удалось определить профиль сети. Включите PIN или повторите проверку.",
-                    ToolTipIcon.Warning);
-            }
-            if (!unsafeAccess)
-                networkWarningShown = false;
-
-            if (physicalNetworkReady && !unsafeAccess &&
-                resumeAfterSafeNetwork && settings.AutoStartReceiver &&
-                !IsCoreRunning)
-            {
-                resumeAfterSafeNetwork = false;
-                Log("Safe physical network profile restored; resuming receiver.");
-                StartCore(false);
-                receiverStartedByProfile = IsCoreRunning;
             }
 
             if (form != null && !form.IsDisposed)
@@ -568,20 +512,17 @@ namespace AirPlayReceiverMvp
                     ref discoveryRefreshAfterNetworkCheck, 0);
                 startAfterNetworkCheck = false;
                 networkUnknownRetries = 0;
-                if (!unsafeAccess)
+                if (IsCoreRunning)
                 {
-                    if (IsCoreRunning)
-                    {
-                        ScheduleRestart(
-                            "manual discovery refresh after network check",
-                            false, 500);
-                        receiverStartedByProfile = true;
-                    }
-                    else
-                    {
-                        StartCore(false);
-                        receiverStartedByProfile = IsCoreRunning;
-                    }
+                    ScheduleRestart(
+                        "manual discovery refresh after network check",
+                        false, 500);
+                    receiverStartedByProfile = true;
+                }
+                else
+                {
+                    StartCore(false);
+                    receiverStartedByProfile = IsCoreRunning;
                 }
             }
             if (startAfterNetworkCheck)
@@ -590,11 +531,8 @@ namespace AirPlayReceiverMvp
                 {
                     startAfterNetworkCheck = false;
                     networkUnknownRetries = 0;
-                    if (!unsafeAccess)
-                    {
-                        StartCore(false);
-                        receiverStartedByProfile = IsCoreRunning;
-                    }
+                    StartCore(false);
+                    receiverStartedByProfile = IsCoreRunning;
                 }
                 else
                 {

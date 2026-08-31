@@ -1,7 +1,7 @@
 # AeroMirror native build information
 
-This file records the native executable prepared for the local AeroMirror
-0.12.20 candidate. It keeps the pinned upstream/runtime inputs and the reviewed
+This file records the native executable prepared for the AeroMirror 0.12.22
+release candidate. It keeps the pinned upstream/runtime inputs and the reviewed
 stream-geometry, feedback, discovery, selected-pipeline, worker-lifecycle,
 parser, setup/pairing, RTP/NTP, crypto, buffering, and renderer hardening from
 the 0.11.1–0.12.15 line. Version 0.12.13 added bounded request-correlated
@@ -18,6 +18,22 @@ Bonjour in headless mode is a stable exit-code-20 prerequisite rather than an
 interactive install path. The source bundle contains the complete pinned
 upstream trees with both reviewed patches separately and already applied.
 
+Version 0.12.21 makes Bonjour error `-65563` terminal for the current DNS-SD
+generation instead of retrying forever. The native core emits one failed,
+prerequisite-unavailable, and degraded sequence, releases any partial RAOP/
+AirPlay registration pair, cancels the retry source, and keeps the listener,
+BLE helper, and receiver process alive. A later explicit discovery refresh
+clears the latch and starts one new same-process registration generation.
+
+Version 0.12.22 replaces fixed or command-line PIN protection with durable
+per-device trust. For an unknown client, native code requests one four-digit
+session PIN from the shell through a request-correlated stdin exchange and
+uses it only for that connection's SRP state. PIN buffers are cleared after
+use, trusted public keys are stored in the existing per-user register, and a
+late cancel or packet from an older connection cannot affect a newer request.
+The Qt viewer also removes caption/control styles while fullscreen and restores
+the exact saved styles and geometry on Escape or lifecycle exit.
+
 ## Exact inputs
 
 - `leapbtw/uxplay-windows`:
@@ -28,11 +44,13 @@ upstream trees with both reviewed patches separately and already applied.
   `libuxplay-aeromirror.patch`
 - Patched wrapper files: `src/airplayworker.cpp`, `src/main.cpp`,
   `src/mainwindow.cpp`, and `src/mainwindow.h`
-- Patched libuxplay files: `aeromirror_host_protocol.h`, `lib/crypto.c`,
+- Patched libuxplay files: `aeromirror_host_protocol.h`,
+  `aeromirror_log_protocol.h`, `lib/airplay_video.c`, `lib/crypto.c`,
   `lib/crypto.h`, `lib/dnssd.c`,
   `lib/dnssd.h`, `lib/fairplay_playfair.c`, `lib/http_handlers.h`,
   `lib/http_request.c`, `lib/http_request.h`, `lib/http_response.c`,
-  `lib/http_response.h`, `lib/httpd.c`, `lib/mirror_buffer.c`,
+  `lib/http_response.h`, `lib/httpd.c`, `lib/logger.c`, `lib/logger.h`,
+  `lib/mirror_buffer.c`,
   `lib/mirror_buffer.h`, `lib/mirror_payload_parser.c`,
   `lib/mirror_payload_parser.h`, `lib/netutils.c`, `lib/netutils.h`,
   `lib/pairing.c`, `lib/pairing.h`, `lib/raop.c`, `lib/raop.h`,
@@ -62,17 +80,18 @@ upstream trees with both reviewed patches separately and already applied.
   managed Windows audio selection.
 - Engineering build/staging GStreamer input: 1.28.5. It is not the
   redistributed-runtime version recorded above.
-- AeroMirror 0.12.20 compatible executable SHA-256 reproduced by clean
+- AeroMirror 0.12.22 compatible executable SHA-256 reproduced by two
+  independent clean
   builds:
-  `4336B9DBFCDE87123EC4796FE43FAA4F1952E27224932B3DD5E8FEAFBAD41832`
+  `E4601B1BDAE661AF63A3F92C9FDA01CA66E54B6E2C5A36EDF802BAF0338CE6F6`
 - Materialized wrapper patch SHA-256:
-  `C95721CC748F85EACFBEC20301F31E3292E82399F2152CE83E27BCC3C7A954E0`
+  `EBC949F1943F1CF9AF9F299CCEE29A817647F3547788BAC0F525E4A76729FF81`
 - Materialized libuxplay patch SHA-256:
-  `9308E476F5BEBB01C1E7752E3763A8E7B65CD0B8268D6E1CDCEABE014F9EE7A0`
-- Provenance pins 38 libuxplay sources and 42 patched sources in total. The
-  0.12.20 corresponding-source archive contains 148 entries. Its no-Git
-  extracted tree passes the same input/hash validation, and a clean
-  57/57 build reproduces the reviewed executable.
+  `B127564D17E8A752D1C16B7D52B13B89BAB88992D358C0A9935C0544F75B997E`
+- Provenance pins 44 libuxplay sources and 49 patched sources in total. The
+  0.12.22 corresponding-source archive contains 149 entries (145 files) and retains the
+  complete prepared source and build inputs. Its extracted no-Git tree passes
+  every pinned hash and completes a clean 57/57 rebuild to the reviewed core.
 - Reproducible PE timestamp (`SOURCE_DATE_EPOCH`): `1786008050`
 - Local checkout paths are remapped to `/src/uxplay-windows`, and debug
   sections are stripped from the released executable.
@@ -85,6 +104,17 @@ The AeroMirror patches add the headless launcher integration,
 `--loader-test`, stable video-size and codec-header geometry markers, a
 feedback-health capability and one-shot recovery markers, a one-shot selected
 GStreamer decoder/videosink marker, and stable DNS-SD readiness markers.
+
+The 0.12.22 pairing protocol emits only request identifiers and state names in
+stdout diagnostics. PIN digits are never placed in process arguments or native
+logs. The shell answers an exact live request through inherited stdin; native
+code binds the secret, cancellation, SRP progress, and trust persistence to
+the same connection and wipes transient PIN storage when that request ends.
+Timeout, Escape, disconnect, malformed or stale SETUP, and mismatch with the
+signature-verified client key return a negative admission result. Genuine
+`AEROMIRROR_*` lines use a dedicated protocol emitter; ordinary native,
+client-metadata, and HLS-language output flattens control bytes and neutralizes
+marker tokens, and raw client identifiers are not logged.
 
 In 0.12.20, `RendererHostWindow` is the only top-level video viewer and its
 native child widget is the only GStreamer video surface. The sink is bound to
@@ -107,6 +137,14 @@ cross-process control surface. If Bonjour is missing in headless mode, the
 wrapper emits `AEROMIRROR_BONJOUR_MISSING action=install-required`, exits 20,
 and never opens the legacy install dialog or registers the bundled responder
 as a service.
+
+If Bonjour becomes unavailable while the process is already running,
+`DNSServiceProcessResult` error `-65563` is not treated as an ordinary
+transient registration failure. The current generation emits exactly one
+`AEROMIRROR_DNSSD_PREREQUISITE_UNAVAILABLE` marker together with its failed
+and degraded result, cancels automatic native retry, and leaves the TCP
+listener and process intact. The explicit refresh command is the only native
+operation that clears this generation latch.
 
 Caption Close first leaves fullscreen and then calls `showMinimized()` while
 ignoring destruction. It deliberately retains the active generation's
@@ -150,10 +188,13 @@ letting a VPN default route choose the advertised address. The launcher also
 keeps beacon diagnostics separate from the stdout command protocol and
 keeps receiver arguments alive for the full native startup call. Headless or
 external `--uxplay` launches now return before the wrapper removes or replaces
-`-vs`/`-fs`. The source packaging script verifies that both complete binary
-Git diffs exactly match the reviewed patches. The audited
-`libuxplay/renderers/audio_renderer.c` and every new or modified source are
-individually pinned in provenance.
+`-vs`/`-fs`. The source packaging script compares canonical full-index patch
+hunks with line endings normalized; wrapper result-object IDs are ignored only
+because equivalent LF/CRLF checkouts can produce different blob IDs. Every
+packaged modified and protected source, including
+`libuxplay/renderers/audio_renderer.c`, is independently pinned by raw SHA-256
+in provenance, while both reviewed patch files retain their exact pinned
+SHA-256.
 
 DNS-SD identity and TXT storage now belong to the full `dnssd_t` lifetime,
 while each RAOP/AirPlay service-ref pair is rolled back and refreshed
@@ -182,13 +223,23 @@ also verifies that the separate build prefix contains GStreamer 1.28.5. The
 executable contains no
 `.debug_*` sections or local checkout path.
 
-The final local 0.12.20 staged-runtime audit covers 199 binaries and 148 staged
-DLLs. All 44 requested GStreamer features resolve to 27 plug-ins, and the
-staged `--loader-test` exits 0. The 148-entry corresponding-source ZIP validates
-from an extracted no-Git tree and rebuilds 57/57 to the same executable hash.
-The local review payload and x64 Setup gates also pass. Physical Photos edges,
-fullscreen/Escape behavior, update/reinstall, and iPhone visibility remain
-pending; these automated results are not physical acceptance or publication.
+For the 0.12.22 release candidate, two independently materialized clean source
+trees each complete 57/57 targets and reproduce SHA-256
+`E4601B1BDAE661AF63A3F92C9FDA01CA66E54B6E2C5A36EDF802BAF0338CE6F6`.
+The engineering runtime stage inspects 200 binaries and copies 148 DLLs; all
+44 requested GStreamer features resolve to 27 plug-ins and its isolated
+`--self-test` passes. The same core also passes `--loader-test` against the
+unchanged pinned GStreamer 1.28.1/Qt 6.10.1 upstream runtime. These automated
+results do not establish installed recovery or iPhone visibility. The
+149-entry corresponding-source archive's extracted no-Git build reproduces
+the same core hash. Physical 0.12.22 pairing, multi-monitor fullscreen,
+installed recovery, and iPhone visibility checks remain pending until the
+versioned test plan is completed.
+
+The runtime builder accepts a separate Qt 6.10.1 prefix when the selected
+MSYS2 tree contains another Qt version. Its dependency-closure pass uses an
+ASCII temporary copy to accommodate MSYS2 `objdump` on Unicode workspace paths,
+then publishes only the validated 200-binary result.
 
 ## Rebuild from this source bundle
 

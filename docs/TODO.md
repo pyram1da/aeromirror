@@ -29,6 +29,9 @@ layout, public asset names, and source-provenance checks throughout the move.
 - [x] Update resilience checks so they no longer assume one source filename.
 - [x] Remove unreachable legacy forms only after the split passes the same
   build and tests, as a separately reviewed cleanup step.
+- [ ] Audit and remove only the now-unreachable manual Bonjour/discovery-repair
+  menu handlers, labels, and compatibility plumbing. Preserve the internal
+  automatic same-process refresh command and physical-IP restart path.
 
 Acceptance target: the shell is behaviorally unchanged, its executable still
 targets Windows 10 1809+ x64 and Windows 11 x64, and existing settings,
@@ -47,6 +50,13 @@ autostart, pairing identity, logs, and update behavior remain compatible.
   staging so failed builds cannot leave ambiguous release inputs.
 - [ ] Add bounded, preview-first cleanup for generated output; cache deletion
   must remain an explicit separate choice.
+- [x] Serialize 0.12.22-and-newer install/update/uninstall mutation per Windows
+  user, revalidate the authoritative primary executable under that mutex, and
+  retain the lock through bounded failure-recovery launch confirmation.
+- [ ] Add a controlled two-Setup integration fixture for the current mutex and
+  rollback path. Keep concurrent execution of immutable pre-0.12.22 Setup
+  binaries explicitly unsupported; they cannot be retrofitted to join the new
+  transaction guard.
 
 Acceptance target: setup and in-place update verification pass with exactly
 the same installed paths, registry identity, shortcuts, payload contract, and
@@ -73,6 +83,10 @@ versions.
 
 - [ ] Add `.editorconfig` and explicit UTF-8/LF rules compatible with Windows
   PowerShell and the current compiler.
+- [ ] Add upstream/native `.gitattributes` and a canonical patch-generation
+  command so full-index metadata is stable across LF/CRLF checkouts. The current
+  source-archive gate compares canonical patch hunks while separately pinning
+  every packaged modified/protected source hash.
 - [ ] Add a single local command that runs the shell build, resilience checks,
   installer logic checks where inputs are available, documentation policy,
   and `git diff --check`.
@@ -109,6 +123,42 @@ publish, sign, or mutate a GitHub Release as a side effect.
 Acceptance target: pointer, keyboard, and assistive-technology users reach the
 same help content, with retained screenshots at representative Windows display
 scales.
+
+### First connection, updates, and public discoverability
+
+- [x] Replace the user-selected fixed/no-PIN modes with one per-device trust
+  flow: every previously unknown iPhone receives a fresh random four-digit PIN,
+  while a previously trusted device reconnects without another prompt. Preserve
+  the receiver key and trusted-client register across in-place updates and give
+  the user a clear way to revoke trusted devices.
+- [x] Present that first-connection PIN in a shell-owned, high-contrast overlay
+  on the active display instead of requiring the user to find it in Settings.
+  The native boundary must send a structured pairing event; the PIN must never
+  enter process arguments, settings, the trust file, ordinary logs, or
+  AeroMirror diagnostic exports, and transient native PIN buffers must be
+  cleared after the SRP request settles.
+- [x] Keep the useful physical-network name visible, but do not ask a normal
+  user to reason about Windows Private/Public protection modes. An unknown or
+  Public physical network must remain fail-closed unless the per-device PIN
+  contract is active.
+- [x] Add opt-in automatic updates, disabled by default. When enabled, download
+  only an exact versioned Setup with a verified SHA-256, never interrupt an
+  active mirroring session, and complete the existing unattended update at the
+  next safe application/Windows start while preserving shortcuts, settings,
+  receiver identity, trust state, and rollback behavior.
+- [x] Replace the history-heavy README opening with a concise value proposition,
+  download path, and FAQ covering Wi-Fi, Bonjour, PIN trust, privacy, supported
+  Windows versions, fullscreen, updates, and the absence of remote-control and
+  AirDrop claims. Prepare the repository description and topic set for the
+  publication pass.
+- [ ] Capture and add genuine product screenshots after physical 0.12.22
+  acceptance. Do not fabricate a stream image or reuse a screenshot that shows
+  private phone, network, path, or account data.
+
+Acceptance target: a new user can find the project, install it, pair one iPhone
+from the Screen Mirroring list using the on-screen code, reconnect later without
+another code, and deliberately opt into verified background updates without
+weakening network or release security.
 
 ### Native core IPC and a real ready state
 
@@ -200,10 +250,11 @@ prefer a request-correlated refresh of the paired RAOP/AirPlay DNS-SD
 generation in the same process and on the same listener ports. Registration
 callbacks are pumped on the native owner context; partial pairs roll back and
 retry with bounded delays; active clients defer. Unsupported or failed
-commands retain bounded full-process fallback. Manual **Restart discovery** and
-physical IPv4 change remain full restarts because the separate BLE helper is
-unchanged. This is local-registration evidence, not continuous iPhone browse
-attestation or an AWDL implementation.
+commands retain bounded full-process fallback. That historical build exposed a
+manual full restart; the current main/tray UI no longer does. A physical IPv4
+change still restarts because the separate BLE helper is unchanged. This is
+local-registration evidence, not continuous iPhone browse attestation or an
+AWDL implementation.
 
 The local 0.12.14 candidate starts the media-liveness audit with one confirmed
 source correction and passive evidence. Every video retry now starts from the
@@ -280,16 +331,42 @@ than an updater failure: `Bonjour Service` had already crashed, remained
 failed with `error=-65563`. The TCP listener and BLE helper were locally ready,
 but they did not make the AirPlay receiver browsable without Bonjour.
 
-- [ ] On both post-update relaunch and ordinary startup, reassess the external
+A second read-only snapshot on 2026-08-29 reproduced the same external
+prerequisite state after an untouched morning launch: the installed 0.12.20
+shell and current core/listener/BLE processes remained alive, but Apple Bonjour
+was still `Stopped` with exit 1067, no `DNSSD_READY` had occurred since August
+25, and every registration attempt returned `-65563`. This is evidence for the
+0.12.22 installer-owned recovery policy, not physical proof that the new policy
+has recovered a real installation.
+
+The unpublished 0.12.21 explicit **Start Bonjour**/`sc.exe` candidate was
+superseded before publication. The 0.12.22 design removes Bonjour/discovery
+repair controls. Setup best-effort configures only a safely validated Apple
+service for Automatic start, bounded 5/30/120-second Windows recovery, and one
+exact Private/UDP 5353/LocalSubnet firewall rule after the application commit.
+Runtime monitoring is read-only and automatically republishes DNS-SD after the
+service returns. Shared system state intentionally remains after uninstall.
+
+- [x] On both post-update relaunch and ordinary startup, reassess the external
   Bonjour service before treating listener/BLE readiness as a usable receiver.
   Surface the blocking stopped/crashed state immediately on the main card.
-- [ ] When Bonjour is known to be stopped, avoid presenting repeated native
+- [x] When Bonjour is known to be stopped, avoid presenting repeated native
   DNS-SD retries or core restarts as recovery. Keep the listener safe, retain
   bounded diagnostics, and wait for an explicit prerequisite-state change.
-- [ ] Reproduce and diagnose the observed `mDNSResponder.exe` `BEX64`/
-  `c0000409` crash before choosing a recovery action. Design one explicit,
-  UAC-gated user path to restore or repair the external prerequisite without
-  registering AeroMirror's bundled per-user responder as a system service.
+- [x] Retain the observed `mDNSResponder.exe` `BEX64`/`c0000409`/`0x437c3`
+  evidence without mislabelling correlation as cause, and move recovery out of
+  the normal application UI into exact installer-owned Windows service policy.
+- [ ] Obtain a readable WER minidump and symbols, then isolate the exact Apple
+  responder failure around TUN/interface-list change. Do not call the VPN the
+  root cause until the stack or a controlled adapter-toggle matrix proves it.
+- [x] Reject the bundled responder's foreground `-server` mode as the 0.12.22
+  product fallback. Its loopback/service-port ownership, multi-session,
+  authenticated IPC, executable placement, firewall, and provenance model is
+  not suitable for silently replacing the shared Apple service.
+- [x] Harden the elevated machine branch before use: validate exact service
+  identity and canonical Program Files path, reject reparse points, untrusted
+  ownership/write access, and NULL DACLs, use direct SCM/firewall APIs, and keep
+  the helper bounded and independent from per-user logs/UI.
 - [ ] Physically verify the recovery path after an installed update: once
   Bonjour is healthy, paired DNS-SD reaches `AEROMIRROR_DNSSD_READY` and the
   receiver appears on the iPhone without requiring the user to discover the
@@ -316,6 +393,12 @@ but they did not make the AirPlay receiver browsable without Bonjour.
   after the new physical trace identifies the boundary. Do not hot-replace a
   half-open socket or auto-reset the receiver without parser/crypto/physical
   tests.
+- [ ] Replace the remaining process-fatal SRP allocation/error helpers with
+  checked status propagation and zeroization. Cover injected allocation and
+  OpenSSL failures without terminating the long-lived receiver.
+- [ ] Make video-renderer initialization and native host/sink binding return
+  structured failure status instead of calling `exit()`. Add deterministic
+  missing-sink, bad-pipeline, bind-failure, and allocation-failure contracts.
 - [x] Add a narrow version-1 `refresh-discovery` command with request,
   generation, PID, RAOP-port, and AirPlay-port correlation; keep it transitional
   redirected stdin/framed stdout rather than presenting it as the complete IPC
@@ -330,7 +413,7 @@ but they did not make the AirPlay receiver browsable without Bonjour.
   retry.
 - [ ] Add safe in-process BLE helper reconfiguration and acknowledgement before
   describing discovery refresh as a same-process DNS-SD-and-BLE operation.
-  Until then, manual discovery and physical IPv4 change remain full restarts.
+  Until then, a physical IPv4 change remains an internal full restart.
 - [x] Keep a guarded post-renewal `SessionUnlock` refresh available after any
   completed idle renewal, with cooldown, readiness/client/network guards, and
   activity re-arming; keep it documented as a mitigation rather than root-cause
@@ -340,24 +423,22 @@ but they did not make the AirPlay receiver browsable without Bonjour.
   limit disruptive legacy process-restart fallback to attempts one and two.
 - [ ] Physically validate the long-idle/unlock mitigation on Windows 10 and 11,
   retaining same-PID/port DNS-SD generations, first-tap iPhone browse/request
-  evidence, manual full-restart controls, and BLE state. Isolate whether the
+  evidence, any internal fallback decision, and BLE state. Isolate whether the
   original absence was DNS-SD, BLE, Bonjour service state, iOS browse cache,
   socket/port publication, or another lifecycle boundary.
 - [ ] Reproduce the reported Windows 10 first-install-only-after-reboot symptom
   on a clean VM. Retain pre-reboot Setup/receiver logs, Bonjour service state,
   pending-reboot indicators, firewall/network state, and the effect of a
-  receiver stop/start. Do not add a generic reboot prompt or machine-wide
-  Bonjour mutation without a proven prerequisite and rollback design.
-- [x] Diagnose the exact missing Private Bonjour mDNS rule and offer only an
-  explicit narrow repair; keep ordinary startup read-only.
-- [ ] Physically validate UAC decline/approval, exact rule scope, no duplicate
-  rule, and renewed iPhone visibility on a controlled Windows machine.
-- [x] Diagnose the exact external Bonjour executable/firewall contract and
-  keep any Private UDP 5353 LocalSubnet repair behind explicit confirmation
-  and UAC; never add Public, TCP, Any-address, or automatic startup rules.
-- [ ] Physically validate missing-rule detection, declined UAC, accepted
-  repair, exact resulting rule scope, iPhone rediscovery, and behavior after
-  reboot without treating local rule presence as browse attestation.
+  receiver stop/start. Do not add a generic reboot prompt; validate the exact
+  0.12.22 Setup-owned service/firewall policy and its fail-open application
+  transaction before changing first-run guidance.
+- [x] Move exact Private Bonjour mDNS and service resilience configuration into
+  a bounded post-commit Setup branch; keep ordinary application startup and
+  monitoring read-only and expose no repair button.
+- [ ] Physically validate Setup UAC decline/approval, exact service recovery and
+  firewall scope, no duplicate rule, renewed iPhone visibility, reboot behavior,
+  and intentional persistence after AeroMirror uninstall on a controlled
+  Windows machine. Local rule presence is not browse attestation.
 - [x] Skip the shortcut/launch option form for updates and same-version
   reinstalls, preserve the installed shortcut state, relaunch after success,
   and retain an explicit downgrade boundary.
@@ -426,6 +507,17 @@ first; do not combine a broad rewrite with Photos, AWDL, or viewer UI changes.
 - [x] Run the focused final package/Setup rebuild after embedded documentation
   freezes; repeat exact entry, shell equality, resilience, embedded provenance,
   version, and all three Setup self-check gates.
+- [x] Harden the inherited HLS/gallery boundary: match HTTP header names without
+  ASCII case sensitivity; bound language parsing and URI replacement; preserve
+  zero-match and shorter-prefix playlists; validate decoded fields and the
+  allocated URI-prefix buffer; keep URI terminators and condensed chunks within
+  their own lines; cap adjusted output at 32 MiB/`INT_MAX`; make allocation
+  failure non-terminating; and cover both parser passes in source-bound tests.
+- [ ] Complete the remaining low-risk HLS syntax cleanup: compare media-type
+  values case-insensitively, require quoted `NAME`/`LANGUAGE` attributes where
+  the grammar requires them, and add benign compatibility fixtures for valid
+  alternate condensed-playlist layouts without turning release validation into
+  hostile-input execution.
 - [ ] Complete physical freeze/lifecycle acceptance for 0.12.15.
 - [ ] Resolve the accepted P2 native backlog: define parent lifetime after a
   terminal platform join failure; broaden audio and optional HLS
@@ -669,6 +761,11 @@ source rebuild, package, and non-installing Setup gates pass.
 - [x] Replace that interim overlay/hook with one native framed viewer, embedded
   video surface, standard caption fullscreen action, deterministic Escape, and
   an acknowledged idempotent state setter shared with Alt+Enter and tray.
+- [x] Make actual fullscreen consistently minimal: no caption, Close, Minimize,
+  or floating controls, and one foreground Escape must return to the remembered
+  framed placement. Keep the standard frame in normal mode because it currently
+  provides move, resize, minimize, close, and keyboard accessibility; do not
+  overload Space until input conflicts and discoverability are tested.
 - [ ] Expose a trustworthy content rectangle/crop signal or validate a
   conservative pixel-analysis design for Photos canvases that contain their
   own encoded black bars; do not crop real dark content by guesswork.

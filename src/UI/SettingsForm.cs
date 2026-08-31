@@ -7,7 +7,6 @@ using System.Net;
 using System.Net.NetworkInformation;
 using System.Reflection;
 using System.Runtime.InteropServices;
-using System.Security.Cryptography;
 using System.ServiceProcess;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -31,9 +30,6 @@ namespace AirPlayReceiverMvp
         private readonly Label networkTitle;
         private readonly NetworkHelpGlyph networkHelp;
         private readonly Label bonjourFirewallNotice;
-        private readonly Button bonjourFirewallRepair;
-        private readonly Panel trustCard;
-        private readonly Button refreshDiscovery;
         private readonly Button settingsButton;
         private readonly Button updatesButton;
         private readonly LinkLabel reportProblem;
@@ -43,10 +39,7 @@ namespace AirPlayReceiverMvp
         private readonly ToolTip toolTips;
         private readonly TextBox receiverName;
         private readonly ComboBox quality;
-        private readonly ComboBox pairing;
-        private readonly Label accessNote;
-        private readonly Panel pinPanel;
-        private readonly TextBox fixedPin;
+        private readonly Button revokeTrustedDevices;
         private readonly ComboBox latency;
         private readonly ComboBox audioOutput;
         private readonly ComboBox theme;
@@ -72,9 +65,11 @@ namespace AirPlayReceiverMvp
         private readonly Button installUpdate;
         private readonly Button openRelease;
         private readonly Button updatesBack;
+        private readonly CheckBox automaticUpdates;
         private UpdateInfo availableUpdate;
         private string pendingInstallerPath = "";
         private bool suppressDirty;
+        private bool suppressAutomaticUpdateChange;
         private bool? appliedDarkTheme;
         private DateTime nextThemeCheck;
         private bool homePageSelected;
@@ -148,7 +143,7 @@ namespace AirPlayReceiverMvp
                 "\uE713", 552, 28, 44, 36, false);
             settingsButton.Font = new Font("Segoe MDL2 Assets", 14F);
             settingsButton.AccessibleName = "Настройки";
-            settingsButton.Click += delegate { ShowSettingsPage(false); };
+            settingsButton.Click += delegate { ShowSettingsPage(); };
             toolTips.SetToolTip(settingsButton, "Настройки");
             homeHeader.Controls.Add(settingsButton);
 
@@ -176,67 +171,7 @@ namespace AirPlayReceiverMvp
             bonjourFirewallNotice.Visible = false;
             networkCard.Controls.Add(bonjourFirewallNotice);
 
-            bonjourFirewallRepair = MakeButton(
-                "Разрешить Bonjour", 372, 43, 180, 34, true);
-            bonjourFirewallRepair.AccessibleName =
-                "Разрешить обнаружение AirPlay через Bonjour";
-            bonjourFirewallRepair.Visible = false;
-            bonjourFirewallRepair.Click += delegate
-            {
-                context.RepairBonjourFirewall(this);
-                SyncStatus();
-            };
-            toolTips.SetToolTip(
-                bonjourFirewallRepair,
-                "Добавить только узкое правило Private UDP 5353 для Bonjour. Windows покажет одно подтверждение администратора.");
-            networkCard.Controls.Add(bonjourFirewallRepair);
-
-            trustCard = new Panel();
-            trustCard.Location = new Point(24, 178);
-            trustCard.Size = new Size(572, 94);
-            trustCard.BackColor = Color.FromArgb(242, 247, 253);
-            homePage.Controls.Add(trustCard);
-
-            var trustTitle = MakeLabel(
-                "Подключайтесь безопасно в любой знакомой и новой сети", 15, 10);
-            trustTitle.Font = new Font("Segoe UI Semibold", 9.5F);
-            trustCard.Controls.Add(trustTitle);
-
-            var trustText = new Label();
-            trustText.Text =
-                "Настройте PIN один раз: iPhone и ноутбук сохранят ключи друг друга.\r\n" +
-                "После этого смена домашнего Wi-Fi сама по себе не потребует нового PIN.";
-            trustText.AutoSize = false;
-            trustText.Size = new Size(405, 48);
-            trustText.Location = new Point(15, 37);
-            trustText.ForeColor = Color.FromArgb(55, 55, 55);
-            trustCard.Controls.Add(trustText);
-
-            var dismissPinSuggestion = MakeButton("×", 531, 7, 26, 26, false);
-            dismissPinSuggestion.FlatAppearance.BorderSize = 0;
-            dismissPinSuggestion.Click += delegate
-            {
-                AppSettings updated = context.CurrentSettings.Copy();
-                updated.DismissPinSuggestion = true;
-                context.SaveSettings(updated, false);
-                SyncStatus();
-            };
-            trustCard.Controls.Add(dismissPinSuggestion);
-
-            var pinSetup = MakeButton("Настроить PIN", 425, 48, 130, 34, false);
-            pinSetup.Click += delegate { ShowSettingsPage(true); };
-            trustCard.Controls.Add(pinSetup);
-
-            refreshDiscovery = MakeButton(
-                "Перезапустить обнаружение", 24, 314, 224, 38, false);
-            refreshDiscovery.Click += delegate
-            {
-                context.RefreshDiscovery();
-                SyncStatus();
-            };
-            homePage.Controls.Add(refreshDiscovery);
-
-            startStop = MakeButton("", 260, 314, 145, 38, true);
+            startStop = MakeButton("", 24, 314, 280, 38, true);
             startStop.Click += delegate
             {
                 if (context.IsCoreRunning) context.StopCore(); else context.StartCore();
@@ -245,7 +180,7 @@ namespace AirPlayReceiverMvp
             homePage.Controls.Add(startStop);
 
             updatesButton = MakeButton(
-                "Обновления", 417, 314, 179, 38, false);
+                "Обновления", 316, 314, 280, 38, false);
             updatesButton.Click += delegate { ShowUpdatesPage(); };
             homePage.Controls.Add(updatesButton);
 
@@ -377,42 +312,38 @@ namespace AirPlayReceiverMvp
 
             AddSection(settingsContent, "Защита подключения", 24, 516);
 
-            pairing = MakeCombo(24, 550, 552);
-            pairing.Items.Add(new NamedValue(
-                "Без PIN — удобно для частной домашней сети", "none"));
-            pairing.Items.Add(new NamedValue(
-                "С PIN — один раз для доверия этому iPhone", "pin"));
-            pairing.SelectedIndexChanged += delegate { UpdatePinPanel(); };
-            settingsContent.Controls.Add(pairing);
+            var pairingNote = MakeFixedLabel(
+                "Новый iPhone один раз получает случайный код на весь экран. " +
+                "После успешного ввода устройство подключается без повторного кода.",
+                24, 550, 350, 70);
+            pairingNote.ForeColor = Color.DimGray;
+            settingsContent.Controls.Add(pairingNote);
 
-            accessNote = MakeFixedLabel("", 27, 585, 548, 60);
-            accessNote.ForeColor = Color.DimGray;
-            settingsContent.Controls.Add(accessNote);
-
-            pinPanel = new Panel();
-            pinPanel.Location = new Point(24, 584);
-            pinPanel.Size = new Size(552, 76);
-            pinPanel.BackColor = Color.FromArgb(237, 246, 255);
-            settingsContent.Controls.Add(pinPanel);
-
-            pinPanel.Controls.Add(MakeLabel(
-                "PIN, который нужно ввести на iPhone", 13, 7));
-            fixedPin = new TextBox();
-            fixedPin.Location = new Point(15, 28);
-            fixedPin.Size = new Size(130, 25);
-            fixedPin.MaxLength = 4;
-            fixedPin.Font = new Font("Segoe UI Semibold", 10F);
-            pinPanel.Controls.Add(fixedPin);
-
-            var generate = MakeButton("Новый PIN", 154, 27, 105, 28, false);
-            generate.Click += delegate { fixedPin.Text = GeneratePin(); };
-            pinPanel.Controls.Add(generate);
-
-            var pinNote = MakeFixedLabel(
-                "Ключ хранится для пары iPhone + ноутбук,\r\nа не для конкретной Wi-Fi-сети.",
-                276, 25, 260, 43);
-            pinNote.ForeColor = Color.DimGray;
-            pinPanel.Controls.Add(pinNote);
+            revokeTrustedDevices = MakeButton(
+                "Сбросить доверие", 392, 558, 184, 38, false);
+            revokeTrustedDevices.Click += delegate
+            {
+                DialogResult answer = MessageBox.Show(
+                    this,
+                    "Все ранее подключённые iPhone снова запросят код. " +
+                    "Текущая трансляция будет остановлена. Продолжить?",
+                    "AeroMirror",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Warning);
+                if (answer != DialogResult.Yes)
+                    return;
+                if (!context.RevokeTrustedDevices())
+                {
+                    MessageBox.Show(
+                        this,
+                        "Не удалось очистить список доверенных устройств.",
+                        "AeroMirror",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
+                }
+                SyncStatus();
+            };
+            settingsContent.Controls.Add(revokeTrustedDevices);
 
             AddSection(settingsContent, "Запуск и поведение приложения", 24, 682);
 
@@ -578,20 +509,38 @@ namespace AirPlayReceiverMvp
             checkUpdate.Click += delegate { CheckForUpdates(); };
             updatesPage.Controls.Add(checkUpdate);
 
+            automaticUpdates = MakeCheckBox(
+                "Автоматически скачивать проверенные обновления", 24, 112);
+            automaticUpdates.CheckedChanged += delegate
+            {
+                if (suppressAutomaticUpdateChange)
+                    return;
+                context.SetAutomaticUpdatesEnabled(automaticUpdates.Checked);
+                updateState.Text = automaticUpdates.Checked
+                    ? "Автообновления включены. Новая версия установится только при следующем безопасном запуске AeroMirror."
+                    : "Автообновления выключены. Проверить и установить новую версию можно вручную.";
+            };
+            updatesPage.Controls.Add(automaticUpdates);
+
+            var automaticUpdatesNote = MakeFixedLabel(
+                "Текущая трансляция и несохранённые настройки никогда не прерываются.",
+                48, 137, 528, 30);
+            automaticUpdatesNote.ForeColor = Color.DimGray;
+            updatesPage.Controls.Add(automaticUpdatesNote);
+
             updateState = MakeFixedLabel(
-                "Проверка выполняется только по нажатию. " +
-                "Приложение обращается к публичному GitHub Release.",
-                24, 116, 552, 42);
+                "Ручная проверка обращается к последнему публичному GitHub Release.",
+                24, 174, 552, 42);
             updateState.ForeColor = Color.DimGray;
             updatesPage.Controls.Add(updateState);
 
-            updateTitle = MakeLabel("", 24, 172);
+            updateTitle = MakeLabel("", 24, 222);
             updateTitle.Font = new Font("Segoe UI Semibold", 14F);
             updatesPage.Controls.Add(updateTitle);
 
             updateNotes = new TextBox();
-            updateNotes.Location = new Point(24, 210);
-            updateNotes.Size = new Size(552, 240);
+            updateNotes.Location = new Point(24, 258);
+            updateNotes.Size = new Size(552, 192);
             updateNotes.Multiline = true;
             updateNotes.ReadOnly = true;
             updateNotes.ScrollBars = ScrollBars.Vertical;
@@ -663,15 +612,17 @@ namespace AirPlayReceiverMvp
             if (IsDisposed)
                 return;
 
-            bool unsafeAccess = context.IsPublicNetwork &&
-                context.CurrentSettings.PairingMode == "none";
             bool dark = appliedDarkTheme ??
                 ThemeHelper.IsDark(context.CurrentSettings.ThemeMode);
             bool bonjourFirewallMissing =
                 context.IsBonjourFirewallRepairRequired;
             bool bonjourUnavailable = context.IsBonjourUnavailable;
-            bool bonjourFirewallRepairRunning =
-                context.IsBonjourFirewallRepairRunning;
+            bool bonjourServiceRecoveryRequired =
+                context.IsBonjourServiceRecoveryRequired;
+            bool bonjourServiceStarting =
+                context.IsBonjourServiceStarting;
+            bool bonjourServiceStatusUnknown =
+                context.IsBonjourServiceStatusUnknown;
             bool receiverReady = context.IsCoreRunning &&
                 context.IsReceiverReady;
             if (receiverReady)
@@ -701,15 +652,6 @@ namespace AirPlayReceiverMvp
                 statusDot.ForeColor = status.ForeColor;
                 startStop.Text = "Проверить";
             }
-            else if (unsafeAccess)
-            {
-                status.Text = "Приёмник приостановлен — включите PIN";
-                status.ForeColor = dark
-                    ? Color.FromArgb(255, 197, 92)
-                    : Color.FromArgb(154, 92, 0);
-                statusDot.ForeColor = status.ForeColor;
-                startStop.Text = "Включить";
-            }
             else
             {
                 status.Text = "Приёмник выключен";
@@ -731,62 +673,34 @@ namespace AirPlayReceiverMvp
             toolTips.SetToolTip(status, receiverDetails);
 
             string networkDetails;
-            if (unsafeAccess)
+            networkCard.BackColor = dark
+                ? Color.FromArgb(31, 50, 67)
+                : Color.FromArgb(237, 246, 255);
+            if (!context.IsNetworkProfileKnown)
             {
-                networkCard.BackColor = dark
-                    ? Color.FromArgb(73, 57, 24)
-                    : Color.FromArgb(255, 244, 215);
-                networkTitle.Text = "Сеть «" + DisplayNetworkName() +
-                    "» · публичная · требуется PIN" +
-                    (context.HasNetworkOverlay
-                        ? " · VPN/виртуальная сеть" : "");
-                networkDetails = context.HasNetworkOverlay
-                    ? "Проверен именно физический Wi-Fi или Ethernet. VPN и виртуальный профиль не меняют режим защиты. Windows считает физическую сеть публичной, поэтому для подключения нужен PIN."
-                    : "Windows считает это физическое подключение публичной сетью. Без PIN приёмник приостановлен.";
-                networkTitle.ForeColor = dark
-                    ? Color.FromArgb(255, 197, 92)
-                    : Color.FromArgb(133, 78, 0);
+                networkTitle.Text = "Проверяем физическую сеть…";
+                networkDetails =
+                    "Компьютер и iPhone должны находиться в одной локальной сети. " +
+                    "Каждый новый iPhone подтверждается одноразовым кодом.";
             }
             else
             {
-                networkCard.BackColor = dark
-                    ? Color.FromArgb(31, 50, 67)
-                    : Color.FromArgb(237, 246, 255);
-                if (!context.IsNetworkProfileKnown)
-                {
-                    networkTitle.Text = "Проверяем физическую сеть…";
-                    networkDetails =
-                        "Компьютер и iPhone должны находиться в одной локальной сети. VPN и виртуальные адаптеры не используются для определения режима защиты.";
-                }
-                else if (context.IsPublicNetwork)
-                {
-                    networkTitle.Text = "Сеть «" + DisplayNetworkName() +
-                        "» · публичная · PIN включён" +
-                        (context.HasNetworkOverlay
-                            ? " · VPN/виртуальная сеть" : "");
-                    networkDetails = context.HasNetworkOverlay
-                        ? "Проверен именно физический Wi-Fi или Ethernet. VPN и виртуальный профиль не меняют режим защиты. Знакомый iPhone проверяется по сохранённому ключу."
-                        : "PIN защищает первое подключение. Знакомый iPhone затем проверяется по сохранённому ключу.";
-                }
-                else
-                {
-                    networkTitle.Text = "Сеть «" + DisplayNetworkName() +
-                        "» · частная" +
-                        (context.HasNetworkOverlay
-                            ? " · VPN/виртуальная сеть" : "");
-                    networkDetails = context.HasNetworkOverlay
-                        ? "Проверен именно физический Wi-Fi или Ethernet. VPN и виртуальный профиль не меняют режим защиты.\r\n" +
-                          "В частной сети PIN необязателен, но его можно включить."
-                        : "Windows пометила физическое подключение как частную сеть.\r\n" +
-                          "В частной сети PIN необязателен, но его можно включить.";
-                }
-                networkTitle.ForeColor = dark
-                    ? Color.FromArgb(111, 190, 255)
-                    : Color.FromArgb(0, 80, 145);
+                networkTitle.Text = "Сеть «" + DisplayNetworkName() +
+                    "» · защищённое подключение" +
+                    (context.HasNetworkOverlay
+                        ? " · VPN/виртуальная сеть" : "");
+                networkDetails = context.HasNetworkOverlay
+                    ? "Проверен физический Wi-Fi или Ethernet. VPN и виртуальный профиль не меняют выбранную локальную сеть. Новый iPhone подтверждается одноразовым кодом, знакомый — сохранённым ключом."
+                    : "Новый iPhone подтверждается одноразовым кодом, знакомый — сохранённым ключом.";
             }
+            networkTitle.ForeColor = dark
+                ? Color.FromArgb(111, 190, 255)
+                : Color.FromArgb(0, 80, 145);
 
             bool showBonjourNotice =
-                bonjourFirewallMissing || bonjourUnavailable;
+                bonjourFirewallMissing || bonjourUnavailable ||
+                bonjourServiceRecoveryRequired || bonjourServiceStarting ||
+                bonjourServiceStatusUnknown;
             networkCard.Height = showBonjourNotice ? 94 : 46;
             bonjourFirewallNotice.Visible = showBonjourNotice;
             if (bonjourUnavailable)
@@ -798,12 +712,43 @@ namespace AirPlayReceiverMvp
                     ? Color.FromArgb(255, 166, 166)
                     : Color.FromArgb(150, 45, 45);
                 bonjourFirewallNotice.Text =
-                    "Bonjour недоступен или установлен некорректно. Проверьте установку, чтобы iPhone находил AeroMirror.";
+                    "Bonjour отсутствует или повреждён. Восстановите Apple Bonjour из доверенного источника.";
                 bonjourFirewallNotice.Size = new Size(536, 42);
                 bonjourFirewallNotice.ForeColor = networkTitle.ForeColor;
-                bonjourFirewallRepair.Visible = false;
                 networkDetails +=
-                    "\r\nBonjour не найден или путь службы небезопасен. AeroMirror не устанавливает системную службу автоматически.";
+                    "\r\nSetup настраивает только уже установленную подлинную службу Apple Bonjour; отсутствующую или повреждённую установку нужно восстановить из доверенного источника.";
+            }
+            else if (bonjourServiceStatusUnknown)
+            {
+                networkCard.BackColor = dark
+                    ? Color.FromArgb(66, 54, 28)
+                    : Color.FromArgb(255, 245, 210);
+                networkTitle.ForeColor = dark
+                    ? Color.FromArgb(255, 211, 120)
+                    : Color.FromArgb(132, 88, 0);
+                bonjourFirewallNotice.Text =
+                    "Не удалось проверить состояние Bonjour. AeroMirror повторит проверку автоматически.";
+                bonjourFirewallNotice.Size = new Size(536, 42);
+                bonjourFirewallNotice.ForeColor = networkTitle.ForeColor;
+                networkDetails +=
+                    "\r\nСостояние Bonjour временно недоступно. Откройте диагностику или повторите проверку позже.";
+            }
+            else if (bonjourServiceRecoveryRequired || bonjourServiceStarting)
+            {
+                networkCard.BackColor = dark
+                    ? Color.FromArgb(72, 36, 36)
+                    : Color.FromArgb(255, 235, 235);
+                networkTitle.ForeColor = dark
+                    ? Color.FromArgb(255, 166, 166)
+                    : Color.FromArgb(150, 45, 45);
+                bonjourFirewallNotice.Text = bonjourServiceStarting
+                    ? "Bonjour запускается. AeroMirror ждёт службу и затем повторит публикацию AirPlay."
+                    : "Bonjour остановлен. AeroMirror ждёт возврата службы; сейчас приёмник не виден в AirPlay.";
+                bonjourFirewallNotice.Size = new Size(536, 42);
+                bonjourFirewallNotice.ForeColor = networkTitle.ForeColor;
+                networkDetails += bonjourServiceStarting
+                    ? "\r\nПриложение только наблюдает за службой. После её запуска AeroMirror один раз заново опубликует AirPlay без перезапуска приёмника."
+                    : "\r\nЕсли служба не вернулась, снова запустите Setup и подтвердите администраторский шаг либо откройте диагностику.";
             }
             else if (bonjourFirewallMissing)
             {
@@ -814,23 +759,15 @@ namespace AirPlayReceiverMvp
                     ? Color.FromArgb(255, 197, 92)
                     : Color.FromArgb(133, 78, 0);
                 bonjourFirewallNotice.Text =
-                    "Windows может блокировать обнаружение AirPlay через Bonjour.";
-                bonjourFirewallNotice.Size = new Size(336, 42);
+                    "Нет точного правила Bonjour. Снова запустите Setup для безопасной проверки.";
+                bonjourFirewallNotice.Size = new Size(536, 42);
                 bonjourFirewallNotice.ForeColor = networkTitle.ForeColor;
-                bonjourFirewallRepair.Visible = true;
-                bonjourFirewallRepair.Enabled =
-                    !bonjourFirewallRepairRunning;
-                bonjourFirewallRepair.Text = bonjourFirewallRepairRunning
-                    ? "Настраиваем…" : "Разрешить Bonjour";
                 networkDetails +=
-                    "\r\nНет точного правила для Bonjour: Private, UDP 5353, только локальная подсеть.";
+                    "\r\nНет точного правила для Bonjour: Private, UDP 5353, только локальная подсеть. Setup предложит отдельный администраторский шаг и изменит правило только после безопасной проверки Apple Bonjour.";
             }
             else
             {
                 bonjourFirewallNotice.Text = "";
-                bonjourFirewallRepair.Visible = false;
-                bonjourFirewallRepair.Enabled = true;
-                bonjourFirewallRepair.Text = "Разрешить Bonjour";
             }
             networkHelp.ForeColor = networkTitle.ForeColor;
             networkHelp.AccessibleDescription = networkDetails;
@@ -841,12 +778,11 @@ namespace AirPlayReceiverMvp
             homeQuality.Text = "Качество: " +
                 QualityDisplayName(context.CurrentSettings.QualityPreset) +
                 "   ·   Имя приёмника: " + context.CurrentSettings.ReceiverName;
-            bool showTrustCard =
-                context.CurrentSettings.PairingMode != "pin" &&
-                !context.CurrentSettings.DismissPinSuggestion;
-            trustCard.Visible = showTrustCard;
-            LayoutHome(showTrustCard);
-            UpdateAccessNote();
+            revokeTrustedDevices.Enabled = context.HasTrustedDevices;
+            revokeTrustedDevices.Text = revokeTrustedDevices.Enabled
+                ? "Сбросить доверие"
+                : "Доверенных устройств нет";
+            LayoutHome();
         }
 
         public bool ConfirmCloseForQuit()
@@ -897,22 +833,11 @@ namespace AirPlayReceiverMvp
             SyncStatus();
         }
 
-        private void LayoutHome(bool showTrustCard)
+        private void LayoutHome()
         {
-            int actionTop;
-            int contentTop = networkCard.Bottom + 16;
-            if (showTrustCard)
-            {
-                trustCard.Location = new Point(24, contentTop);
-                actionTop = trustCard.Bottom + 14;
-            }
-            else
-            {
-                actionTop = contentTop;
-            }
-            refreshDiscovery.Location = new Point(24, actionTop);
-            startStop.Location = new Point(260, actionTop);
-            updatesButton.Location = new Point(417, actionTop);
+            int actionTop = networkCard.Bottom + 16;
+            startStop.Location = new Point(24, actionTop);
+            updatesButton.Location = new Point(316, actionTop);
             homeQuality.Location = new Point(26, actionTop + 51);
             reportStatus.Location = new Point(26, actionTop + 81);
             reportProblem.Location = new Point(452, actionTop + 81);
@@ -924,7 +849,7 @@ namespace AirPlayReceiverMvp
         {
             ComboBox[] controls =
             {
-                quality, latency, audioOutput, pairing, theme, renderer
+                quality, latency, audioOutput, theme, renderer
             };
             foreach (ComboBox combo in controls)
             {
@@ -944,10 +869,10 @@ namespace AirPlayReceiverMvp
         {
             if (!ConfirmAdvancedUnsavedChanges())
                 return;
-            ShowSettingsPage(false);
+            ShowSettingsPage();
         }
 
-        private void ShowSettingsPage(bool focusPin)
+        private void ShowSettingsPage()
         {
             CloseOpenDropDowns();
             homePageSelected = false;
@@ -957,11 +882,6 @@ namespace AirPlayReceiverMvp
             updatesPage.Visible = false;
             settingsPage.Visible = true;
             settingsPage.BringToFront();
-            if (focusPin)
-            {
-                SelectValue(pairing, "pin");
-                fixedPin.Focus();
-            }
         }
 
         private void ShowAdvancedPage()
@@ -1186,9 +1106,6 @@ namespace AirPlayReceiverMvp
             AppSettings s = context.CurrentSettings;
             receiverName.Text = s.ReceiverName;
             SelectValue(quality, s.QualityPreset);
-            SelectValue(pairing,
-                s.PairingMode == "password" ? "none" : s.PairingMode);
-            fixedPin.Text = s.FixedPin;
             SelectValue(latency, s.LatencyProfile);
             SelectValue(audioOutput, s.AudioOutput);
             SelectValue(theme, s.ThemeMode);
@@ -1200,10 +1117,12 @@ namespace AirPlayReceiverMvp
             startMinimized.Checked = s.StartMinimized;
             closeToTray.Checked = s.CloseToTray;
             notifications.Checked = s.Notify;
+            suppressAutomaticUpdateChange = true;
+            automaticUpdates.Checked = s.AutomaticUpdates;
+            suppressAutomaticUpdateChange = false;
             SelectValue(renderer, s.Renderer);
             arguments.Text = s.AdvancedArguments;
             argumentPreview.Text = context.BuildSafeUxPlayArguments();
-            UpdatePinPanel();
             UpdateStartupChild();
             suppressDirty = false;
             SetDirty(false);
@@ -1216,8 +1135,6 @@ namespace AirPlayReceiverMvp
         {
             receiverName.TextChanged += delegate { MarkDirty(); };
             quality.SelectedIndexChanged += delegate { MarkDirty(); };
-            pairing.SelectedIndexChanged += delegate { MarkDirty(); };
-            fixedPin.TextChanged += delegate { MarkDirty(); };
             latency.SelectedIndexChanged += delegate { MarkDirty(); };
             audioOutput.SelectedIndexChanged += delegate { MarkDirty(); };
             topMost.CheckedChanged += delegate { MarkDirty(); };
@@ -1241,16 +1158,8 @@ namespace AirPlayReceiverMvp
         private bool HasUnsavedChanges()
         {
             AppSettings s = context.CurrentSettings;
-            string mode = SelectedValue(pairing);
-            string currentMode =
-                s.PairingMode == "password" ? "none" : s.PairingMode;
-            string pin = mode == "pin" ? fixedPin.Text.Trim() : "";
-            string currentPin =
-                currentMode == "pin" ? s.FixedPin.Trim() : "";
             return receiverName.Text.Trim() != s.ReceiverName.Trim() ||
                 SelectedValue(quality) != s.QualityPreset ||
-                mode != currentMode ||
-                pin != currentPin ||
                 SelectedValue(latency) != s.LatencyProfile ||
                 SelectedValue(audioOutput) != s.AudioOutput ||
                 SelectedValue(theme) != s.ThemeMode ||
@@ -1351,48 +1260,6 @@ namespace AirPlayReceiverMvp
             return true;
         }
 
-        private void UpdatePinPanel()
-        {
-            bool enabled = SelectedValue(pairing) == "pin";
-            pinPanel.Visible = enabled;
-            accessNote.Visible = !enabled;
-            if (enabled && string.IsNullOrWhiteSpace(fixedPin.Text))
-                fixedPin.Text = GeneratePin();
-            UpdateAccessNote();
-        }
-
-        private void UpdateAccessNote()
-        {
-            if (accessNote == null || pairing == null)
-                return;
-            if (SelectedValue(pairing) == "pin")
-            {
-                accessNote.Text =
-                    "PIN вводится при первом знакомстве устройств. Доверие сохраняется " +
-                    "между этим iPhone и ноутбуком независимо от названия Wi-Fi-сети.";
-            }
-            else if (!context.IsNetworkProfileKnown)
-            {
-                accessNote.Text =
-                    "Профиль физической сети пока не определён. Без PIN приёмник " +
-                    "не запустится. Повторите проверку сети.";
-            }
-            else if (context.IsPublicNetwork)
-            {
-                accessNote.Text = context.HasNetworkOverlay
-                    ? "VPN или виртуальная сеть обнаружены, но Windows считает физический Wi-Fi/Ethernet " +
-                      "публичным. Включите PIN либо отключите VPN и повторите проверку."
-                    : "В публичной сети приёмник без PIN будет приостановлен. " +
-                      "Включите PIN или измените профиль сети в Windows.";
-            }
-            else
-            {
-                accessNote.Text =
-                    "В частной домашней сети PIN необязателен. Его можно включить " +
-                    "заранее, чтобы знакомый iPhone подключался и в других сетях.";
-            }
-        }
-
         private void UpdateStartupChild()
         {
             startMinimized.Visible = autoWindows.Checked;
@@ -1434,21 +1301,15 @@ namespace AirPlayReceiverMvp
                 receiverName.Text = canonicalName;
             }
 
-            string mode = SelectedValue(pairing);
-            string pin = fixedPin.Text.Trim();
-            if (mode == "pin" && (pin.Length != 4 || !IsDigits(pin)))
+            string normalizedAdvancedArguments = "";
+            if (includeAdvanced &&
+                !TryReadAdvancedArguments(out normalizedAdvancedArguments))
             {
-                MessageBox.Show(this,
-                    "Для защищённого подключения нужен PIN из четырёх цифр.",
-                    Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
             }
-
             AppSettings updated = context.CurrentSettings.Copy();
             updated.ReceiverName = name;
             updated.QualityPreset = SelectedValue(quality);
-            updated.PairingMode = mode;
-            updated.FixedPin = mode == "pin" ? pin : "";
             updated.LatencyProfile = SelectedValue(latency);
             updated.AudioOutput = SelectedValue(audioOutput);
             updated.ThemeMode = SelectedValue(theme);
@@ -1464,10 +1325,8 @@ namespace AirPlayReceiverMvp
             if (includeAdvanced)
             {
                 updated.Renderer = SelectedValue(renderer);
-                updated.AdvancedArguments = arguments.Text.Trim();
+                updated.AdvancedArguments = normalizedAdvancedArguments;
             }
-            if (mode == "pin")
-                updated.DismissPinSuggestion = true;
             bool qualityChanged =
                 updated.QualityPreset != context.CurrentSettings.QualityPreset;
             bool restarted = context.SaveSettings(updated, true);
@@ -1500,13 +1359,34 @@ namespace AirPlayReceiverMvp
 
         private bool TrySaveAdvancedSettings()
         {
+            string normalizedAdvancedArguments;
+            if (!TryReadAdvancedArguments(out normalizedAdvancedArguments))
+                return false;
             AppSettings updated = context.CurrentSettings.Copy();
             updated.Renderer = SelectedValue(renderer);
-            updated.AdvancedArguments = arguments.Text.Trim();
+            updated.AdvancedArguments = normalizedAdvancedArguments;
             context.SaveSettings(updated, true);
             argumentPreview.Text = context.BuildSafeUxPlayArguments();
             UpdateAdvancedDirty();
             return true;
+        }
+
+        private bool TryReadAdvancedArguments(out string normalized)
+        {
+            if (AppSettings.TryNormalizeAdvancedArguments(
+                    arguments.Text.Trim(), out normalized))
+            {
+                arguments.Text = normalized;
+                return true;
+            }
+
+            MessageBox.Show(this,
+                "Дополнительные аргументы содержат незакрытую кавычку, " +
+                "перенос строки или слишком длинное значение. Исправьте " +
+                "поле и повторите сохранение.",
+                Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            arguments.Focus();
+            return false;
         }
 
         private void DrawQualityItem(object sender, DrawItemEventArgs e)
@@ -1703,19 +1583,6 @@ namespace AirPlayReceiverMvp
         {
             var item = combo.SelectedItem as NamedValue;
             return item == null ? "" : item.Value;
-        }
-
-        private static bool IsDigits(string text)
-        {
-            foreach (char c in text)
-                if (c < '0' || c > '9') return false;
-            return true;
-        }
-
-        private static string GeneratePin()
-        {
-            return new Random(
-                Guid.NewGuid().GetHashCode()).Next(1000, 10000).ToString();
         }
 
         internal static void OpenMobileHotspot(IWin32Window owner)

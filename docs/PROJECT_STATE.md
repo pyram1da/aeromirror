@@ -1,10 +1,101 @@
 # Project state
 
-Last updated: 2026-08-25
+Last updated: 2026-08-31
 
 This is the single current-state handoff for AeroMirror. Keep it concise and
 update it whenever release status, accepted tests, blockers, or the immediate
 next step changes.
+
+## Current local review candidate — 0.12.22
+
+- Scope: simplify AeroMirror into a background receiver with no main/tray
+  Bonjour or discovery-repair button; add installer-owned Bonjour resilience,
+  mandatory first-device trust, a stable native fullscreen path, opt-in staged
+  updates, and a clearer public README/FAQ.
+- Bonjour installer boundary: after the per-user application transaction
+  commits, a separate bounded administrator branch best-effort validates only
+  the exact Apple service and protected canonical `mDNSResponder.exe`. It uses
+  direct Service Control Manager APIs for Automatic start, service start, and
+  restart delays of 5/30/120 seconds plus the non-crash failure flag. Windows
+  Firewall policy converges one exact Private/UDP 5353/LocalSubnet inbound rule
+  with no edge traversal. Unsafe identity/path/owner/ACL/reparse state fails
+  closed. Decline, timeout, or failure cannot roll back the application.
+- Bonjour runtime boundary: application startup and monitoring are read-only.
+  DNS-SD `-65563` removes ready and latches the unavailable prerequisite without
+  retry/process churn; BLE is supplemental. When the validated service returns
+  to `Running`, one recovery event permits at most two same-PID/same-port DNS-SD
+  submissions and requires a correlated ready acknowledgement. A status notice
+  may be shown, but there is no service/firewall/discovery repair control.
+- System-state persistence: the exact Bonjour recovery policy and firewall rule
+  intentionally remain after normal AeroMirror uninstall because they belong to
+  shared machine-wide Apple software and removing them would require another
+  administrator prompt. Reinstall/update is idempotent.
+- First-device trust: every unknown iPhone receives a new cryptographic
+  four-digit code in a high-contrast fullscreen overlay on the active display.
+  The request lasts at most 60 seconds; Escape cancels it. The secret is sent
+  only through redirected stdin for the current PID/request, never through the
+  command line or ordinary log. Trusted devices reconnect without another code;
+  the per-user register survives update and can be revoked from Settings.
+  Legacy fixed/no-PIN modes and protected Advanced overrides are migrated away.
+- Pairing/output boundary: native registration returns an authoritative
+  admission result for the exact active request and verified client key.
+  Timeout, Escape, disconnect, malformed setup, stale completion, or key
+  mismatch rejects SETUP. Genuine machine markers use a dedicated emitter;
+  ordinary native and HLS output flattens controls and neutralizes every
+  `AEROMIRROR_*` token before stdout. The shell parses exact anchored marker
+  grammars, and client name/model/device identifiers are not written to logs.
+  HLS language, master-URI, and condensed-playlist parsing is line-bounded;
+  adjusted responses are capped at 32 MiB and remote parse/allocation failures
+  return an HTTP error instead of terminating the receiver.
+- Fullscreen: the native renderer owns framed and borderless states. Caption
+  maximize and Alt+Enter enter fullscreen, Escape exits, and one acknowledged
+  idempotent setter restores normal geometry. No shell overlay or keyboard hook
+  follows the moving window.
+- Automatic updates: the new setting defaults off. When enabled, the shell uses
+  the fixed public repository and exact versioned URL, validates bounded HTTPS
+  redirects and download size, verifies SHA-256, and stores a current-user
+  DPAPI-protected staged manifest. It does not interrupt the current receiver;
+  background download/staging may finish during an active mirroring/client
+  session without stopping or restarting it, and only a later safe application
+  start may revalidate and launch unattended
+  Setup. Invalid staging fails open and disabling the option removes it.
+- Setup transaction boundary: 0.12.22-and-newer install/update/uninstall
+  mutation is serialized per Windows user. UI does not hold the mutex while
+  idle; every worker re-reads the authoritative primary executable version
+  under it, and failure recovery retains it through bounded process-start
+  confirmation. A busy automatic handoff restores its attempt budget. A
+  historical pre-0.12.22 Setup cannot join this new mutex and must not be run
+  concurrently with a current transaction.
+- Public discoverability: the README now leads with the product value and
+  download link and includes a concise FAQ for network placement, Bonjour,
+  pairing, privacy, Windows support, fullscreen, updates, remote control, and
+  AirDrop. The repository description/topics still need to be applied through
+  GitHub during publication. No genuine product screenshot is available in the
+  repository, so the roadmap retains that item rather than fabricating one.
+- Automated status: the managed x64 build and complete resilience, Bonjour,
+  automatic-update, pairing/fullscreen, and native contract suites pass. Two
+  clean native builds and the extracted no-Git corresponding-source rebuild
+  reproduce core SHA-256
+  `E4601B1BDAE661AF63A3F92C9FDA01CA66E54B6E2C5A36EDF802BAF0338CE6F6`.
+  The final runtime inspects 200 binaries, copies 148 dependency DLLs, resolves
+  44 requested features to 27 GStreamer plug-ins, and passes isolated ASCII and
+  Cyrillic-path self-tests. The 149-entry no-Git source archive rebuilds 57/57
+  to the same core. Exact review payload, x64 Setup, embedded-input equality,
+  and all four non-installing Setup self-checks pass. Exact-tag packaging and
+  public re-download verification remain PENDING.
+- Physical status: fresh and previously trusted iPhone pairing, second-device
+  trust, installed Bonjour UAC decline/approval, stopped-service recovery,
+  one-hour/long-idle visibility, Windows 10/11, fullscreen/Escape/Alt+Enter,
+  Photos containment, update staging/handoff, and uninstall persistence are
+  PENDING in `docs/releases/0.12.22/TEST_PLAN.md`.
+- Version history/publication: 0.12.21 was never tagged or published and is
+  superseded by this candidate; it must not be reconstructed. No 0.12.22 tag or
+  GitHub Release exists yet. Public 0.12.20 remains immutable and
+  updater-visible latest until the authorized 0.12.22 publication completes.
+- Immediate next step: freeze and commit the candidate, rerun the exact package
+  from that documentation freeze, publish the clean annotated tag and four
+  allowed assets, verify public hashes, and record the remaining physical
+  matrix as pending rather than claiming device acceptance.
 
 ## Latest public review release — 0.12.20
 

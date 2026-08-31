@@ -1,13 +1,13 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.ComponentModel;
-using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Security;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using Microsoft.Win32;
 
 namespace AirPlayReceiverMvp
@@ -20,21 +20,17 @@ namespace AirPlayReceiverMvp
         Configured
     }
 
-    internal enum BonjourFirewallChangeResult
-    {
-        AlreadyConfigured,
-        Applied,
-        BonjourUnavailable,
-        PolicyUnavailable,
-        ElevationCanceled,
-        Failed
-    }
-
     internal sealed class BonjourFirewallAssessment
     {
         internal BonjourFirewallState State;
         internal string ExecutablePath;
         internal string Detail;
+    }
+
+    internal sealed class BonjourServiceIdentity
+    {
+        internal string ServiceName;
+        internal string ExecutablePath;
     }
 
     /*
@@ -59,22 +55,16 @@ namespace AirPlayReceiverMvp
 
     internal static class BonjourFirewallService
     {
-        internal const string OwnedRuleName =
-            "AeroMirror Bonjour mDNS (Private)";
-
         private const string BonjourExecutableName = "mDNSResponder.exe";
         private const string ServiceImagePathValue = "ImagePath";
         private const int FirewallDirectionIn = 1;
         private const int FirewallActionAllow = 1;
         private const int FirewallProtocolUdp = 17;
         private const int FirewallProfilePrivate = 2;
-        private const int ErrorCancelled = 1223;
-        private const int ElevatedCommandTimeoutMilliseconds = 30000;
-
-        private static readonly string[] BonjourServiceRegistryPaths =
+        private static readonly string[] BonjourServiceNames =
         {
-            @"SYSTEM\CurrentControlSet\Services\Bonjour Service",
-            @"SYSTEM\CurrentControlSet\Services\mDNSResponder"
+            "Bonjour Service",
+            "mDNSResponder"
         };
 
         internal static BonjourFirewallAssessment AssessPrivateMdnsRule()
@@ -113,38 +103,6 @@ namespace AirPlayReceiverMvp
                 ExecutablePath = executablePath,
                 Detail = ""
             };
-        }
-
-        /*
-         * Nothing calls this automatically. A future UI action must invoke it
-         * explicitly; the only mutating process is the UAC-elevated, fixed
-         * system netsh executable.
-         */
-        internal static BonjourFirewallChangeResult
-            RepairPrivateMdnsRuleExplicitlyWithUac()
-        {
-            BonjourFirewallAssessment before = AssessPrivateMdnsRule();
-            if (before.State == BonjourFirewallState.Configured)
-                return BonjourFirewallChangeResult.AlreadyConfigured;
-            if (before.State == BonjourFirewallState.BonjourUnavailable)
-                return BonjourFirewallChangeResult.BonjourUnavailable;
-            if (before.State == BonjourFirewallState.PolicyUnavailable)
-                return BonjourFirewallChangeResult.PolicyUnavailable;
-
-            int exitCode;
-            BonjourFirewallChangeResult launchResult = RunNetshElevated(
-                BuildAddRuleArguments(before.ExecutablePath), out exitCode);
-            if (launchResult != BonjourFirewallChangeResult.Applied)
-                return launchResult;
-            if (exitCode != 0)
-                return BonjourFirewallChangeResult.Failed;
-
-            BonjourFirewallAssessment after = AssessPrivateMdnsRule();
-            if (after.State == BonjourFirewallState.Configured)
-                return BonjourFirewallChangeResult.Applied;
-            if (after.State == BonjourFirewallState.PolicyUnavailable)
-                return BonjourFirewallChangeResult.PolicyUnavailable;
-            return BonjourFirewallChangeResult.Failed;
         }
 
         internal static bool TryParseBonjourServiceImagePath(
@@ -203,30 +161,20 @@ namespace AirPlayReceiverMvp
                     StringComparison.OrdinalIgnoreCase);
         }
 
-        internal static string BuildAddRuleArguments(
-            string exactExecutablePath)
+        internal static bool TryGetValidatedBonjourServiceIdentity(
+            out BonjourServiceIdentity identity, out string error)
         {
-            string path = RequireValidatedBonjourExecutablePath(
-                exactExecutablePath);
-            return "advfirewall firewall add rule " +
-                "name=" + QuoteNetshValue(OwnedRuleName) + " " +
-                "dir=in action=allow enable=yes profile=private " +
-                "protocol=UDP localport=5353 remoteip=LocalSubnet " +
-                "edge=no program=" + QuoteNetshValue(path);
-        }
-
-        private static bool TryGetBonjourExecutablePath(
-            out string executablePath, out string error)
-        {
-            executablePath = "";
+            identity = null;
             error = "Bonjour service ImagePath was not found.";
+            BonjourServiceIdentity resolvedIdentity = null;
 
-            foreach (string servicePath in BonjourServiceRegistryPaths)
+            foreach (string serviceName in BonjourServiceNames)
             {
                 try
                 {
                     using (RegistryKey key = Registry.LocalMachine.OpenSubKey(
-                        servicePath, false))
+                        @"SYSTEM\CurrentControlSet\Services\" + serviceName,
+                        false))
                     {
                         if (key == null)
                             continue;
@@ -247,10 +195,24 @@ namespace AirPlayReceiverMvp
                             error = "Bonjour service executable does not exist.";
                             return false;
                         }
+                        if (!IsTrustedInstalledBonjourExecutable(parsed))
+                        {
+                            error = "Bonjour service executable is outside the exact protected Program Files\\Bonjour path or is writable by the current user.";
+                            return false;
+                        }
 
-                        executablePath = parsed;
+                        if (resolvedIdentity != null)
+                        {
+                            error = "Multiple Bonjour service identities were found.";
+                            return false;
+                        }
+
+                        resolvedIdentity = new BonjourServiceIdentity
+                        {
+                            ServiceName = serviceName,
+                            ExecutablePath = parsed
+                        };
                         error = "";
-                        return true;
                     }
                 }
                 catch (SecurityException exception)
@@ -270,7 +232,23 @@ namespace AirPlayReceiverMvp
                 }
             }
 
-            return false;
+            identity = resolvedIdentity;
+            return identity != null;
+        }
+
+        private static bool TryGetBonjourExecutablePath(
+            out string executablePath, out string error)
+        {
+            BonjourServiceIdentity identity;
+            if (!TryGetValidatedBonjourServiceIdentity(
+                    out identity, out error))
+            {
+                executablePath = "";
+                return false;
+            }
+
+            executablePath = identity.ExecutablePath;
+            return true;
         }
 
         private static bool TryNormalizeBonjourExecutablePath(
@@ -330,15 +308,204 @@ namespace AirPlayReceiverMvp
             return true;
         }
 
-        private static string RequireValidatedBonjourExecutablePath(
-            string value)
+        private static bool IsTrustedInstalledBonjourExecutable(string path)
         {
             string normalized;
-            if (!TryNormalizeBonjourExecutablePath(value, out normalized))
-                throw new ArgumentException(
-                    "Expected a strict absolute mDNSResponder.exe path.",
-                    "value");
-            return normalized;
+            if (!TryNormalizeBonjourExecutablePath(path, out normalized) ||
+                !File.Exists(normalized))
+                return false;
+
+            if (!IsExpectedBonjourExecutablePath(
+                    normalized,
+                    Environment.GetFolderPath(
+                        Environment.SpecialFolder.ProgramFiles),
+                    Environment.GetFolderPath(
+                        Environment.SpecialFolder.ProgramFilesX86)))
+                return false;
+
+            string trustedRoot;
+            if (!TryGetContainingProgramFilesRoot(
+                    normalized, out trustedRoot))
+                return false;
+
+            try
+            {
+                using (WindowsIdentity identity = WindowsIdentity.GetCurrent())
+                {
+                    if (identity == null || identity.User == null)
+                        return false;
+                    var principal = new WindowsPrincipal(identity);
+                    string current = normalized;
+                    while (true)
+                    {
+                        FileAttributes attributes =
+                            File.GetAttributes(current);
+                        if ((attributes & FileAttributes.ReparsePoint) != 0)
+                            return false;
+
+                        FileSystemSecurity security =
+                            Directory.Exists(current)
+                                ? (FileSystemSecurity)Directory.GetAccessControl(
+                                    current, AccessControlSections.Access |
+                                    AccessControlSections.Owner)
+                                : File.GetAccessControl(
+                                    current, AccessControlSections.Access |
+                                    AccessControlSections.Owner);
+                        if (IsWritableByCurrentToken(
+                                security, identity, principal))
+                            return false;
+
+                        if (string.Equals(
+                                current, trustedRoot,
+                                StringComparison.OrdinalIgnoreCase))
+                            return true;
+                        current = Path.GetDirectoryName(current);
+                        if (string.IsNullOrWhiteSpace(current))
+                            return false;
+                    }
+                }
+            }
+            catch (ArgumentException)
+            {
+                return false;
+            }
+            catch (IOException)
+            {
+                return false;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return false;
+            }
+            catch (SecurityException)
+            {
+                return false;
+            }
+        }
+
+        private static bool IsExpectedBonjourExecutablePath(
+            string path, string programFiles, string programFilesX86)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+                return false;
+
+            string normalizedPath;
+            if (!TryNormalizeBonjourExecutablePath(
+                    path, out normalizedPath))
+                return false;
+
+            string[] roots = { programFiles, programFilesX86 };
+            foreach (string rootValue in roots)
+            {
+                if (string.IsNullOrWhiteSpace(rootValue))
+                    continue;
+                try
+                {
+                    string expected = Path.Combine(
+                        Path.GetFullPath(rootValue).TrimEnd(
+                            Path.DirectorySeparatorChar,
+                            Path.AltDirectorySeparatorChar),
+                        "Bonjour",
+                        BonjourExecutableName);
+                    if (string.Equals(
+                            normalizedPath, expected,
+                            StringComparison.OrdinalIgnoreCase))
+                        return true;
+                }
+                catch (ArgumentException) { }
+                catch (NotSupportedException) { }
+                catch (PathTooLongException) { }
+            }
+            return false;
+        }
+
+        private static bool TryGetContainingProgramFilesRoot(
+            string path, out string trustedRoot)
+        {
+            trustedRoot = "";
+            string[] roots =
+            {
+                Environment.GetFolderPath(
+                    Environment.SpecialFolder.ProgramFiles),
+                Environment.GetFolderPath(
+                    Environment.SpecialFolder.ProgramFilesX86)
+            };
+            foreach (string root in roots)
+            {
+                if (string.IsNullOrWhiteSpace(root))
+                    continue;
+                string normalizedRoot;
+                try
+                {
+                    normalizedRoot = Path.GetFullPath(root).TrimEnd(
+                        Path.DirectorySeparatorChar,
+                        Path.AltDirectorySeparatorChar);
+                }
+                catch (ArgumentException)
+                {
+                    continue;
+                }
+                string prefix = normalizedRoot +
+                    Path.DirectorySeparatorChar;
+                if (path.StartsWith(
+                        prefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    trustedRoot = normalizedRoot;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static bool IsWritableByCurrentToken(
+            FileSystemSecurity security,
+            WindowsIdentity identity,
+            WindowsPrincipal principal)
+        {
+            if (security == null || identity == null ||
+                identity.User == null || principal == null)
+                return true;
+
+            SecurityIdentifier owner = security.GetOwner(
+                typeof(SecurityIdentifier)) as SecurityIdentifier;
+            if (owner != null && (owner.Equals(identity.User) ||
+                principal.IsInRole(owner)))
+                return true;
+
+            const FileSystemRights dangerous =
+                FileSystemRights.WriteData |
+                FileSystemRights.AppendData |
+                FileSystemRights.WriteExtendedAttributes |
+                FileSystemRights.WriteAttributes |
+                FileSystemRights.DeleteSubdirectoriesAndFiles |
+                FileSystemRights.Delete |
+                FileSystemRights.ChangePermissions |
+                FileSystemRights.TakeOwnership;
+            AuthorizationRuleCollection rules = security.GetAccessRules(
+                true, true, typeof(SecurityIdentifier));
+            foreach (FileSystemAccessRule rule in rules)
+            {
+                if ((rule.PropagationFlags & PropagationFlags.InheritOnly) != 0)
+                    continue;
+
+                SecurityIdentifier sid =
+                    rule.IdentityReference as SecurityIdentifier;
+                if (sid == null || (!sid.Equals(identity.User) &&
+                    !principal.IsInRole(sid)))
+                    continue;
+
+                FileSystemRights rights =
+                    rule.FileSystemRights & dangerous;
+                // This is deliberately more conservative than trying to
+                // reproduce Windows AccessCheck semantics. Any applicable
+                // allow for a primitive mutation right makes this path
+                // unsuitable as a trusted elevated-service target, even if
+                // another ACE may deny the same right.
+                if (rule.AccessControlType == AccessControlType.Allow &&
+                    rights != 0)
+                    return true;
+            }
+            return false;
         }
 
         private static bool HasExpectedPrivateMdnsRule(
@@ -363,20 +530,6 @@ namespace AirPlayReceiverMvp
                 string.Equals(
                     actual.Trim(), expected,
                     StringComparison.OrdinalIgnoreCase);
-        }
-
-        private static string QuoteNetshValue(string value)
-        {
-            if (string.IsNullOrEmpty(value) ||
-                value.IndexOf('"') >= 0)
-                throw new ArgumentException("Unsafe netsh value.", "value");
-            for (int index = 0; index < value.Length; index++)
-            {
-                if (char.IsControl(value[index]))
-                    throw new ArgumentException(
-                        "Unsafe netsh value.", "value");
-            }
-            return "\"" + value + "\"";
         }
 
         private static bool TryReadFirewallRules(
@@ -514,49 +667,5 @@ namespace AirPlayReceiverMvp
             }
         }
 
-        private static BonjourFirewallChangeResult RunNetshElevated(
-            string arguments, out int exitCode)
-        {
-            exitCode = -1;
-            string netshPath = Path.Combine(
-                Environment.SystemDirectory, "netsh.exe");
-            if (!File.Exists(netshPath))
-                return BonjourFirewallChangeResult.Failed;
-
-            var start = new ProcessStartInfo
-            {
-                FileName = netshPath,
-                Arguments = arguments,
-                Verb = "runas",
-                UseShellExecute = true,
-                WindowStyle = ProcessWindowStyle.Hidden,
-                WorkingDirectory = Environment.SystemDirectory,
-                ErrorDialog = false
-            };
-
-            try
-            {
-                using (Process process = Process.Start(start))
-                {
-                    if (process == null)
-                        return BonjourFirewallChangeResult.Failed;
-                    if (!process.WaitForExit(
-                            ElevatedCommandTimeoutMilliseconds))
-                        return BonjourFirewallChangeResult.Failed;
-                    exitCode = process.ExitCode;
-                    return BonjourFirewallChangeResult.Applied;
-                }
-            }
-            catch (Win32Exception exception)
-            {
-                return exception.NativeErrorCode == ErrorCancelled
-                    ? BonjourFirewallChangeResult.ElevationCanceled
-                    : BonjourFirewallChangeResult.Failed;
-            }
-            catch (InvalidOperationException)
-            {
-                return BonjourFirewallChangeResult.Failed;
-            }
-        }
     }
 }

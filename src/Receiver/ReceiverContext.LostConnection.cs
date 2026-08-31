@@ -28,6 +28,8 @@ namespace AirPlayReceiverMvp
         private int lostConnectionLostStatePending;
         private int lostConnectionReconnectHintPending;
         private int lostConnectionRecoveredStatePending;
+        private int lostConnectionPlaceholderDismissedSessionGeneration = -1;
+        private int lostConnectionRendererDismissedSessionGeneration = -1;
         private long lostConnectionContinuityToken;
         private int lostConnectionFeedbackHandoffPending;
         private long lostConnectionFeedbackHandoffToken;
@@ -40,6 +42,21 @@ namespace AirPlayReceiverMvp
 
         private void QueueLostConnectionPlaceholder()
         {
+            int sessionGeneration = Interlocked.CompareExchange(
+                ref mirrorSessionGeneration, 0, 0);
+            if (Interlocked.CompareExchange(
+                    ref lostConnectionPlaceholderDismissedSessionGeneration,
+                    0,
+                    0) == sessionGeneration ||
+                Interlocked.CompareExchange(
+                    ref lostConnectionRendererDismissedSessionGeneration,
+                    0,
+                    0) == sessionGeneration)
+            {
+                Interlocked.Exchange(
+                    ref lostConnectionPlaceholderShowPending, 0);
+                return;
+            }
             InvalidateLostConnectionRendererHandoff();
             Interlocked.Exchange(ref lostConnectionRendererHandoffPending, 0);
             Interlocked.Exchange(ref lostConnectionLostStatePending, 1);
@@ -216,6 +233,10 @@ namespace AirPlayReceiverMvp
                 snapshot = null;
                 placeholder.ShowInTaskbar = settings.ShowStreamInTaskbar;
                 placeholder.TopMost = settings.AlwaysOnTop;
+                placeholder.UserDismissed += delegate
+                {
+                    DismissLostConnectionPlaceholderForCurrentSession();
+                };
                 placeholder.FormClosed += delegate
                 {
                     if (ReferenceEquals(lostConnectionForm, placeholder))
@@ -254,6 +275,42 @@ namespace AirPlayReceiverMvp
                 if (snapshot != null)
                     snapshot.Dispose();
             }
+        }
+
+        private void DismissLostConnectionPlaceholderForCurrentSession()
+        {
+            int sessionGeneration = Interlocked.CompareExchange(
+                ref mirrorSessionGeneration, 0, 0);
+            Interlocked.Exchange(
+                ref lostConnectionPlaceholderDismissedSessionGeneration,
+                sessionGeneration);
+            QueueLostConnectionPlaceholderClose();
+            Log("Lost-connection placeholder was dismissed for the current " +
+                "mirroring session; delayed loss events will stay hidden.");
+        }
+
+        private void MarkRendererDismissedForCurrentSession()
+        {
+            int sessionGeneration = Interlocked.CompareExchange(
+                ref mirrorSessionGeneration, 0, 0);
+            if (sessionGeneration <= 0)
+                return;
+            Interlocked.Exchange(
+                ref lostConnectionRendererDismissedSessionGeneration,
+                sessionGeneration);
+            QueueLostConnectionPlaceholderClose();
+            Log("The renderer was minimized with its caption Close action; " +
+                "loss UI is suppressed for the current mirroring session.");
+        }
+
+        private void ClearRendererDismissedForCurrentSession()
+        {
+            int sessionGeneration = Interlocked.CompareExchange(
+                ref mirrorSessionGeneration, 0, 0);
+            Interlocked.CompareExchange(
+                ref lostConnectionRendererDismissedSessionGeneration,
+                -1,
+                sessionGeneration);
         }
 
         private static LostConnectionPlaceholderAction
@@ -659,7 +716,7 @@ namespace AirPlayReceiverMvp
             try
             {
                 if (!placeholder.IsDisposed)
-                    placeholder.Close();
+                    placeholder.CloseProgrammatically();
             }
             catch { }
             finally

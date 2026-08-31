@@ -79,6 +79,28 @@ the bundled responder as a system service. The new private
 local GPL-covered changes; upstream revisions, redistributed runtime,
 dependencies, and third-party license scope remain unchanged.
 
+The local 0.12.21 extension changes only AeroMirror's already patched DNS-SD
+failure handling. Bonjour error `-65563` becomes terminal for the current
+registration generation, emits one stable prerequisite-unavailable result,
+and cancels the native retry source until an explicit refresh starts a new
+generation. It adds no responder, service-management code, protocol feature,
+runtime dependency, or license scope; the pinned upstream revisions and
+redistributed runtime remain unchanged.
+
+The AeroMirror 0.12.22 extension adds no new dependency or upstream protocol
+implementation. It makes the existing AirPlay pair-setup path request one
+ephemeral PIN from the managed shell for an unknown client, binds that request
+to the exact native connection, clears transient PIN storage after SRP use,
+and retains only the established trusted public key in the existing register.
+It also hardens the existing Qt-owned fullscreen transition so borderless
+styles and saved normal geometry have one owner. Its dedicated control-marker
+emitter and ordinary-log sanitizer prevent remote metadata from becoming a
+shell control line. The same local patch adds bounded HLS language/URI parsing
+and case-insensitive HTTP header-name lookup; these changes introduce no
+additional dependency. These remain
+local GPL-covered changes; upstream revisions, redistributed runtime,
+dependencies, and third-party license scope are unchanged.
+
 The AeroMirror 0.11 network review installer does **not** mirror the full
 third-party runtime. During installation it downloads this unchanged upstream
 asset directly from GitHub and verifies it before extraction:
@@ -91,9 +113,9 @@ asset directly from GitHub and verifies it before extraction:
   `https://github.com/leapbtw/uxplay-windows/tree/8cf3424b438424bc99a89155bd29a789f48a43c0`
 
 Each published AeroMirror review release pairs Setup with that version's exact
-AeroMirror and patched native corresponding-source archives. The current local
-0.12.20 candidate would use `AeroMirror-source-0.12.20.zip` and
-`AeroMirror-native-source-0.12.20.zip`; neither is public yet.
+AeroMirror and patched native corresponding-source archives. AeroMirror 0.12.22
+uses `AeroMirror-source-0.12.22.zip` and
+`AeroMirror-native-source-0.12.22.zip` when the version is published.
 
 All previously published assets remain immutable. Every later release must use
 its own versioned filenames rather than replace an earlier asset. The native

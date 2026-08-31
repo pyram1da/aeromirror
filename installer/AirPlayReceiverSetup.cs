@@ -1,32 +1,59 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.IO.Compression;
+using System.Globalization;
 using System.Net;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text;
 using System.Threading;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
 using Microsoft.Win32;
+using ServiceController = System.ServiceProcess.ServiceController;
+using ServiceControllerStatus =
+    System.ServiceProcess.ServiceControllerStatus;
+using ServiceStartMode = System.ServiceProcess.ServiceStartMode;
 
 [assembly: AssemblyTitle("AeroMirror Setup")]
 [assembly: AssemblyProduct("AeroMirror")]
 [assembly: AssemblyCompany("AeroMirror open-source project")]
-[assembly: AssemblyVersion("0.12.20.0")]
-[assembly: AssemblyFileVersion("0.12.20.0")]
+[assembly: AssemblyVersion("0.12.22.0")]
+[assembly: AssemblyFileVersion("0.12.22.0")]
 
 namespace AirPlayReceiverSetup
 {
     internal static class Program
     {
+        internal const string BonjourMachineConfigurationArgument =
+            "/configure-bonjour-machine";
+
         [STAThread]
         private static void Main(string[] args)
         {
+            // This is the only elevated mode. Dispatch it before touching the
+            // per-user log, current directory, UI, or any user-writable path.
+            if (IsExactBonjourMachineConfigurationInvocation(args))
+            {
+                try
+                {
+                    InstallerOperations.ConfigureBonjourMachineElevated();
+                }
+                catch
+                {
+                    Environment.ExitCode = 2;
+                }
+                return;
+            }
+
             string originalWorkingDirectory = Environment.CurrentDirectory;
             try
             {
@@ -56,7 +83,10 @@ namespace AirPlayReceiverSetup
                 return;
             }
 
-            bool updateRequested = HasArgument(args, "/update");
+            bool automaticUpdateRequested =
+                HasArgument(args, "/automatic-update");
+            bool updateRequested = automaticUpdateRequested ||
+                HasArgument(args, "/update");
             if (!Environment.Is64BitOperatingSystem)
             {
                 MessageBox.Show(
@@ -122,55 +152,319 @@ namespace AirPlayReceiverSetup
                 }
                 return;
             }
-            ScheduleSourceDeletion(args);
             if (args.Length > 0 &&
                 string.Equals(
-                    args[0], "/install-silent",
+                    args[0], "/verify-bonjour-recovery",
                     StringComparison.OrdinalIgnoreCase))
             {
                 try
                 {
-                    ShortcutSelection shortcuts =
-                        InstallerOperations.GetShortcutSelection(true);
-                    SetupLog.Write("Silent installation started.");
-                    InstallerOperations.Install(
-                        shortcuts.StartMenu, shortcuts.Desktop);
-                    SetupLog.Write("Silent installation completed successfully.");
+                    InstallerOperations.VerifyBonjourRecoveryPolicyLogic();
+                    SetupLog.Write(
+                        "Bonjour recovery-policy verification completed successfully.");
                 }
                 catch (Exception ex)
                 {
-                    SetupLog.Write("Silent installation failed: " + ex);
+                    SetupLog.Write(
+                        "Bonjour recovery-policy verification failed: " + ex);
                     Environment.ExitCode = 2;
                 }
                 return;
             }
+            bool uninstallWorkerRequested = args.Length > 0 &&
+                string.Equals(
+                    args[0], "/uninstall-worker",
+                    StringComparison.OrdinalIgnoreCase);
+            bool silentInstallRequested = args.Length > 0 &&
+                string.Equals(
+                    args[0], "/install-silent",
+                    StringComparison.OrdinalIgnoreCase);
+            bool uninstallRequested = args.Length > 0 &&
+                string.Equals(
+                    args[0], "/uninstall",
+                    StringComparison.OrdinalIgnoreCase);
 
-            if (args.Length > 0 &&
-                string.Equals(args[0], "/uninstall-worker", StringComparison.OrdinalIgnoreCase))
+            if (uninstallRequested)
             {
-                UninstallWorker(args);
-                return;
-            }
-
-            Application.EnableVisualStyles();
-            Application.SetCompatibleTextRenderingDefault(false);
-
-            if (args.Length > 0 &&
-                string.Equals(args[0], "/uninstall", StringComparison.OrdinalIgnoreCase))
-            {
+                Application.EnableVisualStyles();
+                Application.SetCompatibleTextRenderingDefault(false);
                 BeginUninstall();
                 return;
             }
 
-            Version installedVersion = InstallerOperations.GetInstalledVersion();
-            if (InstallerOperations.ShouldRunAutomaticInstall(
-                    updateRequested, installedVersion, SetupForm.SetupVersion))
+            bool automaticInstallRequested = false;
+            if (!silentInstallRequested && !uninstallWorkerRequested)
             {
-                RunAutomaticInstall(updateRequested);
+                Version installedVersion =
+                    InstallerOperations.GetInstalledVersion();
+                automaticInstallRequested =
+                    InstallerOperations.ShouldRunAutomaticInstall(
+                        updateRequested, installedVersion,
+                        SetupForm.SetupVersion);
+                if (!automaticInstallRequested)
+                {
+                    if (InstallerOperations.ShouldAbortInstallAfterLock(
+                            installedVersion, SetupForm.SetupVersion))
+                    {
+                        if (updateRequested)
+                        {
+                            // Re-enter the normal transaction route. The
+                            // installed tree may belong to another Setup that
+                            // has not committed yet; its version and recovery
+                            // launch must be revalidated under the same mutex.
+                            automaticInstallRequested = true;
+                        }
+                        else
+                        {
+                            SetupLog.Write(
+                                "Setup refused a downgrade because the " +
+                                "installed executable is newer than this Setup.");
+                            Environment.ExitCode = 4;
+                            MessageBox.Show(
+                                "На компьютере уже установлена более новая " +
+                                    "версия AeroMirror. Установка более старой " +
+                                    "версии отменена.",
+                                "AeroMirror",
+                                MessageBoxButtons.OK,
+                                MessageBoxIcon.Information);
+                            return;
+                        }
+                    }
+                    if (!automaticInstallRequested)
+                    {
+                        Application.EnableVisualStyles();
+                        Application.SetCompatibleTextRenderingDefault(false);
+                        Application.Run(new SetupForm(updateRequested));
+                        return;
+                    }
+                }
+            }
+
+            int mutexWaitMilliseconds =
+                automaticUpdateRequested || uninstallWorkerRequested
+                    ? 30000
+                    : 0;
+            Mutex installationMutex;
+            bool installationMutexAcquired;
+            try
+            {
+                installationMutexAcquired = TryAcquireInstallationMutex(
+                    GetInstallationMutexName(), mutexWaitMilliseconds,
+                    out installationMutex);
+            }
+            catch (Exception ex)
+            {
+                SetupLog.Write(
+                    "Installation transaction lock failed: " + ex);
+                Environment.ExitCode = 3;
+                if (updateRequested)
+                    WaitForTransactionAndRelaunchAfterSetupGateFailure(
+                        automaticUpdateRequested);
+                else if (!uninstallWorkerRequested)
+                    ShowInstallationTransactionUnavailable();
+                return;
+            }
+            if (!installationMutexAcquired)
+            {
+                SetupLog.Write(
+                    "Another AeroMirror installation transaction is already " +
+                    "running; this invocation will exit without changes.");
+                Environment.ExitCode = 3;
+                if (updateRequested)
+                    WaitForTransactionAndRelaunchAfterSetupGateFailure(
+                        automaticUpdateRequested);
+                else if (!uninstallWorkerRequested)
+                    ShowInstallationTransactionUnavailable();
                 return;
             }
 
-            Application.Run(new SetupForm(updateRequested));
+            try
+            {
+                if (automaticInstallRequested)
+                {
+                    Version lockedInstalledVersion =
+                        InstallerOperations.GetInstalledVersion();
+                    if (InstallerOperations.ShouldAbortInstallAfterLock(
+                            lockedInstalledVersion,
+                            SetupForm.SetupVersion))
+                    {
+                        SetupLog.Write(
+                            "Setup aborted under the installation lock because " +
+                            "a newer executable was installed while this " +
+                            "invocation was waiting.");
+                        Environment.ExitCode = 4;
+                        string recoveryDetail;
+                        TryRelaunchInstalledShellAfterFailure(
+                            automaticUpdateRequested,
+                            out recoveryDetail);
+                        SetupLog.Write(recoveryDetail);
+                        return;
+                    }
+                }
+                ScheduleSourceDeletion(args);
+                if (silentInstallRequested)
+                {
+                    try
+                    {
+                        ShortcutSelection shortcuts =
+                            InstallerOperations.GetShortcutSelection(true);
+                        SetupLog.Write("Silent installation started.");
+                        InstallerOperations.Install(
+                            shortcuts.StartMenu, shortcuts.Desktop);
+                        SetupLog.Write(
+                            "Silent installation completed successfully.");
+                    }
+                    catch (Exception ex)
+                    {
+                        SetupLog.Write("Silent installation failed: " + ex);
+                        Environment.ExitCode = 2;
+                    }
+                    return;
+                }
+
+                if (uninstallWorkerRequested)
+                {
+                    UninstallWorker(args);
+                    return;
+                }
+
+                if (!automaticInstallRequested)
+                    throw new InvalidOperationException(
+                        "Setup transaction routing was not resolved.");
+                RunAutomaticInstall(
+                    updateRequested, automaticUpdateRequested);
+            }
+            finally
+            {
+                try { installationMutex.ReleaseMutex(); }
+                catch { }
+                installationMutex.Dispose();
+            }
+        }
+
+        internal static string GetInstallationMutexName()
+        {
+            string identity = "unknown";
+            try
+            {
+                WindowsIdentity current = WindowsIdentity.GetCurrent();
+                if (current != null && current.User != null)
+                    identity = current.User.Value;
+            }
+            catch
+            {
+                identity = Environment.UserDomainName + "-" +
+                    Environment.UserName;
+            }
+            using (SHA256 sha = SHA256.Create())
+            {
+                byte[] digest = sha.ComputeHash(
+                    Encoding.UTF8.GetBytes(identity));
+                return "Global\\AeroMirror.Setup.Install." +
+                    BitConverter.ToString(digest).Replace("-", "");
+            }
+        }
+
+        internal static bool TryAcquireInstallationMutex(
+            string name, int waitMilliseconds, out Mutex mutex)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+                throw new ArgumentException("Mutex name is required.", "name");
+            if (waitMilliseconds < 0)
+                throw new ArgumentOutOfRangeException("waitMilliseconds");
+            mutex = null;
+            Mutex candidate = null;
+            try
+            {
+                candidate = new Mutex(false, name);
+                bool acquired;
+                try
+                {
+                    acquired = candidate.WaitOne(waitMilliseconds, false);
+                }
+                catch (AbandonedMutexException)
+                {
+                    acquired = true;
+                }
+                if (!acquired)
+                {
+                    candidate.Dispose();
+                    return false;
+                }
+                mutex = candidate;
+                return true;
+            }
+            catch
+            {
+                if (candidate != null)
+                    candidate.Dispose();
+                throw;
+            }
+        }
+
+        private static void ShowInstallationTransactionUnavailable()
+        {
+            MessageBox.Show(
+                "Другая установка или обновление AeroMirror уже выполняется. " +
+                    "Дождитесь её завершения и повторите попытку.",
+                "AeroMirror",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+
+        private static void WaitForTransactionAndRelaunchAfterSetupGateFailure(
+            bool automaticUpdateRequested)
+        {
+            Mutex recoveryMutex;
+            bool acquired;
+            try
+            {
+                acquired = TryAcquireInstallationMutex(
+                    GetInstallationMutexName(), 300000,
+                    out recoveryMutex);
+            }
+            catch (Exception ex)
+            {
+                SetupLog.Write(
+                    "Could not wait for the active Setup transaction before " +
+                    "receiver recovery: " + ex);
+                return;
+            }
+            if (!acquired)
+            {
+                SetupLog.Write(
+                    "The active Setup transaction did not finish within the " +
+                    "bounded receiver-recovery wait; no executable was " +
+                    "started from the mutable installation tree.");
+                return;
+            }
+            try
+            {
+                // Keep the transaction boundary through path resolution,
+                // process creation, and the bounded early-exit check. Another
+                // Setup must not replace the installed tree between the wait
+                // above and this recovery launch.
+                string recoveryDetail;
+                TryRelaunchInstalledShellAfterFailure(
+                    automaticUpdateRequested, true, out recoveryDetail);
+                SetupLog.Write(recoveryDetail);
+            }
+            finally
+            {
+                try { recoveryMutex.ReleaseMutex(); }
+                catch { }
+                recoveryMutex.Dispose();
+            }
+        }
+
+        internal static bool IsExactBonjourMachineConfigurationInvocation(
+            string[] args)
+        {
+            return args != null &&
+                args.Length == 1 &&
+                string.Equals(
+                    args[0], BonjourMachineConfigurationArgument,
+                    StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool HasArgument(string[] args, string expected)
@@ -194,7 +488,8 @@ namespace AirPlayReceiverSetup
                 MoveFileFlags.DelayUntilReboot);
         }
 
-        private static void RunAutomaticInstall(bool updateRequested)
+        private static void RunAutomaticInstall(
+            bool updateRequested, bool automaticUpdateRequested)
         {
             string action = updateRequested ? "update" : "reinstall";
             string executable;
@@ -215,10 +510,18 @@ namespace AirPlayReceiverSetup
             {
                 SetupLog.Write("Automatic " + action + " failed: " + ex);
                 Environment.ExitCode = 2;
+                string recoveryDetail;
+                bool recovered = TryRelaunchInstalledShellAfterFailure(
+                    automaticUpdateRequested, out recoveryDetail);
+                SetupLog.Write(recoveryDetail);
                 MessageBox.Show(
                     "Не удалось автоматически " +
                     (updateRequested ? "обновить" : "переустановить") +
-                    " AeroMirror.\r\n\r\n" + ex.Message,
+                    " AeroMirror.\r\n\r\n" + ex.Message +
+                    (recovered
+                        ? "\r\n\r\nУстановленная копия AeroMirror снова запущена."
+                        : "\r\n\r\nНе удалось снова запустить установленную " +
+                            "копию; запустите AeroMirror из меню «Пуск»."),
                     "AeroMirror",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
@@ -229,6 +532,8 @@ namespace AirPlayReceiverSetup
             {
                 Process.Start(new ProcessStartInfo(executable)
                 {
+                    Arguments = InstallerOperations.GetPostInstallRelaunchArguments(
+                        automaticUpdateRequested),
                     WorkingDirectory = Path.GetDirectoryName(executable),
                     UseShellExecute = true
                 });
@@ -245,6 +550,65 @@ namespace AirPlayReceiverSetup
                     "AeroMirror",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Warning);
+            }
+        }
+
+        internal static bool TryRelaunchInstalledShellAfterFailure(
+            bool automaticUpdateRequested, out string detail)
+        {
+            return TryRelaunchInstalledShellAfterFailure(
+                automaticUpdateRequested, false, out detail);
+        }
+
+        internal static bool TryRelaunchInstalledShellAfterFailure(
+            bool automaticUpdateRequested,
+            bool setupTransactionBusy,
+            out string detail)
+        {
+            string executable =
+                InstallerOperations.GetInstalledExecutablePath();
+            if (string.IsNullOrEmpty(executable))
+            {
+                detail = "No installed AeroMirror executable was available " +
+                    "after the failed Setup transaction.";
+                return false;
+            }
+            try
+            {
+                using (Process relaunched = Process.Start(
+                    new ProcessStartInfo(executable)
+                    {
+                        Arguments = InstallerOperations
+                            .GetPostInstallFailureRelaunchArguments(
+                                automaticUpdateRequested,
+                                setupTransactionBusy),
+                        WorkingDirectory = Path.GetDirectoryName(executable),
+                        UseShellExecute = true
+                    }))
+                {
+                    if (relaunched == null)
+                    {
+                        detail = "Windows did not return the relaunched " +
+                            "AeroMirror process.";
+                        return false;
+                    }
+                    if (relaunched.WaitForExit(1500))
+                    {
+                        detail = "The installed AeroMirror process exited " +
+                            "during the recovery confirmation window; code " +
+                            relaunched.ExitCode + ".";
+                        return false;
+                    }
+                }
+                detail = "The installed AeroMirror shell was relaunched after " +
+                    "the failed Setup transaction.";
+                return true;
+            }
+            catch (Exception ex)
+            {
+                detail = "Installed AeroMirror relaunch after failed Setup " +
+                    "also failed: " + ex;
+                return false;
             }
         }
 
@@ -432,7 +796,7 @@ namespace AirPlayReceiverSetup
 
     internal sealed class SetupForm : Form
     {
-        internal static readonly Version SetupVersion = new Version(0, 12, 20);
+        internal static readonly Version SetupVersion = new Version(0, 12, 22);
         private readonly CheckBox startMenu;
         private readonly CheckBox desktop;
         private readonly CheckBox launch;
@@ -440,12 +804,18 @@ namespace AirPlayReceiverSetup
         private readonly ProgressBar progress;
         private readonly Label state;
         private readonly Version installedVersion;
+        private readonly int installedVersionComparison;
         private readonly bool updateRequested;
+        private int installInProgress;
 
         public SetupForm(bool updateRequested)
         {
             this.updateRequested = updateRequested;
             installedVersion = InstallerOperations.GetInstalledVersion();
+            installedVersionComparison = installedVersion == null
+                ? 0
+                : InstallerOperations.ComparePublicVersions(
+                    installedVersion, SetupVersion);
             Text = "Установка AeroMirror";
             Icon = Icon.ExtractAssociatedIcon(Assembly.GetExecutingAssembly().Location);
             StartPosition = FormStartPosition.CenterScreen;
@@ -474,11 +844,11 @@ namespace AirPlayReceiverSetup
                 ? updateRequested
                 ? "Обновление AeroMirror · текущие настройки сохранятся"
                 : "Установка для текущего пользователя · без прав администратора"
-                : installedVersion.CompareTo(SetupVersion) < 0
+                : installedVersionComparison < 0
                 ? "Обновление " + installedVersion.ToString(3) +
                     " → " + SetupVersion.ToString(3) +
                     " · настройки сохранятся"
-                : installedVersion.CompareTo(SetupVersion) == 0
+                : installedVersionComparison == 0
                 ? "Переустановка версии " + SetupVersion.ToString(3) +
                     " · настройки сохранятся"
                 : "Установлена более новая версия " +
@@ -539,7 +909,7 @@ namespace AirPlayReceiverSetup
             install = new Button();
             install.Text = installedVersion == null
                 ? updateRequested ? "Обновить" : "Установить"
-                : installedVersion.CompareTo(SetupVersion) < 0
+                : installedVersionComparison < 0
                 ? "Обновить"
                 : "Переустановить";
             install.Size = new Size(150, 40);
@@ -554,27 +924,16 @@ namespace AirPlayReceiverSetup
 
         private void OnInstall(object sender, EventArgs e)
         {
-            if (installedVersion != null &&
-                installedVersion.CompareTo(SetupVersion) > 0)
-            {
-                DialogResult answer = MessageBox.Show(
-                    this,
-                    "На компьютере установлена более новая версия " +
-                    installedVersion.ToString(3) +
-                    ".\r\n\r\nУстановить более старую версию " +
-                    SetupVersion.ToString(3) + "?",
-                    "AeroMirror",
-                    MessageBoxButtons.YesNo,
-                    MessageBoxIcon.Warning);
-                if (answer != DialogResult.Yes)
-                    return;
-            }
+            if (Interlocked.CompareExchange(
+                    ref installInProgress, 1, 0) != 0)
+                return;
 
             install.Enabled = false;
             startMenu.Enabled = false;
             desktop.Enabled = false;
             launch.Enabled = false;
             progress.Visible = true;
+            ControlBox = false;
             state.Text = "Скачиваем и устанавливаем проверенный runtime…";
 
             bool createStartMenu = startMenu.Checked;
@@ -589,8 +948,38 @@ namespace AirPlayReceiverSetup
                     createDesktop + ".");
                 try
                 {
-                    string executable = InstallerOperations.Install(
-                        createStartMenu, createDesktop);
+                    Mutex transactionMutex;
+                    if (!Program.TryAcquireInstallationMutex(
+                            Program.GetInstallationMutexName(), 0,
+                            out transactionMutex))
+                    {
+                        throw new InvalidOperationException(
+                            "Другая установка или обновление AeroMirror уже " +
+                            "выполняется. Дождитесь её завершения и повторите " +
+                            "попытку.");
+                    }
+                    string executable;
+                    try
+                    {
+                        Version lockedInstalledVersion =
+                            InstallerOperations.GetInstalledVersion();
+                        if (InstallerOperations.ShouldAbortInstallAfterLock(
+                                lockedInstalledVersion, SetupVersion))
+                        {
+                            throw new InvalidOperationException(
+                                "Во время ожидания была установлена более " +
+                                "новая версия AeroMirror. Установка старой " +
+                                "версии отменена.");
+                        }
+                        executable = InstallerOperations.Install(
+                            createStartMenu, createDesktop);
+                    }
+                    finally
+                    {
+                        try { transactionMutex.ReleaseMutex(); }
+                        catch { }
+                        transactionMutex.Dispose();
+                    }
                     SetupLog.Write(
                         "Interactive installation completed successfully.");
                     BeginInvoke((MethodInvoker)delegate
@@ -607,6 +996,8 @@ namespace AirPlayReceiverSetup
                                 {
                                     UseShellExecute = true
                                 });
+                                Interlocked.Exchange(ref installInProgress, 0);
+                                ControlBox = true;
                                 Close();
                             }
                             catch (Exception launchError)
@@ -615,6 +1006,8 @@ namespace AirPlayReceiverSetup
                                     "Launching AeroMirror after installation failed: " +
                                     launchError);
                                 Show();
+                                Interlocked.Exchange(ref installInProgress, 0);
+                                ControlBox = true;
                                 state.Text = "Приложение установлено, но не запущено.";
                                 state.ForeColor = Color.FromArgb(160, 45, 45);
                                 MessageBox.Show(
@@ -628,6 +1021,8 @@ namespace AirPlayReceiverSetup
                         }
 
                         state.Text = "Готово. Приложение установлено.";
+                        Interlocked.Exchange(ref installInProgress, 0);
+                        ControlBox = true;
                         install.Text = "Закрыть";
                         install.Enabled = true;
                         install.Click -= OnInstall;
@@ -640,6 +1035,8 @@ namespace AirPlayReceiverSetup
                     BeginInvoke((MethodInvoker)delegate
                     {
                         progress.Visible = false;
+                        Interlocked.Exchange(ref installInProgress, 0);
+                        ControlBox = true;
                         state.Text = "Установка не завершена.";
                         state.ForeColor = Color.FromArgb(160, 45, 45);
                         install.Enabled = true;
@@ -655,6 +1052,19 @@ namespace AirPlayReceiverSetup
                     });
                 }
             });
+        }
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            if (e.CloseReason == CloseReason.UserClosing &&
+                Interlocked.CompareExchange(
+                    ref installInProgress, 0, 0) == 1)
+            {
+                e.Cancel = true;
+                state.Text = "Дождитесь завершения установки…";
+                return;
+            }
+            base.OnFormClosing(e);
         }
 
         private static Label MakeLabel(string text, int x, int y)
@@ -754,6 +1164,81 @@ namespace AirPlayReceiverSetup
         private const int GracefulProcessStopMilliseconds = 1500;
         private const int InstallDirectoryMoveTimeoutMilliseconds = 10000;
         private const int InstallDirectoryMoveRetryDelayMilliseconds = 250;
+        private const int BonjourElevatedSelfTimeoutMilliseconds = 180000;
+        private const int BonjourHelperTimeoutMilliseconds = 210000;
+        private const int BonjourServiceWaitMilliseconds = 20000;
+        private const int ErrorCancelled = 1223;
+        private const uint ScManagerConnect = 0x0001;
+        private const uint ServiceQueryConfig = 0x0001;
+        private const uint ServiceChangeConfig = 0x0002;
+        private const uint ServiceStart = 0x0010;
+        private const uint ServiceNoChange = 0xffffffff;
+        private const uint ServiceAutoStart = 2;
+        private const uint ServiceConfigFailureActions = 2;
+        private const uint ServiceConfigFailureActionsFlag = 4;
+        private const int ScActionNone = 0;
+        private const int ScActionRestart = 1;
+        private const int ErrorServiceAlreadyRunning = 1056;
+        private const uint BonjourFailureResetSeconds = 86400;
+        private const string BonjourFirewallRuleName =
+            "AeroMirror Bonjour mDNS (Private)";
+
+        private static readonly uint[] BonjourRestartDelaysMilliseconds =
+        {
+            5000,
+            30000,
+            120000
+        };
+
+        private static readonly string[] BonjourServiceNames =
+        {
+            "Bonjour Service",
+            "mDNSResponder"
+        };
+
+        private sealed class BonjourWatchdogState
+        {
+            // 0 = running, 1 = completed, 2 = watchdog owns termination.
+            internal int CompletionState;
+        }
+
+        private sealed class BonjourFirewallRuleSnapshot
+        {
+            internal string Name;
+            internal bool Enabled;
+            internal int Direction;
+            internal int Action;
+            internal int Protocol;
+            internal int Profiles;
+            internal string ApplicationName;
+            internal string LocalPorts;
+            internal string RemoteAddresses;
+            internal bool EdgeTraversal;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct ServiceFailureActionsNative
+        {
+            internal uint ResetPeriod;
+            internal IntPtr RebootMessage;
+            internal IntPtr Command;
+            internal uint ActionCount;
+            internal IntPtr Actions;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct ServiceActionNative
+        {
+            internal int Type;
+            internal uint Delay;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct ServiceFailureActionsFlagNative
+        {
+            [MarshalAs(UnmanagedType.Bool)]
+            internal bool Enabled;
+        }
 
         private sealed class RegistryValueSnapshot
         {
@@ -933,6 +1418,7 @@ namespace AirPlayReceiverSetup
 
         internal static Version GetInstalledVersion()
         {
+            Version registryVersion = null;
             try
             {
                 using (RegistryKey key =
@@ -941,35 +1427,106 @@ namespace AirPlayReceiverSetup
                     string value = key == null
                         ? null : key.GetValue("DisplayVersion") as string;
                     Version version;
-                    if (Version.TryParse(value, out version))
-                        return version;
+                    if (TryParseInstalledPublicVersion(value, out version))
+                        registryVersion = version;
                 }
             }
             catch { }
 
-            try
+            Version executableVersion = null;
+            bool executablePresent = false;
+            string[] executableNames =
             {
-                string[] executableNames =
+                "AeroMirror.exe",
+                "AirPlayReceiverMvp.exe"
+            };
+            foreach (string executableName in executableNames)
+            {
+                string executable = Path.Combine(
+                    InstallPaths.InstallDirectory, executableName);
+                if (!File.Exists(executable))
+                    continue;
+
+                // The first existing name is authoritative. In particular,
+                // legacy metadata must not override a present primary binary,
+                // and unreadable/invalid primary metadata must force the
+                // repair path instead of trusting stale registry data.
+                executablePresent = true;
+                try
                 {
-                    "AeroMirror.exe",
-                    "AirPlayReceiverMvp.exe"
-                };
-                foreach (string executableName in executableNames)
+                    string value = FileVersionInfo.GetVersionInfo(
+                        executable).FileVersion;
+                    Version version;
+                    if (TryParseInstalledPublicVersion(value, out version))
+                        executableVersion = version;
+                }
+                catch { }
+                break;
+            }
+            return ResolveInstalledVersion(
+                registryVersion, executableVersion, executablePresent);
+        }
+
+        internal static string GetInstalledExecutablePath()
+        {
+            return ResolveInstalledExecutablePath(
+                InstallPaths.InstallDirectory);
+        }
+
+        internal static string ResolveInstalledExecutablePath(
+            string installDirectory)
+        {
+            if (string.IsNullOrWhiteSpace(installDirectory))
+                return null;
+            string root;
+            try { root = Path.GetFullPath(installDirectory); }
+            catch { return null; }
+            string[] executableNames =
+            {
+                "AeroMirror.exe",
+                "AirPlayReceiverMvp.exe"
+            };
+            foreach (string executableName in executableNames)
+            {
+                string candidate = Path.Combine(root, executableName);
+                if (IsPathWithinDirectory(candidate, root) &&
+                    File.Exists(candidate))
                 {
-                    string executable = Path.Combine(
-                        InstallPaths.InstallDirectory, executableName);
-                    if (File.Exists(executable))
-                    {
-                        string value = FileVersionInfo.GetVersionInfo(
-                            executable).FileVersion;
-                        Version version;
-                        if (Version.TryParse(value, out version))
-                            return version;
-                    }
+                    return candidate;
                 }
             }
-            catch { }
             return null;
+        }
+
+        internal static Version ResolveInstalledVersion(
+            Version registryVersion, Version executableVersion)
+        {
+            // The executable is the installed product. Registry metadata is
+            // only a fallback for an incomplete/missing application tree.
+            return executableVersion ?? registryVersion;
+        }
+
+        internal static Version ResolveInstalledVersion(
+            Version registryVersion,
+            Version executableVersion,
+            bool executablePresent)
+        {
+            return executablePresent
+                ? executableVersion
+                : registryVersion;
+        }
+
+        internal static bool TryParseInstalledPublicVersion(
+            string value, out Version version)
+        {
+            Version parsed;
+            if (!Version.TryParse(value, out parsed) || parsed.Build < 0)
+            {
+                version = null;
+                return false;
+            }
+            version = new Version(parsed.Major, parsed.Minor, parsed.Build);
+            return true;
         }
 
         internal static ShortcutSelection GetShortcutSelection(
@@ -1004,10 +1561,63 @@ namespace AirPlayReceiverSetup
         {
             if (setupVersion == null)
                 throw new ArgumentNullException("setupVersion");
-            if (installedVersion != null &&
-                installedVersion.CompareTo(setupVersion) > 0)
+            if (ShouldAbortInstallAfterLock(
+                    installedVersion, setupVersion))
                 return false;
             return updateRequested || installedVersion != null;
+        }
+
+        internal static bool ShouldAbortInstallAfterLock(
+            Version installedVersion, Version setupVersion)
+        {
+            if (setupVersion == null)
+                throw new ArgumentNullException("setupVersion");
+            return installedVersion != null &&
+                ComparePublicVersions(installedVersion, setupVersion) > 0;
+        }
+
+        internal static int ComparePublicVersions(
+            Version left, Version right)
+        {
+            if (left == null)
+                throw new ArgumentNullException("left");
+            if (right == null)
+                throw new ArgumentNullException("right");
+            if (left.Build < 0 || right.Build < 0)
+                throw new ArgumentException(
+                    "Public versions must contain major, minor, and patch components.");
+
+            int comparison = left.Major.CompareTo(right.Major);
+            if (comparison != 0)
+                return comparison;
+            comparison = left.Minor.CompareTo(right.Minor);
+            if (comparison != 0)
+                return comparison;
+            return left.Build.CompareTo(right.Build);
+        }
+
+        internal static string GetPostInstallRelaunchArguments(
+            bool automaticUpdateRequested)
+        {
+            return automaticUpdateRequested ? "--startup" : "";
+        }
+
+        internal static string GetPostInstallFailureRelaunchArguments(
+            bool automaticUpdateRequested)
+        {
+            return GetPostInstallFailureRelaunchArguments(
+                automaticUpdateRequested, false);
+        }
+
+        internal static string GetPostInstallFailureRelaunchArguments(
+            bool automaticUpdateRequested,
+            bool setupTransactionBusy)
+        {
+            return automaticUpdateRequested
+                ? setupTransactionBusy
+                    ? "--startup --update-busy-recovery"
+                    : "--startup --update-recovery"
+                : "";
         }
 
         internal static void VerifyShortcutSelectionLogic()
@@ -1046,6 +1656,38 @@ namespace AirPlayReceiverSetup
                 ShouldRunAutomaticInstall(
                     false, SetupForm.SetupVersion, SetupForm.SetupVersion),
                 true, "same-version reinstall");
+            AssertPublicVersionComparison(
+                new Version(
+                    SetupForm.SetupVersion.Major,
+                    SetupForm.SetupVersion.Minor,
+                    SetupForm.SetupVersion.Build,
+                    0),
+                SetupForm.SetupVersion,
+                0,
+                "four-part PE version equals its three-part public version");
+            Version normalizedInstalledVersion;
+            if (!TryParseInstalledPublicVersion(
+                    SetupForm.SetupVersion.ToString(3) + ".65535",
+                    out normalizedInstalledVersion) ||
+                ComparePublicVersions(
+                    normalizedInstalledVersion, SetupForm.SetupVersion) != 0 ||
+                TryParseInstalledPublicVersion(
+                    SetupForm.SetupVersion.ToString(2),
+                    out normalizedInstalledVersion))
+            {
+                throw new InvalidOperationException(
+                    "Installed versions were not normalized to three public components.");
+            }
+            AssertAutomaticInstall(
+                ShouldRunAutomaticInstall(
+                    false,
+                    new Version(
+                        SetupForm.SetupVersion.Major,
+                        SetupForm.SetupVersion.Minor,
+                        SetupForm.SetupVersion.Build,
+                        65535),
+                    SetupForm.SetupVersion),
+                true, "PE revision does not turn a reinstall into a downgrade");
             AssertAutomaticInstall(
                 ShouldRunAutomaticInstall(
                     true, new Version(
@@ -1054,10 +1696,67 @@ namespace AirPlayReceiverSetup
                         SetupForm.SetupVersion.Build + 1),
                     SetupForm.SetupVersion),
                 false, "automatic downgrade prevention");
+            if (!ShouldRunAutomaticInstall(
+                    true, new Version(0, 12, 20),
+                    SetupForm.SetupVersion) ||
+                !ShouldAbortInstallAfterLock(
+                    new Version(0, 12, 23),
+                    SetupForm.SetupVersion))
+            {
+                throw new InvalidOperationException(
+                    "An update that became a downgrade while waiting for the " +
+                    "installation lock was not rejected under that lock.");
+            }
+            Version resolvedInstalledVersion = ResolveInstalledVersion(
+                new Version(0, 12, 20),
+                new Version(0, 12, 22));
+            if (resolvedInstalledVersion == null ||
+                ComparePublicVersions(
+                    resolvedInstalledVersion,
+                    new Version(0, 12, 22)) != 0)
+            {
+                throw new InvalidOperationException(
+                    "A stale lower uninstall-registry version must not " +
+                    "override the newer installed executable version.");
+            }
+            resolvedInstalledVersion = ResolveInstalledVersion(
+                new Version(0, 12, 23),
+                new Version(0, 12, 20));
+            if (resolvedInstalledVersion == null ||
+                ComparePublicVersions(
+                    resolvedInstalledVersion,
+                    new Version(0, 12, 20)) != 0)
+            {
+                throw new InvalidOperationException(
+                    "A stale higher uninstall-registry version must not " +
+                    "override the authoritative installed executable version.");
+            }
+            resolvedInstalledVersion = ResolveInstalledVersion(
+                new Version(0, 12, 23), null, true);
+            if (resolvedInstalledVersion != null)
+            {
+                throw new InvalidOperationException(
+                    "An unreadable or invalid primary executable must enter " +
+                    "the repair path instead of trusting stale registry data.");
+            }
+            if (GetPostInstallRelaunchArguments(true) != "--startup" ||
+                GetPostInstallRelaunchArguments(false) != "" ||
+                GetPostInstallFailureRelaunchArguments(true) !=
+                    "--startup --update-recovery" ||
+                GetPostInstallFailureRelaunchArguments(false) != "" ||
+                GetPostInstallFailureRelaunchArguments(true, true) !=
+                    "--startup --update-busy-recovery" ||
+                GetPostInstallFailureRelaunchArguments(false, true) != "")
+            {
+                throw new InvalidOperationException(
+                    "Automatic update success and failure relaunch arguments " +
+                    "are not isolated correctly.");
+            }
         }
 
         internal static void VerifyUpdateLifecycleLogic()
         {
+            VerifyInstallationMutexLogic();
             string verificationRoot = Path.Combine(
                 Path.GetTempPath(),
                 "AeroMirror-update-lifecycle-check-" +
@@ -1077,6 +1776,17 @@ namespace AirPlayReceiverSetup
                     Path.Combine(installDirectory, "AeroMirror.exe"),
                     "update lifecycle verifier",
                     new UTF8Encoding(false));
+                string resolvedExecutable = ResolveInstalledExecutablePath(
+                    installDirectory);
+                if (!string.Equals(
+                        resolvedExecutable,
+                        Path.Combine(installDirectory, "AeroMirror.exe"),
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(
+                        "Failed-Setup recovery did not resolve the exact " +
+                        "installed AeroMirror shell.");
+                }
                 Environment.CurrentDirectory = nestedDirectory;
 
                 if (!Program.EnsureCurrentDirectoryOutsideInstallTree(
@@ -1163,6 +1873,87 @@ namespace AirPlayReceiverSetup
             }
         }
 
+        private static void VerifyInstallationMutexLogic()
+        {
+            string mutexName = "Local\\AeroMirror.Setup.Install.Test." +
+                Guid.NewGuid().ToString("N");
+            using (var holderReady = new ManualResetEvent(false))
+            using (var releaseHolder = new ManualResetEvent(false))
+            {
+                Exception holderFailure = null;
+                var holder = new Thread(delegate()
+                {
+                    Mutex held = null;
+                    try
+                    {
+                        if (!Program.TryAcquireInstallationMutex(
+                                mutexName, 0, out held))
+                        {
+                            throw new InvalidOperationException(
+                                "The first install mutex owner was rejected.");
+                        }
+                        holderReady.Set();
+                        releaseHolder.WaitOne(5000);
+                    }
+                    catch (Exception ex)
+                    {
+                        holderFailure = ex;
+                        holderReady.Set();
+                    }
+                    finally
+                    {
+                        if (held != null)
+                        {
+                            try { held.ReleaseMutex(); }
+                            catch { }
+                            held.Dispose();
+                        }
+                    }
+                });
+                holder.IsBackground = true;
+                holder.Start();
+                try
+                {
+                    if (!holderReady.WaitOne(3000))
+                    {
+                        throw new InvalidOperationException(
+                            "The install mutex owner did not become ready.");
+                    }
+                    Mutex contender;
+                    bool acquired = Program.TryAcquireInstallationMutex(
+                        mutexName, 0, out contender);
+                    if (acquired)
+                    {
+                        try { contender.ReleaseMutex(); }
+                        catch { }
+                        contender.Dispose();
+                        throw new InvalidOperationException(
+                            "A concurrent Setup acquired the install mutex.");
+                    }
+                }
+                finally
+                {
+                    releaseHolder.Set();
+                    holder.Join(5000);
+                }
+                if (holderFailure != null)
+                {
+                    throw new InvalidOperationException(
+                        "The install mutex holder failed.", holderFailure);
+                }
+
+                Mutex afterRelease;
+                if (!Program.TryAcquireInstallationMutex(
+                        mutexName, 0, out afterRelease))
+                {
+                    throw new InvalidOperationException(
+                        "The install mutex was not released after completion.");
+                }
+                try { afterRelease.ReleaseMutex(); }
+                finally { afterRelease.Dispose(); }
+            }
+        }
+
         private static void AssertShortcutSelection(
             ShortcutSelection actual,
             bool expectedStartMenu,
@@ -1185,6 +1976,21 @@ namespace AirPlayReceiverSetup
                 throw new InvalidOperationException(
                     "Automatic-install policy failed for " + scenario +
                     ": got " + actual + ", expected " + expected + ".");
+            }
+        }
+
+        private static void AssertPublicVersionComparison(
+            Version left,
+            Version right,
+            int expectedSign,
+            string scenario)
+        {
+            int actual = Math.Sign(ComparePublicVersions(left, right));
+            if (actual != Math.Sign(expectedSign))
+            {
+                throw new InvalidOperationException(
+                    "Public-version comparison verification failed for " +
+                    scenario + ".");
             }
         }
 
@@ -1229,6 +2035,1520 @@ namespace AirPlayReceiverSetup
                 catch { }
             }
         }
+
+        internal static void VerifyBonjourRecoveryPolicyLogic()
+        {
+            if (!Program.IsExactBonjourMachineConfigurationInvocation(
+                    new[] { Program.BonjourMachineConfigurationArgument }) ||
+                Program.IsExactBonjourMachineConfigurationInvocation(
+                    new string[0]) ||
+                Program.IsExactBonjourMachineConfigurationInvocation(
+                    new[]
+                    {
+                        Program.BonjourMachineConfigurationArgument,
+                        "/unexpected"
+                    }))
+            {
+                throw new InvalidOperationException(
+                    "Elevated Bonjour dispatch is not an exact one-argument mode.");
+            }
+
+            ProcessStartInfo start =
+                CreateBonjourMachineConfigurationStartInfo();
+            string setupPath = Assembly.GetExecutingAssembly().Location;
+            if (!string.Equals(
+                    start.FileName, setupPath,
+                    StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(
+                    start.Arguments,
+                    Program.BonjourMachineConfigurationArgument,
+                    StringComparison.Ordinal) ||
+                !string.Equals(start.Verb, "runas", StringComparison.Ordinal) ||
+                !string.Equals(
+                    start.WorkingDirectory,
+                    Path.GetDirectoryName(setupPath),
+                    StringComparison.OrdinalIgnoreCase) ||
+                !start.UseShellExecute ||
+                start.WindowStyle != ProcessWindowStyle.Hidden ||
+                start.ErrorDialog)
+            {
+                throw new InvalidOperationException(
+                    "Bonjour administrator helper launch is not fixed to this Setup.");
+            }
+
+            ServiceActionNative[] restartActions =
+                CreateBonjourRestartActions();
+            if (BonjourFailureResetSeconds != 86400 ||
+                restartActions.Length != 4 ||
+                restartActions[0].Type != ScActionRestart ||
+                restartActions[0].Delay != 5000 ||
+                restartActions[1].Type != ScActionRestart ||
+                restartActions[1].Delay != 30000 ||
+                restartActions[2].Type != ScActionRestart ||
+                restartActions[2].Delay != 120000 ||
+                restartActions[3].Type != ScActionNone ||
+                restartActions[3].Delay != 0 ||
+                !CreateBonjourFailureActionsFlag().Enabled ||
+                ServiceConfigFailureActions != 2 ||
+                ServiceConfigFailureActionsFlag != 4 ||
+                ServiceAutoStart != 2)
+            {
+                throw new InvalidOperationException(
+                    "Bonjour recovery must be restart/restart/restart/none at " +
+                    "5/30/120 seconds with non-crash failures enabled.");
+            }
+            if (BonjourElevatedSelfTimeoutMilliseconds <= 0 ||
+                BonjourServiceWaitMilliseconds <= 0 ||
+                BonjourServiceWaitMilliseconds >=
+                    BonjourElevatedSelfTimeoutMilliseconds ||
+                BonjourHelperTimeoutMilliseconds <=
+                    BonjourElevatedSelfTimeoutMilliseconds + 20000)
+            {
+                throw new InvalidOperationException(
+                    "Bonjour helper deadlines are not safely nested.");
+            }
+
+            if (!IsExpectedBonjourExecutablePath(
+                    @"C:\Program Files\Bonjour\mDNSResponder.exe",
+                    @"C:\Program Files",
+                    @"C:\Program Files (x86)") ||
+                !IsExpectedBonjourExecutablePath(
+                    @"C:\Program Files (x86)\Bonjour\mDNSResponder.exe",
+                    @"C:\Program Files",
+                    @"C:\Program Files (x86)") ||
+                IsExpectedBonjourExecutablePath(
+                    @"C:\Program Files\Other\mDNSResponder.exe",
+                    @"C:\Program Files",
+                    @"C:\Program Files (x86)") ||
+                IsExpectedBonjourExecutablePath(
+                    @"C:\Program Files\Bonjour\sub\mDNSResponder.exe",
+                    @"C:\Program Files",
+                    @"C:\Program Files (x86)"))
+            {
+                throw new InvalidOperationException(
+                    "Bonjour executable-path policy is not exact.");
+            }
+
+            string parsed;
+            if (!TryParseBonjourImagePath(
+                    "\"C:\\Program Files\\Bonjour\\mDNSResponder.exe\"",
+                    out parsed) ||
+                !string.Equals(
+                    parsed,
+                    @"C:\Program Files\Bonjour\mDNSResponder.exe",
+                    StringComparison.OrdinalIgnoreCase) ||
+                TryParseBonjourImagePath(
+                    @"C:\Program Files\Bonjour\mDNSResponder.exe -server",
+                    out parsed) ||
+                TryParseBonjourImagePath(
+                    @"%LOCALAPPDATA%\mDNSResponder.exe",
+                    out parsed) ||
+                TryParseBonjourImagePath(
+                    @"\\server\share\mDNSResponder.exe",
+                    out parsed))
+            {
+                throw new InvalidOperationException(
+                    "Bonjour ImagePath parser did not remain fail-closed.");
+            }
+
+            if (BonjourServiceNames.Length != 2 ||
+                !string.Equals(
+                    BonjourServiceNames[0], "Bonjour Service",
+                    StringComparison.Ordinal) ||
+                !string.Equals(
+                    BonjourServiceNames[1], "mDNSResponder",
+                    StringComparison.Ordinal) ||
+                !IsKnownBonjourServiceName("Bonjour Service") ||
+                !IsKnownBonjourServiceName("mDNSResponder") ||
+                IsKnownBonjourServiceName("bonjour service") ||
+                IsKnownBonjourServiceName("Bonjour Service "))
+            {
+                throw new InvalidOperationException(
+                    "Bonjour service-name allowlist is not exact.");
+            }
+
+            var exactRule = CreateExpectedBonjourFirewallRuleSnapshot();
+            if (!IsExpectedBonjourFirewallRule(
+                    exactRule, exactRule.ApplicationName))
+            {
+                throw new InvalidOperationException(
+                    "Exact Bonjour firewall matcher rejected the narrow rule.");
+            }
+            VerifyRejectedBonjourFirewallMutation(
+                delegate(BonjourFirewallRuleSnapshot rule)
+                { rule.Name = "Other Bonjour rule"; }, "different name");
+            VerifyRejectedBonjourFirewallMutation(
+                delegate(BonjourFirewallRuleSnapshot rule)
+                { rule.Enabled = false; }, "disabled");
+            VerifyRejectedBonjourFirewallMutation(
+                delegate(BonjourFirewallRuleSnapshot rule)
+                { rule.Direction = 2; }, "outbound");
+            VerifyRejectedBonjourFirewallMutation(
+                delegate(BonjourFirewallRuleSnapshot rule)
+                { rule.Action = 0; }, "blocked");
+            VerifyRejectedBonjourFirewallMutation(
+                delegate(BonjourFirewallRuleSnapshot rule)
+                { rule.Protocol = 6; }, "TCP");
+            VerifyRejectedBonjourFirewallMutation(
+                delegate(BonjourFirewallRuleSnapshot rule)
+                { rule.Profiles = 6; }, "broadened profile");
+            VerifyRejectedBonjourFirewallMutation(
+                delegate(BonjourFirewallRuleSnapshot rule)
+                { rule.ApplicationName = @"C:\Other\mDNSResponder.exe"; },
+                "different executable");
+            VerifyRejectedBonjourFirewallMutation(
+                delegate(BonjourFirewallRuleSnapshot rule)
+                { rule.LocalPorts = "Any"; }, "broad local port");
+            VerifyRejectedBonjourFirewallMutation(
+                delegate(BonjourFirewallRuleSnapshot rule)
+                { rule.RemoteAddresses = "Any"; }, "broad remote scope");
+            VerifyRejectedBonjourFirewallMutation(
+                delegate(BonjourFirewallRuleSnapshot rule)
+                { rule.EdgeTraversal = true; }, "edge traversal");
+
+            VerifyBonjourSecurityDescriptorLogic();
+        }
+
+        private static ServiceActionNative[] CreateBonjourRestartActions()
+        {
+            var actions = new ServiceActionNative[
+                BonjourRestartDelaysMilliseconds.Length + 1];
+            for (int index = 0;
+                index < BonjourRestartDelaysMilliseconds.Length;
+                index++)
+            {
+                actions[index] = new ServiceActionNative
+                {
+                    Type = ScActionRestart,
+                    Delay = BonjourRestartDelaysMilliseconds[index]
+                };
+            }
+            actions[actions.Length - 1] = new ServiceActionNative
+            {
+                Type = ScActionNone,
+                Delay = 0
+            };
+            return actions;
+        }
+
+        private static ServiceFailureActionsFlagNative
+            CreateBonjourFailureActionsFlag()
+        {
+            return new ServiceFailureActionsFlagNative { Enabled = true };
+        }
+
+        private static BonjourFirewallRuleSnapshot
+            CreateExpectedBonjourFirewallRuleSnapshot()
+        {
+            return new BonjourFirewallRuleSnapshot
+            {
+                Name = BonjourFirewallRuleName,
+                Enabled = true,
+                Direction = 1,
+                Action = 1,
+                Protocol = 17,
+                Profiles = 2,
+                ApplicationName =
+                    @"C:\Program Files\Bonjour\mDNSResponder.exe",
+                LocalPorts = "5353",
+                RemoteAddresses = "LocalSubnet",
+                EdgeTraversal = false
+            };
+        }
+
+        private static void VerifyRejectedBonjourFirewallMutation(
+            Action<BonjourFirewallRuleSnapshot> mutate, string scenario)
+        {
+            BonjourFirewallRuleSnapshot rule =
+                CreateExpectedBonjourFirewallRuleSnapshot();
+            mutate(rule);
+            if (IsExpectedBonjourFirewallRule(
+                    rule,
+                    @"C:\Program Files\Bonjour\mDNSResponder.exe"))
+            {
+                throw new InvalidOperationException(
+                    "Bonjour firewall matcher accepted " + scenario + ".");
+            }
+        }
+
+        private static void VerifyBonjourSecurityDescriptorLogic()
+        {
+            var system = new SecurityIdentifier(
+                WellKnownSidType.LocalSystemSid, null);
+            var administrators = new SecurityIdentifier(
+                WellKnownSidType.BuiltinAdministratorsSid, null);
+            var trustedInstaller = new SecurityIdentifier(
+                "S-1-5-80-956008885-3418522649-1831038044-" +
+                "1853292631-2271478464");
+            var users = new SecurityIdentifier(
+                WellKnownSidType.BuiltinUsersSid, null);
+            var noRules = new FileSystemAccessRule[0];
+            var untrustedWrite = new FileSystemAccessRule(
+                users,
+                FileSystemRights.WriteData,
+                InheritanceFlags.None,
+                PropagationFlags.None,
+                AccessControlType.Allow);
+            var untrustedReadOnly = new FileSystemAccessRule(
+                users,
+                FileSystemRights.ReadData | FileSystemRights.ReadAttributes,
+                InheritanceFlags.None,
+                PropagationFlags.None,
+                AccessControlType.Allow);
+            var inheritedOnlyWrite = new FileSystemAccessRule(
+                users,
+                FileSystemRights.WriteData,
+                InheritanceFlags.ContainerInherit,
+                PropagationFlags.InheritOnly,
+                AccessControlType.Allow);
+            var administratorWrite = new FileSystemAccessRule(
+                administrators,
+                FileSystemRights.WriteData,
+                InheritanceFlags.None,
+                PropagationFlags.None,
+                AccessControlType.Allow);
+
+            if (!HasUntrustedWriteAccess(system, false, noRules) ||
+                !HasUntrustedWriteAccess(users, true, noRules) ||
+                !HasUntrustedWriteAccess(
+                    system, true, new[] { untrustedWrite }) ||
+                HasUntrustedWriteAccess(
+                    system, true, new[] { untrustedReadOnly }) ||
+                HasUntrustedWriteAccess(
+                    system, true, new[] { inheritedOnlyWrite }) ||
+                HasUntrustedWriteAccess(
+                    administrators, true,
+                    new[] { administratorWrite }) ||
+                HasUntrustedWriteAccess(
+                    trustedInstaller, true, noRules) ||
+                !IsTrustedBonjourPathComponent(
+                    FileAttributes.Normal, false) ||
+                IsTrustedBonjourPathComponent(
+                    FileAttributes.ReparsePoint, false) ||
+                IsTrustedBonjourPathComponent(
+                    FileAttributes.Normal, true))
+            {
+                throw new InvalidOperationException(
+                    "Bonjour owner, ACL, or reparse-point policy is not fail-closed.");
+            }
+        }
+
+        internal static void EnsureBonjourAutomaticRecovery()
+        {
+            string serviceName;
+            string executablePath;
+            string detail;
+            if (!TryResolveBonjourServiceIdentity(
+                    out serviceName, out executablePath, out detail))
+            {
+                SetupLog.Write(
+                    "Bonjour automatic recovery was not configured because " +
+                    "the installed service identity is unavailable: " + detail);
+                return;
+            }
+
+            if (IsBonjourMachineReady(
+                    serviceName, executablePath, out detail))
+            {
+                SetupLog.Write(
+                    "Bonjour automatic recovery is already configured and " +
+                    "the service is running.");
+                return;
+            }
+
+            ProcessStartInfo start =
+                CreateBonjourMachineConfigurationStartInfo();
+
+            try
+            {
+                SetupLog.Write(
+                    "Requesting one Windows administrator confirmation for " +
+                    "Bonjour service recovery and Private mDNS policy.");
+                using (Process process = Process.Start(start))
+                {
+                    if (process == null)
+                    {
+                        SetupLog.Write(
+                            "Bonjour configuration helper did not start.");
+                        return;
+                    }
+                    if (!process.WaitForExit(BonjourHelperTimeoutMilliseconds))
+                    {
+                        SetupLog.Write(
+                            "Bonjour configuration helper exceeded its " +
+                            "bounded wait and will be terminated before " +
+                            "installation continues.");
+                        if (!TerminateProcessAndWait(process))
+                        {
+                            SetupLog.Write(
+                                "Bonjour configuration helper did not exit " +
+                                "after termination was requested.");
+                        }
+                        return;
+                    }
+                    if (process.ExitCode != 0)
+                    {
+                        SetupLog.Write(
+                            "Bonjour configuration helper returned exit code " +
+                            process.ExitCode + ". Installation will continue.");
+                        return;
+                    }
+                }
+            }
+            catch (Win32Exception exception)
+            {
+                if (exception.NativeErrorCode == ErrorCancelled)
+                {
+                    SetupLog.Write(
+                        "Bonjour administrator confirmation was canceled; " +
+                        "installation will continue without changing the service.");
+                    return;
+                }
+                SetupLog.Write(
+                    "Bonjour configuration helper could not be launched: " +
+                    exception);
+                return;
+            }
+            catch (InvalidOperationException exception)
+            {
+                SetupLog.Write(
+                    "Bonjour configuration helper could not be launched: " +
+                    exception);
+                return;
+            }
+
+            if (!TryResolveBonjourServiceIdentity(
+                    out serviceName, out executablePath, out detail) ||
+                !IsBonjourMachineReady(
+                    serviceName, executablePath, out detail))
+            {
+                SetupLog.Write(
+                    "Bonjour configuration helper completed, but the final " +
+                    "machine state was not confirmed: " + detail);
+                return;
+            }
+            SetupLog.Write(
+                "Bonjour automatic service recovery and running state were " +
+                "confirmed after administrator configuration.");
+        }
+
+        private static ProcessStartInfo
+            CreateBonjourMachineConfigurationStartInfo()
+        {
+            string setupPath = Assembly.GetExecutingAssembly().Location;
+            return new ProcessStartInfo
+            {
+                FileName = setupPath,
+                Arguments = Program.BonjourMachineConfigurationArgument,
+                Verb = "runas",
+                UseShellExecute = true,
+                WindowStyle = ProcessWindowStyle.Hidden,
+                WorkingDirectory = Path.GetDirectoryName(setupPath),
+                ErrorDialog = false
+            };
+        }
+
+        internal static void ConfigureBonjourMachineElevated()
+        {
+            var state = new BonjourWatchdogState();
+            using (var watchdog = new System.Threading.Timer(
+                HandleBonjourConfigurationTimeout,
+                state,
+                BonjourElevatedSelfTimeoutMilliseconds,
+                Timeout.Infinite))
+            {
+                try
+                {
+                    ConfigureBonjourMachineElevatedCore();
+                }
+                finally
+                {
+                    Interlocked.CompareExchange(
+                        ref state.CompletionState, 1, 0);
+                    using (var drained = new ManualResetEvent(false))
+                    {
+                        if (watchdog.Dispose(drained))
+                            drained.WaitOne(5000);
+                    }
+                }
+            }
+        }
+
+        private static void HandleBonjourConfigurationTimeout(object value)
+        {
+            var state = value as BonjourWatchdogState;
+            if (state == null || Interlocked.CompareExchange(
+                    ref state.CompletionState, 2, 0) != 0)
+                return;
+
+            Environment.FailFast(
+                "Bonjour machine configuration exceeded its deadline.");
+        }
+
+        private static void ConfigureBonjourMachineElevatedCore()
+        {
+            using (WindowsIdentity identity = WindowsIdentity.GetCurrent())
+            {
+                var principal = new WindowsPrincipal(identity);
+                if (!principal.IsInRole(
+                        WindowsBuiltInRole.Administrator))
+                {
+                    throw new UnauthorizedAccessException(
+                        "Bonjour machine configuration requires administrator rights.");
+                }
+            }
+
+            string serviceName;
+            string executablePath;
+            string error;
+            if (!TryResolveBonjourServiceIdentity(
+                    out serviceName, out executablePath, out error))
+            {
+                throw new InvalidOperationException(
+                    "Bonjour service identity is unavailable: " + error);
+            }
+
+            EnsureBonjourIdentityUnchanged(serviceName, executablePath);
+            ConfigureBonjourServicePolicy(serviceName);
+            EnsureBonjourIdentityUnchanged(serviceName, executablePath);
+            ConfigureBonjourFirewallRule(executablePath);
+
+            EnsureBonjourIdentityUnchanged(serviceName, executablePath);
+            StartBonjourService(serviceName);
+            if (!WaitForBonjourRunning(serviceName))
+            {
+                throw new InvalidOperationException(
+                    "Bonjour did not reach the Running state after configuration.");
+            }
+
+            string finalServiceName;
+            string finalExecutablePath;
+            if (!TryResolveBonjourServiceIdentity(
+                    out finalServiceName, out finalExecutablePath, out error) ||
+                !string.Equals(
+                    finalServiceName, serviceName,
+                    StringComparison.Ordinal) ||
+                !string.Equals(
+                    finalExecutablePath, executablePath,
+                    StringComparison.OrdinalIgnoreCase) ||
+                !IsBonjourMachineReady(
+                    finalServiceName, finalExecutablePath, out error))
+            {
+                throw new InvalidOperationException(
+                    "Bonjour identity or recovery policy changed during configuration.");
+            }
+        }
+
+        private static void EnsureBonjourIdentityUnchanged(
+            string expectedServiceName, string expectedExecutablePath)
+        {
+            string serviceName;
+            string executablePath;
+            string detail;
+            if (!TryResolveBonjourServiceIdentity(
+                    out serviceName, out executablePath, out detail) ||
+                !string.Equals(
+                    serviceName, expectedServiceName,
+                    StringComparison.Ordinal) ||
+                !string.Equals(
+                    executablePath, expectedExecutablePath,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    "Bonjour service identity changed during configuration.");
+            }
+        }
+
+        private static void ConfigureBonjourServicePolicy(string serviceName)
+        {
+            if (!IsKnownBonjourServiceName(serviceName))
+                throw new InvalidOperationException(
+                    "Unknown Bonjour service identity.");
+
+            IntPtr manager = OpenSCManager(null, null, ScManagerConnect);
+            if (manager == IntPtr.Zero)
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            try
+            {
+                IntPtr service = OpenService(
+                    manager,
+                    serviceName,
+                    ServiceQueryConfig |
+                    ServiceChangeConfig |
+                    ServiceStart);
+                if (service == IntPtr.Zero)
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+                try
+                {
+                    if (!ChangeServiceConfig(
+                            service,
+                            ServiceNoChange,
+                            ServiceAutoStart,
+                            ServiceNoChange,
+                            null,
+                            null,
+                            IntPtr.Zero,
+                            null,
+                            null,
+                            null,
+                            null))
+                    {
+                        throw new Win32Exception(
+                            Marshal.GetLastWin32Error());
+                    }
+
+                    ServiceActionNative[] restartActions =
+                        CreateBonjourRestartActions();
+                    int actionSize = Marshal.SizeOf(
+                        typeof(ServiceActionNative));
+                    IntPtr actions = Marshal.AllocHGlobal(
+                        checked(actionSize *
+                            restartActions.Length));
+                    try
+                    {
+                        for (int index = 0;
+                            index < restartActions.Length;
+                            index++)
+                        {
+                            Marshal.StructureToPtr(
+                                restartActions[index],
+                                IntPtr.Add(actions, index * actionSize),
+                                false);
+                        }
+                        var failure = new ServiceFailureActionsNative
+                        {
+                            ResetPeriod = BonjourFailureResetSeconds,
+                            RebootMessage = IntPtr.Zero,
+                            Command = IntPtr.Zero,
+                            ActionCount = checked((uint)
+                                restartActions.Length),
+                            Actions = actions
+                        };
+                        if (!ChangeServiceConfig2FailureActions(
+                                service,
+                                ServiceConfigFailureActions,
+                                ref failure))
+                        {
+                            throw new Win32Exception(
+                                Marshal.GetLastWin32Error());
+                        }
+                    }
+                    finally
+                    {
+                        Marshal.FreeHGlobal(actions);
+                    }
+
+                    ServiceFailureActionsFlagNative flag =
+                        CreateBonjourFailureActionsFlag();
+                    if (!ChangeServiceConfig2FailureFlag(
+                            service,
+                            ServiceConfigFailureActionsFlag,
+                            ref flag))
+                    {
+                        throw new Win32Exception(
+                            Marshal.GetLastWin32Error());
+                    }
+                }
+                finally
+                {
+                    CloseServiceHandle(service);
+                }
+            }
+            finally
+            {
+                CloseServiceHandle(manager);
+            }
+        }
+
+        private static void StartBonjourService(string serviceName)
+        {
+            if (!IsKnownBonjourServiceName(serviceName))
+                throw new InvalidOperationException(
+                    "Unknown Bonjour service identity.");
+            IntPtr manager = OpenSCManager(null, null, ScManagerConnect);
+            if (manager == IntPtr.Zero)
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            try
+            {
+                IntPtr service = OpenService(
+                    manager, serviceName, ServiceStart);
+                if (service == IntPtr.Zero)
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+                try
+                {
+                    if (!StartService(service, 0, null))
+                    {
+                        int error = Marshal.GetLastWin32Error();
+                        if (error != ErrorServiceAlreadyRunning)
+                            throw new Win32Exception(error);
+                    }
+                }
+                finally
+                {
+                    CloseServiceHandle(service);
+                }
+            }
+            finally
+            {
+                CloseServiceHandle(manager);
+            }
+        }
+
+        private static void ConfigureBonjourFirewallRule(
+            string executablePath)
+        {
+            Type policyType = Type.GetTypeFromProgID(
+                "HNetCfg.FwPolicy2", false);
+            Type ruleType = Type.GetTypeFromProgID(
+                "HNetCfg.FWRule", false);
+            if (policyType == null || ruleType == null)
+            {
+                throw new InvalidOperationException(
+                    "Windows Firewall COM API is unavailable.");
+            }
+
+            object policy = null;
+            object rules = null;
+            object rule = null;
+            try
+            {
+                policy = Activator.CreateInstance(policyType);
+                rules = GetFirewallComProperty(policy, "Rules");
+                for (int attempt = 0; attempt < 16; attempt++)
+                {
+                    int before = CountOwnedBonjourFirewallRules(rules);
+                    if (before == 0)
+                        break;
+                    InvokeFirewallComMethod(
+                        rules,
+                        "Remove",
+                        new object[] { BonjourFirewallRuleName });
+                    int after = CountOwnedBonjourFirewallRules(rules);
+                    if (after >= before)
+                    {
+                        throw new InvalidOperationException(
+                            "Existing Bonjour firewall rule could not be removed.");
+                    }
+                }
+                if (CountOwnedBonjourFirewallRules(rules) != 0)
+                {
+                    throw new InvalidOperationException(
+                        "Too many duplicate Bonjour firewall rules exist.");
+                }
+
+                rule = Activator.CreateInstance(ruleType);
+                SetFirewallComProperty(
+                    rule, "Name", BonjourFirewallRuleName);
+                SetFirewallComProperty(
+                    rule, "Description",
+                    "AeroMirror AirPlay discovery on the private local subnet");
+                SetFirewallComProperty(
+                    rule, "ApplicationName", executablePath);
+                SetFirewallComProperty(rule, "Protocol", 17);
+                SetFirewallComProperty(rule, "LocalPorts", "5353");
+                SetFirewallComProperty(
+                    rule, "RemoteAddresses", "LocalSubnet");
+                SetFirewallComProperty(rule, "Direction", 1);
+                SetFirewallComProperty(rule, "Enabled", true);
+                SetFirewallComProperty(rule, "Profiles", 2);
+                SetFirewallComProperty(rule, "Action", 1);
+                SetFirewallComProperty(rule, "EdgeTraversal", false);
+                InvokeFirewallComMethod(
+                    rules, "Add", new object[] { rule });
+            }
+            finally
+            {
+                ReleaseFirewallComObject(rule);
+                ReleaseFirewallComObject(rules);
+                ReleaseFirewallComObject(policy);
+            }
+        }
+
+        private static int CountOwnedBonjourFirewallRules(object rulesObject)
+        {
+            IEnumerable rules = rulesObject as IEnumerable;
+            if (rules == null)
+                throw new InvalidOperationException(
+                    "Windows Firewall rule collection is unavailable.");
+            int count = 0;
+            foreach (object rule in rules)
+            {
+                try
+                {
+                    string name = Convert.ToString(
+                        GetFirewallComProperty(rule, "Name"),
+                        CultureInfo.InvariantCulture);
+                    if (string.Equals(
+                            name, BonjourFirewallRuleName,
+                            StringComparison.Ordinal))
+                        count++;
+                }
+                finally
+                {
+                    ReleaseFirewallComObject(rule);
+                }
+            }
+            return count;
+        }
+
+        private static void SetFirewallComProperty(
+            object target, string name, object value)
+        {
+            target.GetType().InvokeMember(
+                name,
+                BindingFlags.SetProperty,
+                null,
+                target,
+                new object[] { value },
+                CultureInfo.InvariantCulture);
+        }
+
+        private static object InvokeFirewallComMethod(
+            object target, string name, object[] arguments)
+        {
+            return target.GetType().InvokeMember(
+                name,
+                BindingFlags.InvokeMethod,
+                null,
+                target,
+                arguments,
+                CultureInfo.InvariantCulture);
+        }
+
+        private static bool IsBonjourMachineReady(
+            string serviceName,
+            string executablePath,
+            out string detail)
+        {
+            detail = "";
+            if (!HasExpectedBonjourFailureActions(serviceName))
+            {
+                detail = "expected restart-on-failure policy is missing";
+                return false;
+            }
+
+            if (!HasExpectedBonjourFirewallRule(executablePath, out detail))
+                return false;
+
+            try
+            {
+                using (var service = new ServiceController(serviceName))
+                {
+                    service.Refresh();
+                    if (service.Status != ServiceControllerStatus.Running)
+                    {
+                        detail = "service is " + service.Status;
+                        return false;
+                    }
+                    if (service.StartType != ServiceStartMode.Automatic)
+                    {
+                        detail = "service startup is " + service.StartType;
+                        return false;
+                    }
+                }
+                return true;
+            }
+            catch (InvalidOperationException exception)
+            {
+                detail = exception.Message;
+                return false;
+            }
+        }
+
+        private static bool HasExpectedBonjourFirewallRule(
+            string executablePath, out string detail)
+        {
+            detail = "";
+            Type policyType = Type.GetTypeFromProgID(
+                "HNetCfg.FwPolicy2", false);
+            if (policyType == null)
+            {
+                detail = "Windows Firewall policy COM API is unavailable";
+                return false;
+            }
+
+            object policy = null;
+            object rulesObject = null;
+            int ownedRuleCount = 0;
+            bool exactRuleFound = false;
+            try
+            {
+                policy = Activator.CreateInstance(policyType);
+                rulesObject = GetFirewallComProperty(policy, "Rules");
+                IEnumerable rules = rulesObject as IEnumerable;
+                if (rules == null)
+                {
+                    detail = "Windows Firewall rule collection is unavailable";
+                    return false;
+                }
+
+                foreach (object ruleObject in rules)
+                {
+                    try
+                    {
+                        string name = Convert.ToString(
+                            GetFirewallComProperty(ruleObject, "Name"),
+                            CultureInfo.InvariantCulture);
+                        if (!string.Equals(
+                                name, BonjourFirewallRuleName,
+                                StringComparison.Ordinal))
+                            continue;
+
+                        ownedRuleCount++;
+                        var rule = new BonjourFirewallRuleSnapshot
+                        {
+                            Name = name,
+                            Enabled = Convert.ToBoolean(
+                                GetFirewallComProperty(
+                                    ruleObject, "Enabled"),
+                                CultureInfo.InvariantCulture),
+                            Direction = Convert.ToInt32(
+                                GetFirewallComProperty(
+                                    ruleObject, "Direction"),
+                                CultureInfo.InvariantCulture),
+                            Action = Convert.ToInt32(
+                                GetFirewallComProperty(
+                                    ruleObject, "Action"),
+                                CultureInfo.InvariantCulture),
+                            Protocol = Convert.ToInt32(
+                                GetFirewallComProperty(
+                                    ruleObject, "Protocol"),
+                                CultureInfo.InvariantCulture),
+                            Profiles = Convert.ToInt32(
+                                GetFirewallComProperty(
+                                    ruleObject, "Profiles"),
+                                CultureInfo.InvariantCulture),
+                            ApplicationName = Convert.ToString(
+                                GetFirewallComProperty(
+                                    ruleObject, "ApplicationName"),
+                                CultureInfo.InvariantCulture),
+                            LocalPorts = Convert.ToString(
+                                GetFirewallComProperty(
+                                    ruleObject, "LocalPorts"),
+                                CultureInfo.InvariantCulture),
+                            RemoteAddresses = Convert.ToString(
+                                GetFirewallComProperty(
+                                    ruleObject, "RemoteAddresses"),
+                                CultureInfo.InvariantCulture),
+                            EdgeTraversal = Convert.ToBoolean(
+                                GetFirewallComProperty(
+                                    ruleObject, "EdgeTraversal"),
+                                CultureInfo.InvariantCulture)
+                        };
+                        exactRuleFound = IsExpectedBonjourFirewallRule(
+                            rule, executablePath);
+                    }
+                    catch (COMException)
+                    {
+                    }
+                    catch (InvalidCastException)
+                    {
+                    }
+                    catch (FormatException)
+                    {
+                    }
+                    finally
+                    {
+                        ReleaseFirewallComObject(ruleObject);
+                    }
+                }
+            }
+            catch (COMException exception)
+            {
+                detail = exception.Message;
+                return false;
+            }
+            catch (TargetInvocationException exception)
+            {
+                detail = exception.InnerException != null
+                    ? exception.InnerException.Message
+                    : exception.Message;
+                return false;
+            }
+            catch (UnauthorizedAccessException exception)
+            {
+                detail = exception.Message;
+                return false;
+            }
+            finally
+            {
+                ReleaseFirewallComObject(rulesObject);
+                ReleaseFirewallComObject(policy);
+            }
+
+            if (ownedRuleCount != 1 || !exactRuleFound)
+            {
+                detail = ownedRuleCount == 0
+                    ? "expected Private Bonjour firewall rule is missing"
+                    : "owned Bonjour firewall rule is duplicated or not exact";
+                return false;
+            }
+            return true;
+        }
+
+        private static bool IsExpectedBonjourFirewallRule(
+            BonjourFirewallRuleSnapshot rule, string executablePath)
+        {
+            return rule != null &&
+                string.Equals(
+                    rule.Name, BonjourFirewallRuleName,
+                    StringComparison.Ordinal) &&
+                rule.Enabled &&
+                rule.Direction == 1 &&
+                rule.Action == 1 &&
+                rule.Protocol == 17 &&
+                rule.Profiles == 2 &&
+                !rule.EdgeTraversal &&
+                string.Equals(
+                    rule.ApplicationName, executablePath,
+                    StringComparison.OrdinalIgnoreCase) &&
+                IsExactFirewallValue(rule.LocalPorts, "5353") &&
+                IsExactFirewallValue(
+                    rule.RemoteAddresses, "LocalSubnet");
+        }
+
+        private static bool IsExactFirewallValue(
+            string actual, string expected)
+        {
+            return !string.IsNullOrWhiteSpace(actual) &&
+                string.Equals(
+                    actual.Trim(), expected,
+                    StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static object GetFirewallComProperty(
+            object target, string name)
+        {
+            if (target == null)
+                throw new ArgumentNullException("target");
+            return target.GetType().InvokeMember(
+                name,
+                BindingFlags.GetProperty,
+                null,
+                target,
+                null,
+                CultureInfo.InvariantCulture);
+        }
+
+        private static void ReleaseFirewallComObject(object value)
+        {
+            if (value == null || !Marshal.IsComObject(value))
+                return;
+            try
+            {
+                Marshal.FinalReleaseComObject(value);
+            }
+            catch (InvalidComObjectException)
+            {
+            }
+        }
+
+        private static bool HasExpectedBonjourFailureActions(
+            string serviceName)
+        {
+            if (!IsKnownBonjourServiceName(serviceName))
+                return false;
+
+            IntPtr manager = OpenSCManager(null, null, ScManagerConnect);
+            if (manager == IntPtr.Zero)
+                return false;
+            try
+            {
+                IntPtr service = OpenService(
+                    manager, serviceName, ServiceQueryConfig);
+                if (service == IntPtr.Zero)
+                    return false;
+                try
+                {
+                    uint bytesNeeded;
+                    QueryServiceConfig2(
+                        service,
+                        ServiceConfigFailureActions,
+                        IntPtr.Zero,
+                        0,
+                        out bytesNeeded);
+                    if (bytesNeeded == 0)
+                        return false;
+
+                    IntPtr buffer = Marshal.AllocHGlobal(
+                        checked((int)bytesNeeded));
+                    try
+                    {
+                        if (!QueryServiceConfig2(
+                                service,
+                                ServiceConfigFailureActions,
+                                buffer,
+                                bytesNeeded,
+                                out bytesNeeded))
+                            return false;
+                        var actions =
+                            (ServiceFailureActionsNative)Marshal.PtrToStructure(
+                                buffer,
+                                typeof(ServiceFailureActionsNative));
+                        if (actions.ResetPeriod !=
+                                BonjourFailureResetSeconds ||
+                            actions.ActionCount !=
+                                BonjourRestartDelaysMilliseconds.Length + 1 ||
+                            actions.Actions == IntPtr.Zero)
+                            return false;
+
+                        int actionSize = Marshal.SizeOf(
+                            typeof(ServiceActionNative));
+                        for (int index = 0;
+                            index < BonjourRestartDelaysMilliseconds.Length;
+                            index++)
+                        {
+                            IntPtr actionPointer = IntPtr.Add(
+                                actions.Actions, checked(index * actionSize));
+                            var action =
+                                (ServiceActionNative)Marshal.PtrToStructure(
+                                    actionPointer,
+                                    typeof(ServiceActionNative));
+                            if (action.Type != ScActionRestart ||
+                                action.Delay !=
+                                    BonjourRestartDelaysMilliseconds[index])
+                                return false;
+                        }
+                        IntPtr terminalActionPointer = IntPtr.Add(
+                            actions.Actions,
+                            checked(BonjourRestartDelaysMilliseconds.Length *
+                                actionSize));
+                        var terminalAction =
+                            (ServiceActionNative)Marshal.PtrToStructure(
+                                terminalActionPointer,
+                                typeof(ServiceActionNative));
+                        if (terminalAction.Type != ScActionNone ||
+                            terminalAction.Delay != 0)
+                            return false;
+                    }
+                    finally
+                    {
+                        Marshal.FreeHGlobal(buffer);
+                    }
+
+                    int flagSize = Marshal.SizeOf(
+                        typeof(ServiceFailureActionsFlagNative));
+                    IntPtr flagBuffer = Marshal.AllocHGlobal(flagSize);
+                    try
+                    {
+                        if (!QueryServiceConfig2(
+                                service,
+                                ServiceConfigFailureActionsFlag,
+                                flagBuffer,
+                                checked((uint)flagSize),
+                                out bytesNeeded))
+                            return false;
+                        var flag =
+                            (ServiceFailureActionsFlagNative)
+                                Marshal.PtrToStructure(
+                                    flagBuffer,
+                                    typeof(ServiceFailureActionsFlagNative));
+                        return flag.Enabled;
+                    }
+                    finally
+                    {
+                        Marshal.FreeHGlobal(flagBuffer);
+                    }
+                }
+                finally
+                {
+                    CloseServiceHandle(service);
+                }
+            }
+            finally
+            {
+                CloseServiceHandle(manager);
+            }
+        }
+
+        private static bool TryResolveBonjourServiceIdentity(
+            out string serviceName,
+            out string executablePath,
+            out string error)
+        {
+            serviceName = "";
+            executablePath = "";
+            error = "Bonjour service was not found.";
+            foreach (string candidateName in BonjourServiceNames)
+            {
+                using (RegistryKey key = Registry.LocalMachine.OpenSubKey(
+                    @"SYSTEM\CurrentControlSet\Services\" + candidateName,
+                    false))
+                {
+                    if (key == null)
+                        continue;
+                    if (serviceName.Length != 0)
+                    {
+                        error = "Multiple Bonjour service identities were found.";
+                        serviceName = "";
+                        executablePath = "";
+                        return false;
+                    }
+                    object raw = key.GetValue(
+                        "ImagePath",
+                        null,
+                        RegistryValueOptions.DoNotExpandEnvironmentNames);
+                    string parsed;
+                    if (!TryParseBonjourImagePath(raw as string, out parsed) ||
+                        !File.Exists(parsed) ||
+                        !IsProtectedProgramFilesPath(parsed))
+                    {
+                        error = "Bonjour ImagePath is not a protected absolute mDNSResponder.exe path.";
+                        return false;
+                    }
+                    serviceName = candidateName;
+                    executablePath = parsed;
+                }
+            }
+            if (serviceName.Length == 0)
+                return false;
+            error = "";
+            return true;
+        }
+
+        private static bool TryParseBonjourImagePath(
+            string raw, out string executablePath)
+        {
+            executablePath = "";
+            if (string.IsNullOrWhiteSpace(raw))
+                return false;
+            string value = raw.Trim();
+            string candidate;
+            if (value[0] == '\"')
+            {
+                int closingQuote = value.IndexOf('\"', 1);
+                if (closingQuote <= 1 ||
+                    value.Substring(closingQuote + 1).Trim().Length != 0)
+                    return false;
+                candidate = value.Substring(1, closingQuote - 1);
+            }
+            else
+            {
+                for (int index = 0; index < value.Length; index++)
+                {
+                    if (char.IsWhiteSpace(value[index]))
+                        return false;
+                }
+                candidate = value;
+            }
+
+            if (candidate.IndexOf('%') >= 0 ||
+                candidate.IndexOf('*') >= 0 ||
+                candidate.IndexOf('?') >= 0 ||
+                candidate.IndexOf('\"') >= 0)
+                return false;
+            for (int index = 0; index < candidate.Length; index++)
+            {
+                if (char.IsControl(candidate[index]))
+                    return false;
+            }
+            if (candidate.Length < 4 ||
+                !char.IsLetter(candidate[0]) ||
+                candidate[1] != ':' ||
+                candidate[2] != '\\' ||
+                candidate.IndexOf(':', 2) >= 0 ||
+                candidate.StartsWith(@"\\", StringComparison.Ordinal) ||
+                candidate.StartsWith(@"\\?\", StringComparison.Ordinal))
+                return false;
+
+            string fullPath;
+            try
+            {
+                fullPath = Path.GetFullPath(candidate);
+            }
+            catch (ArgumentException)
+            {
+                return false;
+            }
+            catch (NotSupportedException)
+            {
+                return false;
+            }
+            catch (PathTooLongException)
+            {
+                return false;
+            }
+            if (!string.Equals(
+                    fullPath, candidate,
+                    StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(
+                    Path.GetFileName(fullPath),
+                    "mDNSResponder.exe",
+                    StringComparison.OrdinalIgnoreCase))
+                return false;
+            executablePath = fullPath;
+            return true;
+        }
+
+        private static bool IsProtectedProgramFilesPath(string path)
+        {
+            string programFiles = Environment.GetFolderPath(
+                Environment.SpecialFolder.ProgramFiles);
+            string programFilesX86 = Environment.GetFolderPath(
+                Environment.SpecialFolder.ProgramFilesX86);
+            if (!IsExpectedBonjourExecutablePath(
+                    path, programFiles, programFilesX86))
+                return false;
+
+            string root = IsPathUnderExactRoot(path, programFiles)
+                ? Path.GetFullPath(programFiles).TrimEnd('\\')
+                : Path.GetFullPath(programFilesX86).TrimEnd('\\');
+            string current = path;
+            while (true)
+            {
+                FileAttributes attributes = File.GetAttributes(current);
+                if (!IsTrustedBonjourPathComponent(
+                        attributes,
+                        HasUntrustedWriteAccess(current)))
+                    return false;
+                if (string.Equals(
+                        current, root,
+                        StringComparison.OrdinalIgnoreCase))
+                    return true;
+                current = Path.GetDirectoryName(current);
+                if (string.IsNullOrWhiteSpace(current))
+                    return false;
+            }
+        }
+
+        private static bool IsTrustedBonjourPathComponent(
+            FileAttributes attributes, bool hasUntrustedWriteAccess)
+        {
+            return (attributes & FileAttributes.ReparsePoint) == 0 &&
+                !hasUntrustedWriteAccess;
+        }
+
+        private static bool IsExpectedBonjourExecutablePath(
+            string path, string programFiles, string programFilesX86)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+                return false;
+            string[] roots = { programFiles, programFilesX86 };
+            foreach (string rootValue in roots)
+            {
+                if (string.IsNullOrWhiteSpace(rootValue))
+                    continue;
+                string expected = Path.Combine(
+                    Path.GetFullPath(rootValue).TrimEnd('\\'),
+                    "Bonjour",
+                    "mDNSResponder.exe");
+                if (string.Equals(
+                        Path.GetFullPath(path), expected,
+                        StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return false;
+        }
+
+        private static bool IsPathUnderExactRoot(
+            string path, string rootValue)
+        {
+            if (string.IsNullOrWhiteSpace(path) ||
+                string.IsNullOrWhiteSpace(rootValue))
+                return false;
+            string root = Path.GetFullPath(rootValue).TrimEnd('\\');
+            return Path.GetFullPath(path).StartsWith(
+                root + "\\", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool HasUntrustedWriteAccess(string path)
+        {
+            FileSystemSecurity security = Directory.Exists(path)
+                ? (FileSystemSecurity)Directory.GetAccessControl(
+                    path,
+                    AccessControlSections.Access |
+                    AccessControlSections.Owner)
+                : File.GetAccessControl(
+                    path,
+                    AccessControlSections.Access |
+                    AccessControlSections.Owner);
+            var raw = new RawSecurityDescriptor(
+                security.GetSecurityDescriptorBinaryForm(), 0);
+            var owner = security.GetOwner(
+                typeof(SecurityIdentifier)) as SecurityIdentifier;
+            AuthorizationRuleCollection rules = security.GetAccessRules(
+                true, true, typeof(SecurityIdentifier));
+            return HasUntrustedWriteAccess(
+                owner, raw.DiscretionaryAcl != null, rules);
+        }
+
+        private static bool HasUntrustedWriteAccess(
+            SecurityIdentifier owner,
+            bool hasDiscretionaryAcl,
+            IEnumerable accessRules)
+        {
+            if (!hasDiscretionaryAcl ||
+                owner == null ||
+                !IsTrustedMachineWriter(owner) ||
+                accessRules == null)
+                return true;
+            foreach (object value in accessRules)
+            {
+                var rule = value as FileSystemAccessRule;
+                if (rule == null)
+                    return true;
+                if (rule.AccessControlType != AccessControlType.Allow ||
+                    (rule.PropagationFlags &
+                        PropagationFlags.InheritOnly) != 0)
+                    continue;
+                int rights = unchecked((int)rule.FileSystemRights);
+                int writeRights = unchecked((int)(
+                    FileSystemRights.WriteData |
+                    FileSystemRights.AppendData |
+                    FileSystemRights.WriteExtendedAttributes |
+                    FileSystemRights.DeleteSubdirectoriesAndFiles |
+                    FileSystemRights.WriteAttributes |
+                    FileSystemRights.Delete |
+                    FileSystemRights.ChangePermissions |
+                    FileSystemRights.TakeOwnership));
+                int genericWriteOrAll = unchecked((int)0x50000000);
+                if ((rights & writeRights) == 0 &&
+                    (rights & genericWriteOrAll) == 0)
+                    continue;
+
+                var sid = rule.IdentityReference as SecurityIdentifier;
+                if (sid == null || !IsTrustedMachineWriter(sid))
+                    return true;
+            }
+            return false;
+        }
+
+        private static bool IsTrustedMachineWriter(SecurityIdentifier sid)
+        {
+            if (sid == null)
+                return false;
+            return sid.IsWellKnown(WellKnownSidType.LocalSystemSid) ||
+                sid.IsWellKnown(
+                    WellKnownSidType.BuiltinAdministratorsSid) ||
+                string.Equals(
+                    sid.Value,
+                    "S-1-5-80-956008885-3418522649-1831038044-" +
+                    "1853292631-2271478464",
+                    StringComparison.Ordinal);
+        }
+
+        private static bool IsKnownBonjourServiceName(string value)
+        {
+            return string.Equals(
+                    value, "Bonjour Service",
+                    StringComparison.Ordinal) ||
+                string.Equals(
+                    value, "mDNSResponder",
+                    StringComparison.Ordinal);
+        }
+
+        private static bool TerminateProcessAndWait(Process process)
+        {
+            if (process == null)
+                return true;
+            try
+            {
+                if (!process.HasExited)
+                    process.Kill();
+            }
+            catch (InvalidOperationException)
+            {
+            }
+            catch (Win32Exception)
+            {
+                return process.HasExited;
+            }
+            return process.HasExited || process.WaitForExit(5000);
+        }
+
+        private static bool WaitForBonjourRunning(string serviceName)
+        {
+            if (!IsKnownBonjourServiceName(serviceName))
+                return false;
+            try
+            {
+                using (var service = new ServiceController(serviceName))
+                {
+                    service.WaitForStatus(
+                        ServiceControllerStatus.Running,
+                        TimeSpan.FromMilliseconds(
+                            BonjourServiceWaitMilliseconds));
+                    service.Refresh();
+                    return service.Status == ServiceControllerStatus.Running;
+                }
+            }
+            catch (InvalidOperationException)
+            {
+                return false;
+            }
+            catch (System.ServiceProcess.TimeoutException)
+            {
+                return false;
+            }
+        }
+
+        [DllImport("advapi32.dll", CharSet = CharSet.Unicode,
+            SetLastError = true)]
+        private static extern IntPtr OpenSCManager(
+            string machineName,
+            string databaseName,
+            uint desiredAccess);
+
+        [DllImport("advapi32.dll", CharSet = CharSet.Unicode,
+            SetLastError = true)]
+        private static extern IntPtr OpenService(
+            IntPtr serviceManager,
+            string serviceName,
+            uint desiredAccess);
+
+        [DllImport("advapi32.dll", CharSet = CharSet.Unicode,
+            SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool ChangeServiceConfig(
+            IntPtr service,
+            uint serviceType,
+            uint startType,
+            uint errorControl,
+            string binaryPathName,
+            string loadOrderGroup,
+            IntPtr tagId,
+            string dependencies,
+            string serviceStartName,
+            string password,
+            string displayName);
+
+        [DllImport("advapi32.dll", CharSet = CharSet.Unicode,
+            EntryPoint = "ChangeServiceConfig2W", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool ChangeServiceConfig2FailureActions(
+            IntPtr service,
+            uint infoLevel,
+            ref ServiceFailureActionsNative info);
+
+        [DllImport("advapi32.dll", CharSet = CharSet.Unicode,
+            EntryPoint = "ChangeServiceConfig2W", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool ChangeServiceConfig2FailureFlag(
+            IntPtr service,
+            uint infoLevel,
+            ref ServiceFailureActionsFlagNative info);
+
+        [DllImport("advapi32.dll", CharSet = CharSet.Unicode,
+            SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool StartService(
+            IntPtr service,
+            int argumentCount,
+            string[] arguments);
+
+        [DllImport("advapi32.dll", CharSet = CharSet.Unicode,
+            SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool QueryServiceConfig2(
+            IntPtr service,
+            uint infoLevel,
+            IntPtr buffer,
+            uint bufferSize,
+            out uint bytesNeeded);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool CloseServiceHandle(IntPtr handle);
 
         internal static string Install(bool startMenu, bool desktop)
         {
@@ -1282,6 +3602,7 @@ namespace AirPlayReceiverSetup
                     MoveInstallDirectoryToBackup(
                         InstallPaths.InstallDirectory, backup);
                 }
+                string installedExecutable;
                 try
                 {
                     MoveOrCopyDirectory(source, InstallPaths.InstallDirectory);
@@ -1298,7 +3619,7 @@ namespace AirPlayReceiverSetup
                     WriteUninstallRegistry(executable, uninstaller);
                     MigrateAutostart(executable);
                     TryDeleteDirectory(backup);
-                    return executable;
+                    installedExecutable = executable;
                 }
                 catch
                 {
@@ -1327,6 +3648,21 @@ namespace AirPlayReceiverSetup
                     }
                     throw;
                 }
+
+                // App installation is committed at this point. Bonjour is a
+                // shared machine prerequisite, so its best-effort recovery
+                // setup must never roll back or delete a successful update.
+                try
+                {
+                    EnsureBonjourAutomaticRecovery();
+                }
+                catch (Exception exception)
+                {
+                    SetupLog.Write(
+                        "Bonjour automatic recovery configuration was " +
+                        "skipped after an unexpected error: " + exception);
+                }
+                return installedExecutable;
             }
             finally
             {

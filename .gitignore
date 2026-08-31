@@ -1,6 +1,8 @@
 # Generated build and packaging output
 /artifacts/
 /vendor/
+/.native-short/
+/AeroMirror-*-review/
 
 # Local runtime and user data
 /data/

@@ -36,6 +36,64 @@ namespace AirPlayReceiverMvp
 
                 try
                 {
+                    AutomaticUpdateService.CleanupStaleDownloads();
+                    AppSettings startupSettings = AppSettings.Load();
+                    bool recoveringFromBusySetup = HasArgument(
+                        args, "--update-busy-recovery");
+                    bool recoveringFromFailedUpdate = HasArgument(
+                        args, "--update-recovery") ||
+                        recoveringFromBusySetup;
+                    if (!startupSettings.AutomaticUpdates)
+                    {
+                        AutomaticUpdateService.ClearStagedUpdate();
+                    }
+                    else if (recoveringFromBusySetup)
+                    {
+                        string busyRecoveryStatus;
+                        AutomaticUpdateService
+                            .RestorePendingLaunchAttemptAfterSetupBusy(
+                                AppVersion.Current,
+                                out busyRecoveryStatus);
+                        ReceiverContext.Log(busyRecoveryStatus);
+                    }
+                    else if (!recoveringFromFailedUpdate)
+                    {
+                        string automaticUpdateStatus;
+                        if (AutomaticUpdateService.TryLaunchPendingUpdate(
+                                AppVersion.Current,
+                                out automaticUpdateStatus))
+                        {
+                            ReceiverContext.Log(automaticUpdateStatus);
+                            ReceiverContext.FlushLog(1000);
+                            return;
+                        }
+                        if (!string.Equals(
+                                automaticUpdateStatus,
+                                "Подготовленного обновления нет.",
+                                StringComparison.Ordinal))
+                        {
+                            ReceiverContext.Log(automaticUpdateStatus);
+                        }
+                    }
+                    else
+                    {
+                        ReceiverContext.Log(
+                            "Skipped one pending-update handoff while " +
+                            "recovering the installed receiver after a failed " +
+                            "Setup transaction.");
+                    }
+                }
+                catch (Exception exception)
+                {
+                    // Update housekeeping must never prevent the receiver from
+                    // starting. A later safe launch can retry or discard it.
+                    ReceiverContext.Log(
+                        "Automatic update startup handoff skipped: " +
+                        exception.Message);
+                }
+
+                try
+                {
                     Application.EnableVisualStyles();
                     Application.SetCompatibleTextRenderingDefault(false);
                     Application.Run(new ReceiverContext(args, showEvent));
@@ -48,6 +106,22 @@ namespace AirPlayReceiverMvp
                         "AeroMirror", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
+        }
+
+        private static bool HasArgument(string[] args, string expected)
+        {
+            if (args == null)
+                return false;
+            foreach (string argument in args)
+            {
+                if (string.Equals(
+                        argument, expected,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+            return false;
         }
     }
 }

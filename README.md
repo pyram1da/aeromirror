@@ -1,14 +1,96 @@
-# AeroMirror for Windows
+# AeroMirror — AirPlay screen mirroring for Windows
 
-A native-style Windows tray application that makes an iPhone screen available
-on a Windows 10/11 PC through the open-source UxPlay receiver.
+Mirror an iPhone screen and audio to a Windows 10/11 PC over the local network.
+AeroMirror is a free, open-source AirPlay receiver powered by UxPlay. It starts
+with Windows, waits quietly in the tray, and opens the stream in a movable,
+resizable Windows window—without an iPhone app, account, subscription, ads, or
+telemetry.
 
-**Set it up once and forget it:** AeroMirror starts quietly with Windows,
-waits in the tray, and is ready from the iPhone's Screen Mirroring menu.
-There is no phone app, account, subscription, advertising, or telemetry.
+**[Download the latest AeroMirror installer for Windows](https://github.com/Nadejny/aeromirror/releases/latest)**
+
+Public builds are review releases: automated build and package checks pass,
+while the remaining physical Windows/iPhone acceptance is documented with each
+release.
 
 This is an independent project. It is not affiliated with or endorsed by
 Apple. AirPlay, iPhone, and Apple are trademarks of Apple Inc.
+
+## FAQ
+
+### Do the iPhone and PC need to be on the same Wi-Fi?
+
+They need to be on the same local network. The iPhone can use Wi-Fi while the
+PC uses Wi-Fi or Ethernet. Guest-network isolation, some VPNs, and router
+client-isolation settings can prevent AirPlay discovery even when both devices
+have internet access. AeroMirror normally waits in the background: open
+**Control Center → Screen Mirroring** on the iPhone and select the PC name.
+
+### What is Bonjour, and do I need to manage it?
+
+Bonjour is the local-network discovery service that makes AeroMirror appear in
+the iPhone's Screen Mirroring list. AeroMirror monitors discovery health and
+republishes the receiver automatically when it can; normal use should not
+require opening the app or pressing a restart button. Setup asks for Windows
+administrator approval only for a best-effort, exact Apple Bonjour service and
+Private-network firewall configuration. The running application only observes
+that system state. A missing, replaced, or damaged Bonjour installation is
+reported instead of being started through a button in AeroMirror.
+
+### What happens on the first connection?
+
+When a new iPhone needs trust, AeroMirror shows a four-digit PIN on the PC.
+The PC display darkens and the code is shown in a large fullscreen overlay for
+one minute; Escape cancels the request. Enter the code on the iPhone once. The
+receiver identity and trusted-device record stay in the current Windows user's
+local application data and survive an in-place update. A different iPhone or
+Windows user establishes its own trust, and **Reset trust** in Settings makes
+all devices pair again.
+
+### Does mirroring go through a cloud service?
+
+No. Video and audio stay on the local network, and AeroMirror has no account,
+analytics, advertising, or cloud mirroring component. Update checks contact the
+public GitHub Releases service; diagnostic logs remain local unless the user
+chooses to share a reviewed, redacted copy.
+
+### Which Windows versions are supported?
+
+Windows 10 version 1809 or newer on x64, and Windows 11 on x64. The current
+package does not support Windows on ARM or 32-bit Windows.
+
+### Can AeroMirror control the iPhone from the PC?
+
+No. AeroMirror receives the iPhone's screen and audio; it does not provide
+mouse, keyboard, touch, or remote-control access to iOS.
+
+### Does AeroMirror support AirDrop?
+
+No. AirPlay screen mirroring and AirDrop file transfer are different Apple
+protocols. AeroMirror is an AirPlay receiver and does not implement AirDrop or
+AWDL file sharing.
+
+### Does AeroMirror update automatically?
+
+Automatic updates are optional and disabled by default. With them disabled, an
+update starts only after the user asks AeroMirror to check and approves the
+download. If automatic updates are enabled, AeroMirror can install a verified
+GitHub Release at a later safe AeroMirror start. It does not close an active
+receiver to apply a newly found version. In either mode, it accepts only the
+exact versioned installer from the fixed project repository, verifies its
+SHA-256 digest, installs in place, and preserves the receiver identity, trusted
+devices, settings, and existing shortcut choices.
+
+Setup 0.12.22 and later prevents two current AeroMirror installers from
+changing the same installation at once. Let any older Setup window finish or
+close it before starting a current Setup; historical installers cannot use the
+new transaction guard.
+
+### How do I enter and leave fullscreen?
+
+Use the normal maximize button on the stream window or Alt+Enter to enter the
+clean borderless view. Press Escape to return to the previous movable window.
+Fullscreen is owned by the renderer itself, so there is no separate floating
+button that can lag behind the window.
 
 ## What works
 
@@ -25,18 +107,19 @@ Apple. AirPlay, iPhone, and Apple are trademarks of Apple Inc.
   names are normalized to one Bonjour-safe value of at most 50 UTF-8 bytes,
   and an interactive save explains and persists the effective value if it had
   to remove controls, repair invalid text, trim, or shorten the input;
-- uses no PIN on a trusted/private network by default;
-- can establish PIN trust once and keeps the receiver key and trusted-client
-  register under the user's local application data, independently of the
-  current Wi-Fi network and application install folder;
+- requires per-device PIN trust on every network: a previously unknown iPhone
+  receives a fresh random four-digit code in a fullscreen PC overlay, while a
+  trusted device reconnects without another prompt; the receiver key and
+  trusted-client register stay under the user's local application data,
+  independently of the current Wi-Fi network and application install folder;
+- lets the user revoke the trusted-device register without exposing a fixed
+  PIN, password, identity path, or register path through Advanced arguments;
 - detects the active physical Wi-Fi/Ethernet profile while ignoring VPN and
   virtual adapters, and reports how many overlay profiles were excluded;
-- pauses unprotected reception on a Windows Public physical network and asks
-  the user to enable a visible four-digit PIN;
-- canonicalizes persisted protection state before use: only no-PIN mode or
-  PIN mode with exactly four ASCII digits is accepted, so an obsolete,
-  unknown, or malformed stored value becomes unprotected and the existing
-  Public/Unknown physical-network rule fails closed;
+- keeps the physical Windows network name and category visible for diagnosis,
+  while mandatory per-device PIN trust removes the old Private/Public
+  protection choice; a usable physical Wi-Fi/Ethernet IPv4 address is still
+  required and VPN/virtual adapters cannot redefine that LAN;
 - offers simple 720p/30, 1080p/30, 1080p/60, and HEVC 4K/60 quality
   presets in the normal settings;
 - offers Windows Mobile Hotspot only as an optional advanced action while a
@@ -95,9 +178,13 @@ Apple. AirPlay, iPhone, and Apple are trademarks of Apple Inc.
   clients defer that operation; only the first two automatic command failures
   retain the legacy full-process fallback, while later failures keep the
   listener alive and rearm the recurring schedule;
-  **Restart discovery** remains a deliberate full DNS-SD-and-BLE process
-  restart, and a real physical IPv4 change also restarts because the separate
-  BLE helper receives its advertised address at startup; an incoming high-
+  the 0.12.22 source treats a stopped Apple Bonjour service as a blocked
+  prerequisite instead of a reason to retry or restart the receiver: BLE
+  cannot create a false ready state, background monitoring remains read-only,
+  and successful Windows service recovery triggers one bounded same-process,
+  same-port DNS-SD republication without a main-window or tray repair button;
+  a real physical IPv4 change still restarts the core because the separate BLE
+  helper receives its advertised address at startup; an incoming high-
   level AirPlay request starts a fresh ten-minute epoch so maintenance cannot interrupt the
   next handshake, and a stale end marker from the previous session preserves
   the newer request/PIN grace instead of triggering deferred maintenance;
@@ -116,11 +203,13 @@ Apple. AirPlay, iPhone, and Apple are trademarks of Apple Inc.
   renderer without taking focus; confirmed loss keeps a
   softened in-memory view of unobscured renderer client pixels, or a dark
   fallback otherwise, until a proven handoff or the user closes it;
-- checks a configured public GitHub Release channel only when requested,
+- checks a fixed public GitHub Release channel when requested, or in the
+  background only after the user enables automatic updates,
   accepts only exact three-part release tags such as `v0.12.5`,
   requires the exact versioned asset name
   `AeroMirror-Setup-<MAJOR.MINOR.PATCH>.exe`, displays curated release notes,
-  and verifies the setup SHA-256 before launching an update;
+  and verifies the Setup SHA-256; automatic mode stages the verified file for
+  a later safe application start instead of interrupting the current receiver;
 - provides a basic diagnostic report, a local log, and a **Report a problem**
   action that prepares a separately redacted log snapshot and opens a
   pre-filled GitHub Issue; the user reviews and attaches the file manually;
@@ -163,6 +252,47 @@ not the runtime downloaded by the public network installer. Qt 6.10.1
 officially supports Windows 10 1809 x64 and newer. Windows 10 is outside Microsoft's normal consumer support lifecycle,
 but remains an explicit application target. ARM64 and 32-bit packages are not
 included.
+
+## Current local 0.12.22 review candidate
+
+The local candidate turns the stopped-Bonjour diagnosis into a setup-and-forget
+flow. There is no Bonjour or discovery repair button on the main screen or in
+the tray. After the application files commit, Setup uses a separate bounded
+administrator step to configure only an exact, safely installed Apple Bonjour
+service for Automatic start, three Windows recovery delays, and one narrow
+Private/UDP 5353/LocalSubnet inbound rule. The per-user install still succeeds
+if that best-effort system step is declined or fails. The running application
+only assesses the service and firewall state; after Windows returns Bonjour to
+`Running`, AeroMirror requests at most two same-process DNS-SD publications on
+the existing AirPlay ports and waits for an acknowledged ready marker.
+
+Unknown iPhones now use mandatory first-device trust. A cryptographically
+random four-digit code appears in a high-contrast fullscreen overlay on the
+active PC display for up to one minute and is sent only to the current native
+pairing request through redirected stdin. It is not placed in process arguments
+or ordinary logs. A successful device record survives an in-place update; the
+user can revoke all trusted devices in Settings. Legacy fixed/no-PIN choices
+and protected Advanced-argument overrides are removed during migration.
+
+Fullscreen remains inside the native viewer: caption maximize and Alt+Enter
+enter a clean borderless monitor-sized window, while Escape returns to the
+remembered normal geometry. Optional automatic updates are disabled by default;
+when enabled, an exact-name/digest-verified Setup is staged for a later safe
+AeroMirror launch and never closes the current receiver merely because a new
+release was found.
+
+The inherited HLS/gallery path now also treats HTTP header names
+case-insensitively, parses language playlists within explicit bounds, rewrites
+shorter or absent URI prefixes safely, and rejects incomplete decoded fields
+without terminating the receiver process.
+
+Automated build, native, installer, update, and security gates are recorded in
+the [0.12.22 test plan](docs/releases/0.12.22/TEST_PLAN.md). Installed Windows
+10/11 behavior, physical iPhone pairing/visibility, fullscreen keys, and the
+complete update handoff remain pending until their evidence is recorded. No
+0.12.22 tag or Release exists yet; public 0.12.20 remains updater-visible
+latest. The unpublished 0.12.21 candidate was superseded and will not be tagged
+or reconstructed.
 
 ## Latest public 0.12.20 review release
 
@@ -273,9 +403,10 @@ ports. Mirroring and active-client grace defer the operation.
 Only the first two automatic attempts in an idle epoch may use the historical
 full-process fallback when the native refresh is unavailable, times out, or
 fails. Later failures leave the receiver listening and try again on the next
-20-minute deadline. **Restart discovery** remains the explicit strong action
-that restarts DNS-SD and the separate BLE helper, and a physical IPv4 change
-still requires that full restart.
+20-minute deadline. That historical release still exposed a strong discovery
+restart that replaced DNS-SD and the separate BLE helper. The current 0.12.22
+UI no longer exposes that troubleshooting control; a real physical IPv4 change
+still requires an internal full restart.
 
 For an already installed copy, an update started inside AeroMirror, a newer
 Setup, or a same-version Setup reinstall proceeds without presenting the three
@@ -370,44 +501,43 @@ all earlier public assets remain immutable history.
 ## Installer: recommended
 
 For normal use, open the
-[latest AeroMirror release](https://github.com/pyram1da/aeromirror/releases/latest)
+[latest AeroMirror release](https://github.com/Nadejny/aeromirror/releases/latest)
 and download:
 
 ```text
-AeroMirror-Setup-0.12.19.exe
+AeroMirror-Setup-0.12.22.exe
 ```
 
-`v0.12.19` is the normal updater-visible review Release for physical Photos,
-fullscreen, and discovery testing. Its automated/native contracts,
-corresponding source, exact-tag 13-entry review package, Setup lifecycle,
-public API digests, and fresh re-downloads pass. It keeps 0.12.16 recurring
-same-process discovery maintenance, removes the unverified 0.12.18 Photos
-cover transform, adds a visible shell-owned fullscreen control and reliable
-event-driven Escape, and diagnoses one exact missing Private Bonjour rule.
-Installed-update and physical Photos/firewall/long-idle acceptance remain
-pending; earlier published assets are not replaced.
+`v0.12.22` is the normal updater-visible review Release after publication. It
+removes manual discovery repair, gives every unknown iPhone a one-time large
+four-digit pairing code, keeps fullscreen inside the native viewer, adds
+installer-owned Bonjour recovery, and offers verified automatic updates as an
+opt-in setting. Installed Windows/iPhone, Photos, fullscreen, and long-idle
+acceptance remain explicitly pending; earlier published assets are never
+replaced.
 
 Scope and pending physical acceptance are in the
-[0.12.19 release notes](docs/releases/0.12.19/RELEASE_NOTES.md) and
-[test plan](docs/releases/0.12.19/TEST_PLAN.md). Exact tag, public assets,
-digests, and re-download evidence are in the
-[build report](docs/releases/0.12.19/BUILD_REPORT.md). The historical
+[0.12.22 release notes](docs/releases/0.12.22/RELEASE_NOTES.md) and
+[test plan](docs/releases/0.12.22/TEST_PLAN.md). Exact tag, public assets,
+digests, and re-download evidence are recorded in the versioned build report
+after publication. The historical
 [0.12.8 release notes](docs/releases/0.12.8/RELEASE_NOTES.md) and
 [test plan](docs/releases/0.12.8/TEST_PLAN.md) remain available; 0.12.8 was
 never tagged or published. Published 0.12.7 remains immutable history.
 
-The canonical repository is now `pyram1da/aeromirror`. AeroMirror 0.12.19 still
-contains the former `Nadejny/aeromirror` updater slug; GitHub redirects its
-`releases/latest` API to the canonical repository. Canonical and legacy API,
-HTML/latest, and Setup routes resolve to the same verified `v0.12.19`
-Release.
+The canonical repository is `pyram1da/aeromirror`. For compatibility with
+already-installed versions, the updater remains pinned to the historical
+`Nadejny/aeromirror` slug; GitHub redirects that slug to the canonical
+repository.
 
 The installer:
 
 - is a **network review installer**: it downloads the unchanged pinned
   `uxplay-windows` runtime directly from the upstream GitHub Release, verifies
   SHA-256, and fails closed if the download or checksum is wrong;
-- installs for the current Windows user without an administrator prompt;
+- installs the application files for the current Windows user; a separate
+  best-effort administrator prompt appears only when the exact Apple Bonjour
+  recovery/firewall state still needs configuration;
 - places the application under
   `%LOCALAPPDATA%\Programs\AirPlayReceiverMvp` (the legacy internal path is
   retained so v0.7/v0.8 upgrade in place);
@@ -419,8 +549,8 @@ The installer:
 - updates or reinstalls an existing copy without reopening that option form,
   preserves the current shortcut choices, relaunches AeroMirror, and rolls back
   application files plus installer metadata if replacement fails;
-- refuses to downgrade a newer installed version automatically and retains the
-  explicit downgrade confirmation;
+- refuses to replace a newer installed version and reports that the older Setup
+  was cancelled;
 - keeps the exact pinned upstream runtime in a content-addressed local cache
   after SHA-256 verification, so a reinstall or later update using the same
   runtime does not download the 100+ MB archive again;
@@ -435,12 +565,19 @@ not mirror or silently fall back to another runtime.
 AeroMirror Setup extracts the pinned portable Qt/GStreamer application
 runtime, but installs no system-wide .NET/VC++ redistributable, driver, or
 framework prerequisite; a full Windows reboot is not an expected normal
-completion step. Bonjour is a separate machine-wide discovery service. The
-0.12.20 headless core reports when it is absent but does not offer to register
-the bundled per-user responder as a system service. One Windows 10 first-
-install report worked only after reboot, but the cause was not retained; a
-stopped or stale Bonjour lifecycle is only a hypothesis. Diagnose a repeat on
-a clean Windows 10 VM before rebooting, as described in
+completion step. Bonjour is a separate, shared machine-wide discovery service.
+After the per-user application transaction commits, 0.12.22 Setup may request
+Windows administrator approval for one best-effort system configuration pass.
+It accepts only the exact Apple service and a protected canonical
+`mDNSResponder.exe` path, configures Automatic start plus bounded Windows
+recovery actions, starts the service when necessary, and ensures one exact
+Private/UDP 5353/LocalSubnet inbound rule. An absent, replaced, or unsafe
+service is left untouched, and declining this step does not remove or roll back
+the installed application. AeroMirror's normal runtime remains unelevated and
+read-only. Because Bonjour is shared system software, this narrow recovery and
+firewall state intentionally remains after AeroMirror is uninstalled; a later
+reinstall is idempotent. Diagnose any remaining first-run problem before
+rebooting, as described in
 [troubleshooting](docs/TROUBLESHOOTING.md).
 
 The installer is currently unsigned, so Windows SmartScreen may display an
@@ -450,7 +587,7 @@ an accidental mismatch; until Authenticode publisher verification is added,
 they are not a substitute for a signed release if the repository account
 itself were compromised.
 
-## Portable build: local testing only in 0.11
+## Portable build: local testing only
 
 The offline portable package is intentionally **not attached** to the 0.11
 review Release. It contains the full Qt/GStreamer/FFmpeg/MSYS2 DLL closure,
@@ -464,27 +601,25 @@ deleting or cleaning its folder deletes the program.
 1. Extract the whole ZIP to a normal folder. Do not run it from inside the ZIP.
 2. Start `AeroMirror.exe`.
 3. Allow network access if Windows Firewall asks.
-4. If Bonjour is missing, install it from a trusted system/vendor source; the
-   0.12.20 headless core reports the prerequisite and does not register its
-   bundled per-user responder as a system service.
+4. If Bonjour is missing, install it from a trusted Apple/vendor source; the
+   headless core reports the prerequisite and does not register its bundled
+   per-user responder as a system service. Portable engineering runs have no
+   Setup-owned machine configuration and no in-app Bonjour repair button.
 5. Put the iPhone and PC on the same local network.
 6. On iPhone, open **Control Center → Screen Mirroring** and select the PC name.
 7. Use the tray icon to change settings or stop the receiver.
 
-On a Windows **Private** physical network, a fresh installation accepts a
-connection without a PIN. PIN protection remains available there as an
-optional extra layer. On a Windows **Public** network, the shell pauses an
-unprotected receiver until you enable PIN protection. The PIN is generated
-and shown in the settings window, so the iPhone never asks for an invisible
-code.
+Every previously unknown iPhone must complete the per-device PIN flow. The PC
+shows a fresh four-digit code in a fullscreen overlay; after successful entry,
+that device reconnects without another prompt until trust is reset. The old
+fixed/no-PIN protection choices no longer exist. The Windows physical-network
+name and category remain visible diagnostic information, and a usable physical
+IPv4 address is still required.
 
-VPN, tunnel, Hyper-V, and other virtual profiles do not determine whether the
-LAN is trusted. The UI shows the exact physical profile name and Windows
-category. If Windows itself marks the physical Wi-Fi/Ethernet as Public while
-a VPN is active, AeroMirror remains fail-closed: disconnect the VPN and repeat
-the check, change the physical Windows profile to Private only when it really
-is a trusted network, or use PIN protection. A personal hotspot is never
-enabled automatically.
+VPN, tunnel, Hyper-V, and other virtual profiles do not replace the physical
+Wi-Fi/Ethernet address or category. A personal hotspot is never enabled
+automatically, and per-device trust remains active on Private, Public, and
+Unknown networks alike.
 
 Settings and logs are stored under:
 
@@ -540,31 +675,31 @@ installer from that exact ZIP with:
 
 ```powershell
 .\package-review.ps1 `
-  -Version 0.12.19 `
+  -Version 0.12.22 `
   -HeadlessRuntimePath .\artifacts\headless-runtime
 
 .\build-installer.ps1 `
-  -Version 0.12.19 `
-  -PortableZip .\artifacts\AeroMirror-review-payload-x64-0.12.19.zip
+  -Version 0.12.22 `
+  -PortableZip .\artifacts\AeroMirror-review-payload-x64-0.12.22.zip
 ```
 
 The result is:
 
 ```text
-artifacts\installer\AeroMirror-Setup-0.12.19.exe
+artifacts\installer\AeroMirror-Setup-0.12.22.exe
 ```
 
-Public release names use three-part semantic versions such as `0.12.19`.
+Public release names use three-part semantic versions such as `0.12.22`.
 Windows executable metadata internally requires four numeric fields and may
-show `0.12.19.0` in a file-property dialog; the AeroMirror UI and GitHub
-Release intentionally show only `0.12.19`.
+show `0.12.22.0` in a file-property dialog; the AeroMirror UI and GitHub
+Release intentionally show only `0.12.22`.
 
 For local offline engineering tests, create the full portable package with
 both explicit inputs:
 
 ```powershell
 .\package.ps1 `
-  -Version 0.12.19 `
+  -Version 0.12.22 `
   -UxPlayPortablePath .\artifacts\headless-runtime `
   -HeadlessCorePath .\artifacts\headless-runtime\uxplay-windows.exe
 ```
@@ -578,7 +713,7 @@ SHA-256.
 
 ### Rebuild the reviewed native core
 
-`AeroMirror-native-source-0.12.19.zip` is a prepared corresponding-source
+`AeroMirror-native-source-0.12.22.zip` is a prepared corresponding-source
 archive: the `uxplay-windows` and `libuxplay` patches are already applied, so
 do not apply them a second time. After providing the pinned Qt 6.10.1 and
 MSYS2 toolchains listed in
@@ -587,7 +722,7 @@ MSYS2 toolchains listed in
 ```powershell
 # Use a short extraction path: the MinGW/CMake object tree can exceed the
 # Windows filename limit under a deeply nested Downloads/workspace folder.
-$source = Resolve-Path .\AeroMirror-native-source-0.12.19\uxplay-windows
+$source = Resolve-Path .\AeroMirror-native-source-0.12.22\uxplay-windows
 & "$source\AeroMirror-build-inputs\build-compatible-core.ps1" `
   -UpstreamRoot $source `
   -Qt610Prefix C:\path\to\Qt-6.10.1 `
@@ -621,12 +756,15 @@ src/
   Receiver/
     ReceiverContext.cs       tray application context and shared state
     ReceiverContext.Core.cs  native lifecycle and discovery/recovery policy
+    ReceiverContext.Pairing.cs first-device PIN overlay and trust lifecycle
+    ReceiverContext.Updates.cs opt-in background update staging
     ReceiverContext.HttpReset.cs native HTTP reset marker state
     ReceiverContext.Rendering.cs renderer-window sizing and Win32 policy
     ReceiverContext.LostConnection.cs fatal-loss placeholder lifecycle
     ReceiverContext.Diagnostics.cs logging and problem-report workflow
   UI/
     SettingsForm.cs          active home/settings/updates window
+    PairingPinOverlayForm.cs fullscreen first-device code overlay
     DiagnosticsForm.cs       diagnostic text viewer
     LostConnectionForm.cs    softened reconnect placeholder window
     ThemeHelper.cs           light/dark control styling
@@ -635,9 +773,11 @@ src/
       NamedValue.cs
       WheelSafeComboBox.cs
   Updates/
+    AutomaticUpdateService.cs protected staging and next-start handoff
     UpdateInfo.cs
     UpdateService.cs         strict release parsing, download, and verification
   Network/
+    BonjourServiceRecoveryService.cs read-only runtime service assessment
     NetworkProfileInfo.cs
     NetworkSafety.cs         physical-profile trust and adapter filtering
   Interop/
@@ -678,6 +818,9 @@ docs/
   TROUBLESHOOTING.md         log collection and first-run reproduction
   TODO.md                    product and protocol roadmap
   releases/
+    0.12.22/
+      RELEASE_NOTES.md       automatic recovery and first-device trust summary
+      TEST_PLAN.md           automated evidence and pending physical matrix
     0.12.19/
       RELEASE_NOTES.md       non-cropping gallery/fullscreen release summary
       TEST_PLAN.md           gallery, fullscreen, and discovery gates
@@ -809,8 +952,9 @@ pass; deeper UI extraction should be reviewed separately from receiver fixes.
   SD refresh in that same process and on the same RAOP/AirPlay ports. Bonjour
   callbacks prove only local registration for the new generation; they do not
   continuously attest iPhone visibility or force a phone to discard a cached
-  row. The unchanged BLE helper is not refreshed in place, so manual discovery
-  and a real physical IPv4 change still use full-process recovery. The older
+  row. The unchanged BLE helper is not refreshed in place, so a real physical
+  IPv4 change still uses internal full-process recovery; the current UI exposes
+  no manual discovery-restart button. The older
   0.12.16 keeps the first ten-minute deadline and then repeats same-process
   re-registration every 20 minutes while idle. Only the first two automatic
   attempts may fall back to a full process restart; later failures retain the
@@ -884,13 +1028,15 @@ pass; deeper UI extraction should be reviewed separately from receiver fixes.
   browsing or that an AirPlay session is active.
 - The executables are not yet code-signed, so Windows SmartScreen may warn
   about an unknown publisher.
-- GitHub update checking in 0.12.7 uses the former `Nadejny/aeromirror` slug;
-  GitHub redirects it to canonical `pyram1da/aeromirror`, and both latest API
-  routes returned the same public `v0.12.7` Release ID.
+- Update checking is pinned to `Nadejny/aeromirror` and accepts only the exact
+  versioned GitHub Release URL/Setup name plus a verified SHA-256. It does not
+  follow a repository rename or select an arbitrary executable asset.
 - Bonjour/mDNS and Windows Firewall remain external system dependencies. The
-  0.12.19 release can explicitly add only the exact Private/UDP
-  5353/LocalSubnet rule for the validated Bonjour executable after confirmation
-  and UAC; it does not change the Bonjour service or clean the rule on uninstall.
+  0.12.22 Setup can best-effort configure only the exact validated Apple
+  service and Private/UDP 5353/LocalSubnet rule after Windows administrator
+  approval; normal application runtime is read-only and exposes no repair
+  button. The exact shared service-recovery policy and narrow rule intentionally
+  remain after AeroMirror uninstall.
   Allow the receiver only on intended network categories. Some managed or guest
   Wi-Fi networks block device discovery.
   AeroMirror extracts a portable app runtime but installs no system-wide
@@ -898,10 +1044,10 @@ pass; deeper UI extraction should be reviewed separately from receiver fixes.
   normally require a full Windows reboot. Bonjour is machine-wide, so an
   uninstall/reinstall on the same PC cannot reproduce a truly clean first
   install; one unproven Windows 10 reboot report remains scheduled for a clean
-  VM test, without automatic Bonjour service mutation.
+  VM test against the exact bounded Setup-owned Bonjour policy.
 - Public-network detection follows active physical Windows network profiles.
-  A wrongly classified physical profile can still produce a conservative
-  warning; fix the category in Windows or enable PIN.
+  The name/category remains useful diagnostic information, while mandatory
+  per-device PIN trust applies on Private, Public, and Unknown alike.
 - DRM-protected playback is not supported.
 - No AirDrop, AeroDrop companion, clipboard sync, remote input, recording UI,
   multi-device UI, virtual camera, OBS integration, or `Win+K` integration.
@@ -910,8 +1056,10 @@ pass; deeper UI extraction should be reviewed separately from receiver fixes.
 - Phone notifications, SMS, and call handling are not included. The app's
   notification option only covers failures and unsafe network status; a normal
   Windows autostart is silent.
-- PIN registration behavior is provided by UxPlay and can vary with iOS
-  versions and stored pairing records.
+- Per-device PIN/SRP registration is provided by the patched UxPlay boundary
+  and can still vary with iOS versions and stored pairing records; physical
+  first/second-device acceptance remains release evidence, not an automated
+  compatibility claim.
 
 ## Quality presets
 
@@ -928,7 +1076,7 @@ The source device can send a lower resolution or frame rate. UxPlay accepts a
 120 FPS request, but iPhone mirroring is not guaranteed to provide it, so the
 main UI does not advertise a misleading 120 FPS preset.
 
-Changing quality, FPS, receiver name, PIN mode, renderer, latency, or raw
+Changing quality, FPS, receiver name, renderer, latency, or raw
 UxPlay arguments restarts the native receiver because these capabilities are
 advertised when the AirPlay service/session starts. Stop Screen Mirroring on
 the iPhone and connect again to guarantee a new quality negotiation. UI-only
@@ -976,13 +1124,13 @@ The current license inventory is an engineering review, not legal advice.
 
 ## Sharing a build
 
-For the public 0.12.19 review Release, share the GitHub Release page or its
+For the public 0.12.22 review Release, share the GitHub Release page or its
 network Setup—not a loose `AeroMirror.exe`. Project policy keeps these assets
 together and immutable:
 
-- `AeroMirror-Setup-0.12.19.exe`;
-- `AeroMirror-source-0.12.19.zip`;
-- `AeroMirror-native-source-0.12.19.zip`;
+- `AeroMirror-Setup-0.12.22.exe`;
+- `AeroMirror-source-0.12.22.zip`;
+- `AeroMirror-native-source-0.12.22.zip`;
 - `SHA256SUMS.txt`.
 
 The native source archive contains the exact prepared `uxplay-windows` and

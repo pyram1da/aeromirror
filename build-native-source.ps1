@@ -2,7 +2,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$UpstreamRoot,
 
-    [string]$Version = "0.12.20"
+    [string]$Version = "0.12.22"
 )
 
 $ErrorActionPreference = "Stop"
@@ -53,6 +53,20 @@ function Get-Sha256Lower([string]$Path) {
     return (
         Get-FileHash -Algorithm SHA256 -LiteralPath $Path
     ).Hash.ToLowerInvariant()
+}
+
+function Get-CanonicalPatchText([string]$Path) {
+    $text = [IO.File]::ReadAllText(
+        $Path, [Text.UTF8Encoding]::new($false))
+    $text = $text.Replace("`r`n", "`n").Replace("`r", "`n")
+    # Git's index line describes complete result blobs, so a Windows checkout
+    # with equivalent CRLF source can produce a different new-object id even
+    # when every emitted patch hunk is byte-for-byte identical. Raw hashes for
+    # all packaged patched/protected sources are validated separately below.
+    return [Regex]::Replace(
+        $text,
+        '(?m)^index [0-9a-f]{7,40}\.\.[0-9a-f]{7,40}( [0-7]{6})?$',
+        'index <source-hashes-validated-separately>$1')
 }
 
 function Assert-FileHash(
@@ -166,6 +180,7 @@ $modified = @(
 )
 $expectedModified = @(
     " m libuxplay",
+    " M scripts/verify-bundle.ps1",
     " M src/airplayworker.cpp",
     " M src/main.cpp",
     " M src/mainwindow.cpp",
@@ -182,17 +197,23 @@ $libModified = @(
 )
 $expectedLibModified = @(
     "?? aeromirror_host_protocol.h",
+    "?? aeromirror_log_protocol.h",
+    " M lib/airplay_video.c",
+    " M lib/airplay_video.h",
     " M lib/crypto.c",
     " M lib/crypto.h",
     " M lib/dnssd.c",
     " M lib/dnssd.h",
     " M lib/fairplay_playfair.c",
+    " M lib/fcup_request.h",
     " M lib/http_handlers.h",
     " M lib/http_request.c",
     " M lib/http_request.h",
     " M lib/http_response.c",
     " M lib/http_response.h",
     " M lib/httpd.c",
+    " M lib/logger.c",
+    " M lib/logger.h",
     " M lib/mirror_buffer.c",
     " M lib/mirror_buffer.h",
     " M lib/netutils.c",
@@ -234,8 +255,9 @@ Assert-FileHash -Path $reviewedPatch `
 $actualPatch = [IO.Path]::GetTempFileName()
 try {
     & git -c ("safe.directory=" + $upstream) -C $upstream `
-        diff --binary --no-ext-diff `
+        diff --binary --full-index --no-ext-diff `
         ("--output=" + $actualPatch) -- `
+        "scripts/verify-bundle.ps1" `
         "src/airplayworker.cpp" `
         "src/main.cpp" `
         "src/mainwindow.cpp" `
@@ -245,7 +267,9 @@ try {
     }
     $reviewedPatchHash = Get-Sha256Lower -Path $reviewedPatch
     $actualPatchHash = Get-Sha256Lower -Path $actualPatch
-    if ($reviewedPatchHash -ne $actualPatchHash) {
+    if ($reviewedPatchHash -ne $actualPatchHash -and
+        (Get-CanonicalPatchText -Path $reviewedPatch) -cne
+            (Get-CanonicalPatchText -Path $actualPatch)) {
         throw (
             "The modified native source does not exactly match " +
             "uxplay-windows-headless.patch.")
@@ -276,6 +300,7 @@ try {
     & git -c ("safe.directory=" + $libuxplay) -C $libuxplay `
         add -N -- `
         "aeromirror_host_protocol.h" `
+        "aeromirror_log_protocol.h" `
         "lib/mirror_payload_parser.c" `
         "lib/mirror_payload_parser.h" `
         "lib/worker_lifecycle.c" `
@@ -284,20 +309,26 @@ try {
         throw "Unable to add new reviewed sources to the temporary index."
     }
     & git -c ("safe.directory=" + $libuxplay) -C $libuxplay `
-        diff --binary --no-ext-diff `
+        diff --binary --full-index --no-ext-diff `
         ("--output=" + $actualLibPatch) -- `
         "aeromirror_host_protocol.h" `
+        "aeromirror_log_protocol.h" `
+        "lib/airplay_video.c" `
+        "lib/airplay_video.h" `
         "lib/crypto.c" `
         "lib/crypto.h" `
         "lib/dnssd.c" `
         "lib/dnssd.h" `
         "lib/fairplay_playfair.c" `
+        "lib/fcup_request.h" `
         "lib/http_handlers.h" `
         "lib/http_request.c" `
         "lib/http_request.h" `
         "lib/http_response.c" `
         "lib/http_response.h" `
         "lib/httpd.c" `
+        "lib/logger.c" `
+        "lib/logger.h" `
         "lib/mirror_buffer.c" `
         "lib/mirror_buffer.h" `
         "lib/mirror_payload_parser.c" `
@@ -398,6 +429,7 @@ try {
         $libArchive, (Join-Path $sourceRoot "libuxplay"))
 
     foreach ($relative in @(
+        "scripts\verify-bundle.ps1",
         "src\airplayworker.cpp",
         "src\main.cpp",
         "src\mainwindow.cpp",
@@ -408,17 +440,23 @@ try {
     }
     foreach ($relative in @(
         "aeromirror_host_protocol.h",
+        "aeromirror_log_protocol.h",
+        "lib\airplay_video.c",
+        "lib\airplay_video.h",
         "lib\crypto.c",
         "lib\crypto.h",
         "lib\dnssd.c",
         "lib\dnssd.h",
         "lib\fairplay_playfair.c",
+        "lib\fcup_request.h",
         "lib\http_handlers.h",
         "lib\http_request.c",
         "lib\http_request.h",
         "lib\http_response.c",
         "lib\http_response.h",
         "lib\httpd.c",
+        "lib\logger.c",
+        "lib\logger.h",
         "lib\mirror_buffer.c",
         "lib\mirror_buffer.h",
         "lib\mirror_payload_parser.c",

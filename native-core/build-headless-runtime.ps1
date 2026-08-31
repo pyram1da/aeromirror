@@ -11,7 +11,9 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$HeadlessExecutable,
 
-    [string]$MsysRoot = "C:\msys64"
+    [string]$MsysRoot = "C:\msys64",
+
+    [string]$QtPrefix = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -24,6 +26,16 @@ $artifactRoot = Join-Path $projectRoot "artifacts"
 $stage = Join-Path $artifactRoot "headless-runtime"
 $prefix = Join-Path $MsysRoot "ucrt64"
 $runtimeBin = Join-Path $prefix "bin"
+$qtRoot = if ([string]::IsNullOrWhiteSpace($QtPrefix)) {
+    $prefix
+} else {
+    (Resolve-Path -LiteralPath $QtPrefix).Path
+}
+$qtBin = Join-Path $qtRoot "bin"
+$windeployqt = Join-Path $qtBin "windeployqt.exe"
+if (-not (Test-Path -LiteralPath $windeployqt -PathType Leaf)) {
+    $windeployqt = Join-Path $qtBin "windeployqt-qt6.exe"
+}
 $provenancePath = Join-Path $nativeRoot "source-provenance.json"
 $uxplayPatch = Join-Path $nativeRoot "uxplay-windows-headless.patch"
 $libuxplayPatch = Join-Path $nativeRoot "libuxplay-aeromirror.patch"
@@ -110,7 +122,7 @@ $required = @(
     (Join-Path $original "dnssd.dll"),
     (Join-Path $original "mDNSResponder.exe"),
     (Join-Path $original "LICENSE.rtf"),
-    (Join-Path $runtimeBin "windeployqt.exe"),
+    $windeployqt,
     (Join-Path $runtimeBin "python.exe"),
     (Join-Path $runtimeBin "objdump.exe")
     $buildGStreamerCore,
@@ -337,9 +349,9 @@ Copy-Item -LiteralPath $provenancePath `
     -Destination (Join-Path $stage "resources\source-provenance.json")
 
 $env:MSYSTEM = "UCRT64"
-$env:PATH = "$runtimeBin;$(Join-Path $MsysRoot 'usr\bin');$env:PATH"
+$env:PATH = "$qtBin;$runtimeBin;$(Join-Path $MsysRoot 'usr\bin');$env:PATH"
 
-& (Join-Path $runtimeBin "windeployqt.exe") `
+& $windeployqt `
     --release `
     --no-translations `
     --no-compiler-runtime `
@@ -447,10 +459,35 @@ $buildManifest = [ordered]@{
 $buildManifest | ConvertTo-Json -Depth 8 |
     Set-Content -LiteralPath (Join-Path $stage "resources\build-manifest.json") -Encoding utf8
 
-& (Join-Path $upstream "scripts\collect-runtime-dependencies.ps1") `
-    -StageDir $stage `
-    -MsysRoot $MsysRoot `
-    -EnvironmentName "ucrt64" `
-    -ManifestPath (Join-Path $stage "resources\bundle-files.json")
+$aeroRuntimeTempRoot = [IO.Path]::GetTempPath()
+$dependencyStage = Join-Path $aeroRuntimeTempRoot (
+    "AeroMirror-runtime-dependencies-" + [Guid]::NewGuid().ToString("N"))
+Assert-ChildPath -Parent $aeroRuntimeTempRoot -Child $dependencyStage
+New-Item -ItemType Directory -Path $dependencyStage | Out-Null
+try {
+    # MSYS2 objdump cannot open some Unicode Windows paths. Run only its
+    # recursive dependency pass against an ASCII temporary copy, then publish
+    # the validated result back to the normal artifact directory.
+    Get-ChildItem -LiteralPath $stage -Force |
+        Copy-Item -Destination $dependencyStage -Recurse -Force
+    & (Join-Path $upstream "scripts\collect-runtime-dependencies.ps1") `
+        -StageDir $dependencyStage `
+        -MsysRoot $MsysRoot `
+        -EnvironmentName "ucrt64" `
+        -ManifestPath (Join-Path $dependencyStage "resources\bundle-files.json")
+
+    Assert-ChildPath -Parent $artifactRoot -Child $stage
+    if (Test-Path -LiteralPath $stage) {
+        Remove-Item -LiteralPath $stage -Recurse -Force
+    }
+    Move-Item -LiteralPath $dependencyStage -Destination $stage
+    $dependencyStage = $null
+}
+finally {
+    if ($dependencyStage -and
+        (Test-Path -LiteralPath $dependencyStage)) {
+        Remove-Item -LiteralPath $dependencyStage -Recurse -Force
+    }
+}
 
 Write-Host "Headless runtime staged at $stage"

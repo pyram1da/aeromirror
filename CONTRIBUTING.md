@@ -29,11 +29,11 @@ Open one GitHub issue per problem and include:
   app changed the result;
 - whether an AirPlay session was connecting, active, or disconnecting;
 - for a receiver missing after long idle, include the last successful session,
-  Windows lock/unlock times, both timed idle-discovery stages and any unlock
-  fallback decision, each correlated discovery request/generation with PID and
-  ports, each iPhone browse/tap time, and the first log before manually
-  restarting discovery. Also retain the replacement PID and fresh DNS-SD/BLE
-  startup after the manual action;
+  Windows lock/unlock times, each automatic recovery decision, each correlated
+  discovery request/generation with PID and ports, each iPhone browse/tap time,
+  and the first log before taking any recovery action. If diagnostics explicitly
+  require a controlled app restart, also retain the replacement PID and fresh
+  DNS-SD/BLE startup after that restart;
 - for a Wi-Fi interruption or frozen reconnect, whether the continuity view
   showed connection lost, waiting for image, the Screen Mirroring reconnect
   hint, or faded before the picture actually resumed; retain the log from the
@@ -48,11 +48,11 @@ Open one GitHub issue per problem and include:
   visible motion actually resumed. The marker proves that one decrypted and
   validated access unit triggered a resume request; it does not prove decode,
   presentation, or a physically fixed freeze by itself;
-- for a 0.12.16 missing-after-idle report, retain the numbered automatic
-  renewal lines, every correlated discovery request/result, lock/unlock and
-  sleep/wake times, PID and ports, and the time of each iPhone Screen Mirroring
-  browse. Note whether the receiver returned before pressing **Restart
-  discovery**; a local ready marker is not remote visibility proof;
+- for a missing-after-idle report, retain the numbered automatic recovery
+  lines, every correlated discovery request/result, lock/unlock and sleep/wake
+  times, PID and ports, and the time of each iPhone Screen Mirroring browse.
+  Note whether Windows service recovery restored visibility without restarting
+  AeroMirror; a local ready marker is not remote visibility proof;
 - for layout issues, the phone orientation and the app/media being displayed;
   for Photos also retain the ordered raw/encoded geometry, whether a phone-
   shaped frame preceded or followed the exact media signature, and measure the

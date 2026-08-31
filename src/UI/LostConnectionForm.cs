@@ -16,6 +16,10 @@ namespace AirPlayReceiverMvp
         private readonly Font buttonFont;
         private Timer rendererHandoffTimer;
         private DateTime rendererHandoffStartedUtc;
+        private bool programmaticClose;
+        private bool userDismissedRaised;
+
+        internal event EventHandler UserDismissed;
 
         internal LostConnectionForm(Rectangle bounds, Bitmap snapshot)
         {
@@ -79,6 +83,26 @@ namespace AirPlayReceiverMvp
         protected override bool ShowWithoutActivation
         {
             get { return true; }
+        }
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            if (!programmaticClose &&
+                e.CloseReason == CloseReason.UserClosing &&
+                !userDismissedRaised)
+            {
+                userDismissedRaised = true;
+                EventHandler handler = UserDismissed;
+                if (handler != null)
+                    handler(this, EventArgs.Empty);
+            }
+            base.OnFormClosing(e);
+        }
+
+        internal void CloseProgrammatically()
+        {
+            programmaticClose = true;
+            Close();
         }
 
         protected override void OnPaintBackground(PaintEventArgs e)

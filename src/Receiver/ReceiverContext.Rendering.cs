@@ -1045,6 +1045,7 @@ namespace AirPlayReceiverMvp
             if (window != IntPtr.Zero &&
                 NativeMethods.RestoreAndActivateWindow(window))
             {
+                ClearRendererDismissedForCurrentSession();
                 Log("Renderer window restored and activated explicitly.");
                 return;
             }

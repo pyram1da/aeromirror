@@ -64,20 +64,30 @@ namespace AirPlayReceiverMvp
 
         private string GetBonjourStatus()
         {
-            string[] names = { "Bonjour Service", "mDNSResponder" };
-            foreach (string name in names)
+            try
             {
-                try
+                BonjourServiceAssessment assessment =
+                    BonjourServiceRecoveryService.Assess();
+                switch (assessment.State)
                 {
-                    using (var service = new ServiceController(name))
-                    {
-                        ServiceControllerStatus status = service.Status;
-                        return status.ToString();
-                    }
+                    case BonjourServiceState.Running:
+                        return "Running";
+                    case BonjourServiceState.StartPending:
+                        return "StartPending";
+                    case BonjourServiceState.StopPending:
+                        return "StopPending";
+                    case BonjourServiceState.Stopped:
+                        return "Stopped";
+                    case BonjourServiceState.MissingOrUnsafe:
+                        return "не установлен или небезопасен";
+                    default:
+                        return "недоступен";
                 }
-                catch { }
             }
-            return "не установлен или недоступен";
+            catch
+            {
+                return "недоступен";
+            }
         }
 
         private void ShowDiagnostics()
@@ -118,7 +128,9 @@ namespace AirPlayReceiverMvp
                 report.AppendLine(ReadLogTail(AppSettings.LogPath, 1024 * 1024));
                 File.WriteAllText(
                     path,
-                    RedactSupportText(report.ToString(), settings.FixedPin),
+                    RedactSupportText(
+                        report.ToString(),
+                        settings.LegacyFixedPinForSanitization),
                     new UTF8Encoding(false));
 
                 string issueBody =
@@ -211,6 +223,7 @@ namespace AirPlayReceiverMvp
         private void Quit()
         {
             quitting = true;
+            StopAutomaticUpdateWork();
             CloseLostConnectionPlaceholder();
             monitorTimer.Stop();
             NetworkChange.NetworkAddressChanged -= OnNetworkAddressChanged;
@@ -225,7 +238,13 @@ namespace AirPlayReceiverMvp
             if (Interlocked.CompareExchange(
                     ref restartStopInProgress, 0, 0) == 1)
             {
-                restartStopDone.WaitOne(4000);
+                bool stopSettled = restartStopDone.WaitOne(
+                    CoreStopCompletionWaitMilliseconds);
+                if (!stopSettled)
+                {
+                    Log("ERROR application exit timed out waiting for the " +
+                        "bounded native core stop contract.");
+                }
                 Interlocked.Exchange(ref restartStopInProgress, 0);
                 Interlocked.Exchange(ref restartStopCompleted, 0);
             }

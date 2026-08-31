@@ -82,10 +82,16 @@ AeroMirror Setup extracts the pinned portable application runtime, but installs
 no system-wide .NET/VC++ redistributable, driver, or framework prerequisite; a
 full Windows reboot is not an expected normal prerequisite. One reported
 Windows 10 installation became usable only after reboot, but no pre-reboot
-evidence was retained. A stopped or stale Bonjour service lifecycle is only the
-strongest current hypothesis, not a diagnosis. AeroMirror observes Bonjour but
-does not start, stop, repair, uninstall, or otherwise mutate that machine-wide
-service.
+evidence was retained. A later public 0.12.20 run retained a different exact
+failure: Apple `mDNSResponder.exe` crashed, Bonjour remained stopped with exit
+1067, and DNS-SD returned `-65563`. At 17:56:31 Windows recorded a
+`SmartRoute-TUN` profile connection and at 17:56:34 Bonjour repeated the same
+`BEX64`/`c0000409`/`0x437c3` crash. That three-second repeat is strong
+correlation, but the protected WER dump has not yielded a readable stack, so
+the crash cause remains unproven. The unpublished 0.12.21 manual-start design
+was superseded. In 0.12.22 ordinary AeroMirror startup and monitoring remain
+read-only; exact service recovery and the narrow firewall rule are a
+best-effort Setup step after the application transaction commits.
 
 For a normal review test:
 
@@ -94,19 +100,22 @@ For a normal review test:
 2. Exit AeroMirror from its tray menu. Closing the window may only hide it.
 3. Start the review build and note the exact local time.
 4. Accept the Windows Firewall prompt for private/local networks if it appears.
-   If a Bonjour firewall UAC prompt appears, record the choice and result. The
-   0.12.20 headless core reports an absent Bonjour prerequisite but does not
-   offer a bundled service installation. Before any reboot, record whether the
-   Bonjour service exists, its
-   state/start type, and whether its process is running. Do not remove or
+   Setup may also show one Windows administrator prompt for exact Apple Bonjour
+   service recovery and its Private/UDP 5353/LocalSubnet rule. Record whether
+   it was approved or declined; the per-user application must remain installed
+   either way. The headless core reports an absent Bonjour prerequisite but
+   never offers a bundled service installation. Before any reboot, record
+   whether Bonjour exists, its state/start type/recovery policy, whether its
+   process is running, and the exact firewall-rule result. Do not remove or
    modify Bonjour manually on a daily-use PC.
 5. Do not restart the receiver yet. Wait 60 seconds, open **Control Center →
    Screen Mirroring** on the iPhone, and record whether AeroMirror appears.
 6. Attempt one connection. Record whether the PIN prompt, video window, and
    audio appear and whether any window closes unexpectedly.
-7. If the receiver is still unavailable, use **Stop receiver**, wait five
-   seconds, then use **Start receiver**. Record the time and whether this
-   workaround changes the result.
+7. If the receiver is still unavailable, leave it idle for at least 60 seconds
+   so the background service-state check can observe Windows recovery. Then use
+   **Stop receiver**, wait five seconds, and use **Start receiver** only as a
+   separately recorded workaround.
 8. Copy `receiver.log`, review and mask it as described above, then attach it
    to the bug report.
 
@@ -124,19 +133,78 @@ pending-reboot indicators, sockets/readiness markers, and iPhone browse result.
 Do not report the reboot as a normal installation requirement until a clean VM
 reproduces the same lifecycle.
 
-### 0.12.20 Private Bonjour firewall diagnostic
+### 0.12.22 automatic Bonjour recovery
 
-If diagnostics report that the exact Private Bonjour mDNS rule is missing, use
-**Разрешить Bonjour** on the main network card only after recording the
-existing firewall state. Clicking that scoped action is the application-level
-confirmation; Windows then shows one UAC prompt and may add one inbound rule
-for the validated `mDNSResponder.exe`: Private profile, UDP 5353, remote
-`LocalSubnet`, no edge traversal. Declining UAC or a failed exact-path/policy
-check must leave the machine unchanged. This action does not repair the Bonjour
-service, does not run automatically, and 0.12.20 does not remove the external
-rule during uninstall. If Bonjour itself is absent, the card reports that
-prerequisite and offers no repair button. Record the before/after rule and
-iPhone browse result.
+The current main window and tray contain no Bonjour, firewall, or discovery-
+restart button. If the network card reports that Bonjour is stopped or the
+exact rule is missing, first retain the local time, application version,
+Bonjour status/start type/recovery policy, firewall assessment, current core
+PID and AirPlay ports, the `-65563`/prerequisite markers, and the iPhone browse
+result. Opening or moving the AeroMirror window is not a recovery step.
+
+If the exact service is stopped, wait for Windows service recovery and keep the
+receiver running. The log should show the runtime's read-only state transition.
+After Bonjour returns to `Running`, AeroMirror may send at most two
+same-process discovery requests for that recovery event and must receive
+`AEROMIRROR_DNSSD_READY` before showing ready. The core PID and AirPlay ports
+should remain unchanged. Reopen the iPhone Screen Mirroring list and record the
+result before manually restarting the receiver.
+
+If the service recovery policy or exact firewall rule is absent, reinstall the
+same or newer AeroMirror Setup and record the separate Windows administrator
+prompt. Setup validates the exact Apple service identity, canonical protected
+`mDNSResponder.exe` path, ownership/ACL/reparse state, and uses bounded Windows
+service/firewall APIs. Approval may configure Automatic start, recovery after
+5/30/120 seconds, the non-crash failure flag, and one inbound Allow rule for
+Private, UDP 5353, `LocalSubnet`, with edge traversal off. It must not create a
+Public, TCP, arbitrary-address/port, or broad application rule. Declining or a
+failed check must not uninstall or roll back the per-user application.
+
+If Bonjour is missing, replaced, or in an unsafe location, AeroMirror reports
+the prerequisite and Setup leaves it untouched; obtain Apple Bonjour from a
+trusted vendor source. Do not register AeroMirror's bundled responder as a
+system service. If Bonjour stops again, retain the Windows Application/WER
+event and time. Do not describe a virtual adapter, twenty-minute renewal, or
+the update itself as the crash cause unless a stack or controlled reproduction
+proves the link.
+
+The exact service-recovery policy and firewall rule intentionally remain after
+a normal AeroMirror uninstall because they belong to shared machine-wide Apple
+software. Reinstalling AeroMirror converges the same state. Do not delete that
+system state merely to test uninstall on a daily-use PC; use a controlled VM if
+full machine cleanup is part of the test.
+
+### First-device PIN and trusted-device reports
+
+For an unknown iPhone, the PC should show one high-contrast fullscreen overlay
+with four digits for at most one minute. Enter the code only in the iPhone's
+AirPlay prompt. Escape cancels the current request. A successful connection
+stores trust for the current Windows user; it does not create a reusable fixed
+PIN. A known device should reconnect without another overlay until **Reset
+trust** is used in Settings.
+
+Never photograph or attach the active code. The ordinary log should contain
+only request/state markers, not the digits. If the overlay is missing, record
+the exact time, core PID, whether another display was active, and the structured
+pairing state. If it repeats for a trusted phone, record whether the
+`trusted-clients.txt` file exists, but do not open, paste, or attach its
+contents. Test trust reset only after preserving the before/after behavior.
+
+### Automatic-update reports
+
+Automatic updates are off by default. When enabled, finding a release may
+download and stage an exact digest-verified Setup, but it must not interrupt the
+current receiver or launch Setup in the middle of mirroring. Installation is
+attempted only at a later safe AeroMirror start before the normal UI/core. A
+corrupt, stale, unsafe, or repeatedly failing stage must be discarded or
+deferred while normal receiver startup continues.
+
+Record the installed and candidate versions, enable/disable state, check and
+staging times, whether mirroring was active, the next application-start time,
+Setup result, and preservation of shortcuts/settings/trust. Do not attach the
+staged installer or DPAPI-protected manifest to an issue. Disabling automatic
+updates should remove known staged files; manual **Check for updates** remains
+available for a user-confirmed install.
 
 ## What the review log records
 
@@ -223,12 +291,11 @@ Please include:
   sleep, sign-in and SessionUnlock times, every numbered timed or unlock
   renewal, any legacy fallback decision, each in-process discovery request and
   terminal generation, PID/ports before and after it, every iPhone browse
-  attempt, and whether the first tap reached Windows before using **Restart
-  discovery**;
-- when testing **Restart discovery**, record the replacement PID, ports, fresh
-  DNS-SD/BLE startup, and iPhone result. Starting with 0.12.13 this button deliberately
-  remains the strong full-process path rather than the narrow automatic DNS-SD
-  command;
+  attempt, and whether the first tap reached Windows before any manual receiver
+  stop/restart;
+- for a stopped Bonjour report, record the Windows service recovery settings,
+  every read-only state transition, the bounded same-PID DNS-SD submissions,
+  and the iPhone result before manually restarting the receiver;
 - for the Windows 10 reboot symptom, whether the machine/VM had ever contained
   Bonjour, every installer/UAC/firewall prompt, pre/post-reboot Bonjour service
   and process state, and whether receiver Stop/Start changed the result;

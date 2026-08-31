@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "0.12.20",
+    [string]$Version = "0.12.22",
 
     [string]$RuntimePath = ".\artifacts\headless-runtime",
 
@@ -51,6 +51,13 @@ function Assert-ChildPath([string]$Parent, [string]$Child) {
 Assert-ChildPath -Parent $artifactRoot -Child $releaseRoot
 if ($SourceRef -ne ("v" + $Version)) {
     throw "SourceRef must be the exact release tag v$Version."
+}
+$sourceRefTypeOutput = @(
+    & git -C $projectRoot cat-file -t $SourceRef
+)
+if ($LASTEXITCODE -ne 0 -or
+    (($sourceRefTypeOutput -join "").Trim()) -ne "tag") {
+    throw "Release source ref $SourceRef must be an annotated Git tag."
 }
 $sourceCommitOutput = @(
     & git -C $projectRoot rev-parse ($SourceRef + "^{commit}")

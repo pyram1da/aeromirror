@@ -32,36 +32,66 @@ $lostConnectionUiSource = [IO.File]::ReadAllText(
     (Join-Path $sourceRoot "UI\LostConnectionForm.cs"))
 $settingsFormSource = [IO.File]::ReadAllText(
     (Join-Path $sourceRoot "UI\SettingsForm.cs"))
-$accessNoteStart = $settingsFormSource.IndexOf(
-    "private void UpdateAccessNote()", [StringComparison]::Ordinal)
-$accessNoteEnd = $settingsFormSource.IndexOf(
-    "private void UpdateStartupChild()", [Math]::Max(0, $accessNoteStart),
+$pairingOverlaySource = [IO.File]::ReadAllText(
+    (Join-Path $sourceRoot "UI\PairingPinOverlayForm.cs"))
+$pairingContextSource = [IO.File]::ReadAllText(
+    (Join-Path $sourceRoot "Receiver\ReceiverContext.Pairing.cs"))
+Assert-True ($settingsFormSource.Contains(
+        'revokeTrustedDevices = MakeButton(') -and
+    $settingsFormSource.Contains('context.RevokeTrustedDevices()') -and
+    $settingsFormSource.Contains('context.HasTrustedDevices') -and
+    -not $settingsFormSource.Contains('SelectedValue(pairing)') -and
+    -not $settingsFormSource.Contains('fixedPin.Text')) `
+    "settings expose revocation without a fixed-PIN or no-PIN choice"
+Assert-True ($pairingOverlaySource.Contains(
+        'RandomNumberGenerator.Create()') -and
+    $pairingOverlaySource.Contains('value < 60000') -and
+    $pairingOverlaySource.Contains('ToString("D4")') -and
+    $pairingOverlaySource.Contains('FormBorderStyle.None') -and
+    $pairingOverlaySource.Contains('TopMost = true') -and
+    $pairingOverlaySource.Contains('keyData == Keys.Escape')) `
+    "first-device PIN uses unbiased cryptographic generation and a dismissible fullscreen overlay"
+Assert-True ($pairingContextSource.Contains(
+        'AEROMIRROR_PAIRING_PIN_REQUIRED request=') -and
+    $pairingContextSource.Contains('timeout_seconds=60$') -and
+    $pairingContextSource.Contains(
+        'AEROMIRROR_SECRET pairing-pin request=') -and
+    $pairingContextSource.Contains('process.StandardInput.WriteLine') -and
+    -not $source.Contains('networkWarningItem')) `
+    "pairing announces no digits and sends the ephemeral PIN only over redirected stdin"
+$sessionProgressStart = $pairingContextSource.IndexOf(
+    'PairingUiEventKind.SessionProgress)',
     [StringComparison]::Ordinal)
-Assert-True ($accessNoteStart -ge 0 -and $accessNoteEnd -gt $accessNoteStart) `
-    "the settings access-note policy has a deterministic source boundary"
-$accessNoteSource = $settingsFormSource.Substring(
-    $accessNoteStart, $accessNoteEnd - $accessNoteStart)
-$unknownNetworkAccessNote = $accessNoteSource.IndexOf(
-    "else if (!context.IsNetworkProfileKnown)",
-    [StringComparison]::Ordinal)
-$publicNetworkAccessNote = $accessNoteSource.IndexOf(
-    "else if (context.IsPublicNetwork)",
-    [StringComparison]::Ordinal)
-$unknownNetworkProfileText = [Text.Encoding]::UTF8.GetString(
-    [Convert]::FromBase64String(
-        "0J/RgNC+0YTQuNC70Ywg0YTQuNC30LjRh9C10YHQutC+0Lkg0YHQtdGC0Lgg0L/QvtC60LAg0L3QtSDQvtC/0YDQtdC00LXQu9GR0L0="))
-$receiverWillNotStartText = [Text.Encoding]::UTF8.GetString(
-    [Convert]::FromBase64String(
-        "0JHQtdC3IFBJTiDQv9GA0LjRkdC80L3QuNC6"))
-$repeatNetworkCheckText = [Text.Encoding]::UTF8.GetString(
-    [Convert]::FromBase64String(
-        "0J/QvtCy0YLQvtGA0LjRgtC1INC/0YDQvtCy0LXRgNC60YMg0YHQtdGC0Lg="))
-Assert-True ($unknownNetworkAccessNote -ge 0 -and
-    $publicNetworkAccessNote -gt $unknownNetworkAccessNote -and
-    $accessNoteSource.Contains($unknownNetworkProfileText) -and
-    $accessNoteSource.Contains($receiverWillNotStartText) -and
-    $accessNoteSource.Contains($repeatNetworkCheckText)) `
-    "an unknown physical network is not described as private and explains the fail-closed PIN policy"
+$sessionProgressEnd = $pairingContextSource.IndexOf(
+    'if (pairingEvent.RequestId != activePairingPinRequest',
+    $sessionProgressStart, [StringComparison]::Ordinal)
+Assert-True ($sessionProgressStart -ge 0 -and
+    $sessionProgressEnd -gt $sessionProgressStart) `
+    "uncorrelated session-progress branch is present"
+$sessionProgressSlice = $pairingContextSource.Substring(
+    $sessionProgressStart,
+    $sessionProgressEnd - $sessionProgressStart)
+Assert-True ($sessionProgressSlice.Contains(
+        'This marker has no pairing request id.') -and
+    -not $sessionProgressSlice.Contains('DismissPairingPinOverlay') -and
+    -not $sessionProgressSlice.Contains('CancelPairingPinRequest')) `
+    "uncorrelated session progress cannot dismiss, cancel, or stop the active PIN timeout"
+Assert-True ($pairingContextSource.Contains(
+        'bool stopConfirmed = StopCoreInternal(') -and
+    $pairingContextSource.Contains('if (!stopConfirmed)') -and
+    $pairingContextSource.Contains(
+        'TryCreateTrustResetPendingMarker()') -and
+    $pairingContextSource.Contains(
+        'TryResolvePendingTrustResetAfterConfirmedCoreExit(') -and
+    $pairingContextSource.Contains(
+        'durable trust-reset request remains') -and
+    $pairingContextSource.Contains(
+        'trusted devices were not revoked because native') -and
+    $pairingContextSource.Contains(
+        'ref restartStopInProgress, 0, 0) == 1') -and
+    -not $pairingContextSource.Contains(
+        '"trusted-device revocation failed", false, 500')) `
+    "pairing cancellation and revocation cannot mutate trust or restart before core exit is confirmed"
 $receiverCoreSource = [IO.File]::ReadAllText(
     (Join-Path $sourceRoot "Receiver\ReceiverContext.Core.cs"))
 $receiverContextSource = [IO.File]::ReadAllText(
@@ -78,83 +108,62 @@ Assert-True (-not (Test-Path -LiteralPath $deletedRendererControlsPath) -and
     "managed fullscreen overlay and low-level Escape hook are removed"
 $bonjourFirewallContextSource = [IO.File]::ReadAllText(
     (Join-Path $sourceRoot "Receiver\ReceiverContext.BonjourFirewall.cs"))
-$bonjourAssessmentGetterStart = $bonjourFirewallContextSource.IndexOf(
-    "private BonjourFirewallAssessment GetBonjourFirewallAssessment()",
+$bonjourServiceSource = [IO.File]::ReadAllText(
+    (Join-Path $sourceRoot "Network\BonjourServiceRecoveryService.cs"))
+Assert-True ($bonjourFirewallContextSource.Contains(
+        "BonjourFirewallService.AssessPrivateMdnsRule()") -and
+    $bonjourFirewallContextSource.Contains(
+        "BonjourServiceRecoveryService.Assess()") -and
+    $bonjourServiceSource.Contains(
+        "The ordinary per-user application only observes Bonjour") -and
+    $bonjourServiceSource.Contains("service.Status") -and
+    -not $source.Contains("RepairBonjour") -and
+    -not $source.Contains("RecoverExplicitlyWithUac") -and
+    -not $source.Contains("RepairPrivateMdnsRuleExplicitlyWithUac")) `
+    "the ordinary application observes Bonjour without an elevated repair path"
+Assert-True (-not $settingsFormSource.Contains("refreshDiscovery") -and
+    -not $settingsFormSource.Contains("bonjourFirewallRepair") -and
+    -not $receiverContextSource.Contains("bonjourItem") -and
+    -not [regex]::IsMatch(
+        $receiverContextSource,
+        'ToolStripMenuItem\([^\r\n]*Bonjour')) `
+    "main and tray UI expose no manual Bonjour or discovery controls"
+$bonjourMonitorStart = $receiverCoreSource.IndexOf(
+    "private void HandleBonjourServiceRecoveryMonitor()",
     [StringComparison]::Ordinal)
-$bonjourAssessmentGetterEnd = $bonjourFirewallContextSource.IndexOf(
-    "internal string GetBonjourFirewallDiagnosticLine()",
-    [Math]::Max(0, $bonjourAssessmentGetterStart),
+$bonjourMonitorEnd = $receiverCoreSource.IndexOf(
+    "private void MarkBonjourPrerequisiteUnavailable()",
+    [Math]::Max(0, $bonjourMonitorStart),
     [StringComparison]::Ordinal)
-$bonjourRepairStart = $bonjourFirewallContextSource.IndexOf(
-    "public void RepairBonjourFirewall(IWin32Window owner)",
+Assert-True ($bonjourMonitorStart -ge 0 -and
+    $bonjourMonitorEnd -gt $bonjourMonitorStart) `
+    "Bonjour service monitoring has a deterministic source boundary"
+$bonjourMonitorSource = $receiverCoreSource.Substring(
+    $bonjourMonitorStart, $bonjourMonitorEnd - $bonjourMonitorStart)
+Assert-True ($bonjourMonitorSource.Contains("now.AddSeconds(3).Ticks") -and
+    $bonjourMonitorSource.Contains(
+        "assessment.State != BonjourServiceState.Running") -and
+    $bonjourMonitorSource.Contains(
+        "assessment.State == BonjourServiceState.Stopped") -and
+    $bonjourMonitorSource.Contains("attempt >= 2") -and
+    $bonjourMonitorSource.Contains(
+        '" of 2)."') -and
+    $bonjourMonitorSource.Contains(
+        'TryRequestNativeDiscoveryRefresh(') -and
+    $bonjourMonitorSource.Contains(
+        '"Bonjour service recovered", false') -and
+    -not $bonjourMonitorSource.Contains("ScheduleRestart(")) `
+    "Stopped Bonjour is polled every three seconds and Running receives at most two same-process refreshes"
+$pendingRefreshGuardIndex = $bonjourMonitorSource.IndexOf(
+    "ref coreDiscoveryRefreshPendingRequest",
     [StringComparison]::Ordinal)
-$bonjourRepairEnd = $bonjourFirewallContextSource.IndexOf(
-    "private void HandleBonjourFirewallRepairResult()",
-    [Math]::Max(0, $bonjourRepairStart),
+$bonjourAttemptReservationIndex = $bonjourMonitorSource.IndexOf(
+    "ref coreBonjourRecoveryAttempted",
+    [Math]::Max(0, $pendingRefreshGuardIndex),
     [StringComparison]::Ordinal)
-Assert-True ($bonjourAssessmentGetterStart -ge 0 -and
-    $bonjourAssessmentGetterEnd -gt $bonjourAssessmentGetterStart -and
-    $bonjourRepairStart -ge 0 -and
-    $bonjourRepairEnd -gt $bonjourRepairStart) `
-    "Bonjour assessment and repair have deterministic source boundaries"
-$bonjourAssessmentGetterSource = $bonjourFirewallContextSource.Substring(
-    $bonjourAssessmentGetterStart,
-    $bonjourAssessmentGetterEnd - $bonjourAssessmentGetterStart)
-$bonjourRepairSource = $bonjourFirewallContextSource.Substring(
-    $bonjourRepairStart, $bonjourRepairEnd - $bonjourRepairStart)
-$bonjourRepairResultSource = $bonjourFirewallContextSource.Substring(
-    $bonjourRepairEnd)
-$bonjourRepairSuccessDialogText = [Text.Encoding]::UTF8.GetString(
-    [Convert]::FromBase64String(
-        "0JTQvtGB0YLRg9C/IEJvbmpvdXIg0LjRgdC/0YDQsNCy0LvQtdC9"))
-$automaticBonjourServiceText = [Text.Encoding]::UTF8.GetString(
-    [Convert]::FromBase64String(
-        "QWVyb01pcnJvciDQvdC1INGD0YHRgtCw0L3QsNCy0LvQuNCy0LDQtdGCINGB0LjRgdGC0LXQvNC90YPRjiDRgdC70YPQttCx0YMg0LDQstGC0L7QvNCw0YLQuNGH0LXRgdC60Lg="))
-Assert-True (-not $bonjourAssessmentGetterSource.Contains(
-        "AssessPrivateMdnsRule()") -and
-    $bonjourAssessmentGetterSource.Contains(
-        "BeginBonjourFirewallAssessment();") -and
-    $bonjourRepairSource.Contains("ThreadPool.QueueUserWorkItem") -and
-    $bonjourRepairSource.IndexOf(
-        "ThreadPool.QueueUserWorkItem", [StringComparison]::Ordinal) -lt
-        $bonjourRepairSource.IndexOf(
-            "RepairPrivateMdnsRuleExplicitlyWithUac",
-            [StringComparison]::Ordinal) -and
-    $bonjourFirewallContextSource.Contains(
-        "HandleBonjourFirewallRepairResult();") -and
-    $bonjourFirewallContextSource.Contains(
-        "ref bonjourFirewallRepairReady")) `
-    "Bonjour assessment and explicit UAC repair never wait synchronously on the WinForms thread"
-Assert-True (-not $bonjourRepairSource.Contains(
-        "MessageBoxButtons.YesNo") -and
-    $bonjourRepairSource.Contains(
-        "RepairPrivateMdnsRuleExplicitlyWithUac") -and
-    $bonjourFirewallContextSource.Contains(
-        "public bool IsBonjourFirewallRepairRequired") -and
-    $bonjourFirewallContextSource.Contains(
-        "public bool IsBonjourUnavailable") -and
-    $bonjourFirewallContextSource.Contains(
-        "public bool IsBonjourFirewallRepairRunning")) `
-    "the explicit Bonjour action proceeds directly to one UAC operation and exposes read-only UI state"
-Assert-True ($bonjourRepairResultSource.Contains(
-        "State = BonjourFirewallState.Configured") -and
-    $bonjourRepairResultSource.Contains(
-        "BeginBonjourFirewallAssessment();") -and
-    $bonjourRepairResultSource.Contains("form.SyncStatus();") -and
-    $bonjourRepairResultSource.Contains("RefreshDiscovery();") -and
-    -not $bonjourRepairResultSource.Contains(
-        $bonjourRepairSuccessDialogText)) `
-    "successful Bonjour repair updates the card and discovery without a success dialog"
-Assert-True ($settingsFormSource.Contains(
-        "context.RepairBonjourFirewall(this);") -and
-    $settingsFormSource.Contains(
-        "context.IsBonjourFirewallRepairRequired") -and
-    $settingsFormSource.Contains("context.IsBonjourUnavailable") -and
-    $settingsFormSource.Contains(
-        "bonjourFirewallRepair.Visible = false;") -and
-    $settingsFormSource.Contains(
-        $automaticBonjourServiceText)) `
-    "the main network card exposes repair only for a missing rule and never offers bundled Bonjour installation"
+Assert-True ($pendingRefreshGuardIndex -ge 0 -and
+    $bonjourAttemptReservationIndex -gt $pendingRefreshGuardIndex) `
+    "a pending 12-second refresh cannot consume the second bounded Bonjour recovery attempt"
 $quoteArgumentStart = $source.IndexOf(
     "private static string QuoteArgument(string value)",
     [StringComparison]::Ordinal)
@@ -609,16 +618,17 @@ $nativeFeedbackSource = Get-NativePatchSlice `
     "independent feedback timer"
 Assert-True ([regex]::Matches(
         $nativePatchSource,
-        '(?m)^\+.*LOGI\("AEROMIRROR_VIDEO_HEALTH').Count -eq 1 -and
+        '(?ms)^\+\s*aeromirror_protocol_marker\(\r?\n' +
+            '^\+\s*"AEROMIRROR_VIDEO_HEALTH').Count -eq 1 -and
     $nativePatchSource.Contains(
         "#define AEROMIRROR_VIDEO_HEALTH_INTERVAL_US (2 * SECOND_IN_USECS)") -and
     $nativeFeedbackSource.Contains(
         "health_now_us - aeromirror_last_health_log_us.load() >=") -and
-    $nativeFeedbackSource.IndexOf('LOGI("AEROMIRROR_VIDEO_HEALTH') -lt
+    $nativeFeedbackSource.IndexOf('"AEROMIRROR_VIDEO_HEALTH') -lt
         $nativeFeedbackSource.IndexOf(
             "aeromirror_last_health_log_us.store(health_now_us)")) `
     "one fixed media health summary is emitted by the independent two-second timer"
-$healthLogStart = $nativeHealthSource.IndexOf('LOGI("AEROMIRROR_VIDEO_HEALTH')
+$healthLogStart = $nativeHealthSource.IndexOf('"AEROMIRROR_VIDEO_HEALTH')
 $healthLogEnd = $nativeHealthSource.IndexOf(
     "previous_ingress_generation = ingress_generation", $healthLogStart)
 Assert-True ($healthLogStart -ge 0 -and $healthLogEnd -gt $healthLogStart) `
@@ -797,14 +807,21 @@ Assert-True ($source.Contains(
     "the updater launches Setup outside the installed application directory"
 Assert-True ($settingsFormSource.Contains(
         'Arguments = "/update /delete-source"') -and
+    $source.Contains(
+        'Arguments = "/automatic-update /delete-source"') -and
     $installerSource.Contains("ShouldRunAutomaticInstall(") -and
-    $installerSource.Contains("RunAutomaticInstall(updateRequested);") -and
+    $installerSource.Contains(
+        "updateRequested, automaticUpdateRequested") -and
+    $installerSource.Contains("ComparePublicVersions(") -and
+    $installerSource.Contains("GetPostInstallRelaunchArguments(") -and
+    -not $installerSource.Contains(
+        "installedVersion.CompareTo(") -and
     $installerSource.Contains(
         "InstallerOperations.GetShortcutSelection(true)") -and
     $installerSource.Contains("SetupVersion.Build + 1") -and
     $installerSource.Contains(
         "AeroMirror relaunched after automatic install.")) `
-    "application updates and installed-version reinstalls run without the option form, preserve shortcut choices, retain version-independent downgrade verification, and relaunch AeroMirror"
+    "manual and automatic updates remain distinct, compare public three-part versions, preserve shortcut choices, prevent downgrades, and relaunch automatic updates in startup mode"
 Assert-True ($installerSource.Contains(
         'start.Arguments = "--loader-test";') -and
     -not $installerSource.Contains('"--self-test"')) `
@@ -937,6 +954,87 @@ Assert-True ($automaticRenewalHandlerSource.Contains(
         $automaticRenewalHandlerSource,
         'ScheduleRestart\s*\(\s*"idle discovery renewal"').Count -eq 1) `
     "timed renewal prefers same-PID refresh, bounds legacy restart fallback, and rearms recurring maintenance"
+$physicalDeferredIndex = $automaticRenewalHandlerSource.IndexOf(
+    "ref physicalNetworkRestartDeferred")
+$sessionEndedIndex = $automaticRenewalHandlerSource.IndexOf(
+    "ref mirrorSessionEndedPending")
+$bonjourRenewalGuardIndex = $automaticRenewalHandlerSource.IndexOf(
+    "GetBonjourStatus()")
+$automaticRenewalEvaluateIndex = $automaticRenewalHandlerSource.IndexOf(
+    "EvaluateAutomaticDiscoveryRenewal(")
+Assert-True ($physicalDeferredIndex -ge 0 -and
+    $sessionEndedIndex -gt $physicalDeferredIndex -and
+    $bonjourRenewalGuardIndex -gt $sessionEndedIndex -and
+    $bonjourRenewalGuardIndex -lt $automaticRenewalEvaluateIndex) `
+    "stopped Bonjour blocks only timed renewal after higher-priority deferred maintenance is handled"
+$bonjourTransitionStart = $receiverCoreSource.IndexOf(
+    "private void HandleBonjourDependencyTransition()")
+$bonjourTransitionEnd = $receiverCoreSource.IndexOf(
+    "private void HandleBonjourServiceRecoveryMonitor()",
+    $bonjourTransitionStart)
+$bonjourTransitionSource = $receiverCoreSource.Substring(
+    $bonjourTransitionStart,
+    $bonjourTransitionEnd - $bonjourTransitionStart)
+Assert-True ($receiverCoreSource.Contains(
+        "if (attempt >= 2 || Interlocked.CompareExchange(") -and
+    $receiverCoreSource.Contains(
+        '"one bounded retry will follow."') -and
+    $receiverCoreSource.Contains(
+        "ArmBonjourRecoveryRetryAfterRefreshFailure(") -and
+    $receiverCoreSource.Contains(
+        '"command writer failure"') -and
+    $receiverCoreSource.Contains(
+        '"refresh timeout"') -and
+    $receiverCoreSource.Contains(
+        '"native discovery command writer " +') -and
+    $receiverCoreSource.Contains(
+        '"Periodic native discovery command " +') -and
+    $receiverCoreSource.Contains(
+        "RefreshBonjourFirewallAssessment();") -and
+    $bonjourTransitionSource.Contains("SetState(true,") -and
+    -not $bonjourTransitionSource.Contains("SetState(false,")) `
+    "Bonjour recovery keeps the live-core action truthful, bounds submitted and asynchronous retries, and refreshes cached UI state"
+$writerFailureStart = $receiverCoreSource.IndexOf(
+    'Log("Native discovery command writer failed for "')
+$writerFailureEnd = $receiverCoreSource.IndexOf(
+    "private bool TryWriteNativeVideoCommand(", $writerFailureStart)
+$writerFailureSource = $receiverCoreSource.Substring(
+    $writerFailureStart, $writerFailureEnd - $writerFailureStart)
+Assert-True ($writerFailureSource.Contains(
+        "coreDiscoveryRefreshFallbackPending") -and
+    $writerFailureSource.Contains(
+        "ArmBonjourRecoveryRetryAfterRefreshFailure(") -and
+    $writerFailureSource.Contains(
+        'ScheduleRestart(') -and
+    $writerFailureSource.Contains(
+        "ArmIdleDiscoveryRenewalIfAvailable();")) `
+    "async refresh writer failure preserves Bonjour, legacy-restart, and recurring-idle recovery semantics"
+$markBonjourStart = $receiverCoreSource.IndexOf(
+    "private void MarkBonjourPrerequisiteUnavailable()")
+$markBonjourEnd = $receiverCoreSource.IndexOf(
+    "internal void ResumeDiscoveryAfterBonjourRecovery()",
+    $markBonjourStart)
+$markBonjourSource = $receiverCoreSource.Substring(
+    $markBonjourStart, $markBonjourEnd - $markBonjourStart)
+Assert-True (-not $markBonjourSource.Contains(
+        "coreBonjourRecoveryAttempted, 0") -and
+    $receiverCoreSource.Contains(
+        "if (attempt >= 2 || Interlocked.CompareExchange(")) `
+    "a repeated native prerequisite marker cannot reset the bounded Bonjour recovery budget"
+$bonjourMonitorStart = $receiverCoreSource.IndexOf(
+    "private void HandleBonjourServiceRecoveryMonitor()")
+$bonjourMonitorEnd = $receiverCoreSource.IndexOf(
+    "private void MarkBonjourPrerequisiteUnavailable()",
+    $bonjourMonitorStart)
+$bonjourMonitorSource = $receiverCoreSource.Substring(
+    $bonjourMonitorStart, $bonjourMonitorEnd - $bonjourMonitorStart)
+Assert-True ($bonjourMonitorSource.Contains(
+        "assessment.State == BonjourServiceState.Stopped") -and
+    $bonjourMonitorSource.Contains(
+        "assessment.State == BonjourServiceState.StopPending") -and
+    -not $bonjourMonitorSource.Contains(
+        'GetBonjourStatus(), "Running"')) `
+    "only a confirmed stopped service resets the recovery epoch; Unknown cannot renew the bounded budget"
 $unlockHandlerStart = $source.IndexOf(
     "private void HandleSessionUnlockDiscoveryRefresh")
 $unlockHandlerEnd = $source.IndexOf(
@@ -984,9 +1082,8 @@ Assert-True ($unlockHandlerSource.Contains(
         "EvaluateSessionUnlockDiscoveryRefresh(") -and
     $unlockHandlerSource.Contains("ref coreSocketsReady") -and
     $unlockHandlerSource.Contains("ref coreDnsSdStatus") -and
-    $unlockHandlerSource.Contains("ref coreBleStatus") -and
-    $unlockHandlerSource.Contains(
-        "dnsSdStatus == 1 || bleStatus == 1") -and
+    -not $unlockHandlerSource.Contains("ref coreBleStatus") -and
+    $unlockHandlerSource.Contains("dnsSdStatus == 1") -and
     $unlockHandlerSource.Contains("localDiscoveryReady") -and
     $unlockHandlerSource.Contains("physicalNetworkReady") -and
     $unlockHandlerSource.Contains("networkProfileKnown") -and
@@ -995,14 +1092,14 @@ Assert-True ($unlockHandlerSource.Contains(
     $unlockRefreshGateIndex -ge 0 -and
     $unlockRefreshGateIndex -lt $unlockRenewalConsumeIndex -and
     $unlockRenewalConsumeIndex -lt $unlockScheduleIndex) `
-    "only the deterministic Refresh action advances the recurring count and may schedule a bounded legacy restart"
+    "only confirmed DNS-SD and the deterministic Refresh action advance unlock maintenance"
 Assert-True (-not $source.Contains("post-session discovery renewal")) `
     "a completed session does not force an unconditional core restart"
 Assert-True ($source.Contains('parts.Add("-reset 15")')) `
     "UxPlay receives its upstream fifteen-second lost-client reset bound"
 $systemResetIndex = $source.IndexOf('parts.Add("-reset 15")')
 $advancedArgumentsIndex = $source.IndexOf(
-    'parts.Add(settings.AdvancedArguments.Trim())')
+    'parts.Add(advancedArguments)')
 Assert-True ($systemResetIndex -lt $advancedArgumentsIndex) `
     "advanced UxPlay arguments can override the system reset bound"
 $managedAudioSinkIndex = $source.IndexOf(
@@ -1102,10 +1199,13 @@ $networkHelpTooltipCount = [regex]::Matches(
     $source, 'toolTips\.SetToolTip\(networkHelp, networkDetails\)').Count
 Assert-True ($networkHelpTooltipCount -eq 1) `
     "network details are attached only to the question-mark control"
-$privatePinGuidanceBreakCount = [regex]::Matches(
-    $source, '\\r\\n" \+\s*"[^"]*PIN [^"]*"').Count
-Assert-True ($privatePinGuidanceBreakCount -ge 2) `
-    "private-network PIN guidance starts on a separate tooltip line"
+Assert-True ($settingsFormSource.Contains(
+        'context.HasNetworkOverlay') -and
+    $settingsFormSource.Contains(
+        'context.HasTrustedDevices') -and
+    -not $settingsFormSource.Contains('context.IsPublicNetwork') -and
+    -not $settingsFormSource.Contains('context.CurrentSettings.PairingMode')) `
+    "network guidance describes mandatory per-device trust independently of the Windows profile"
 Assert-True ($source.Contains("e.Graphics.DpiX / 96F") -and
     $source.Contains("SmoothingMode.AntiAlias") -and
     $source.Contains("format.Alignment = StringAlignment.Center") -and
@@ -1184,6 +1284,38 @@ Assert-True ($source.Contains("internal sealed class LostConnectionForm") -and
     $lostConnectionUiSource.Contains("detailLabel.Text =") -and
     $lostConnectionUiSource.Contains("closeButton.Text =")) `
     "fatal connection loss has a focused user-visible placeholder"
+Assert-True ($lostConnectionUiSource.Contains(
+        "internal event EventHandler UserDismissed;") -and
+    $lostConnectionUiSource.Contains(
+        "protected override void OnFormClosing(FormClosingEventArgs e)") -and
+    $lostConnectionUiSource.Contains("CloseReason.UserClosing") -and
+    $lostConnectionUiSource.Contains("CloseProgrammatically()") -and
+    $lostConnectionContextSource.Contains(
+        "lostConnectionPlaceholderDismissedSessionGeneration = -1") -and
+    $lostConnectionContextSource.Contains(
+        "DismissLostConnectionPlaceholderForCurrentSession()") -and
+    $source.Contains(
+        "ref lostConnectionPlaceholderDismissedSessionGeneration")) `
+    "user dismissal is latched for one mirroring session while programmatic close stays distinct"
+$rendererDismissStart = $lostConnectionContextSource.IndexOf(
+    "private void MarkRendererDismissedForCurrentSession()")
+$rendererDismissEnd = $lostConnectionContextSource.IndexOf(
+    "private void ClearRendererDismissedForCurrentSession()",
+    $rendererDismissStart)
+Assert-True ($rendererDismissStart -ge 0 -and
+    $rendererDismissEnd -gt $rendererDismissStart) `
+    "caption-close suppression has a focused implementation boundary"
+$rendererDismissSource = $lostConnectionContextSource.Substring(
+    $rendererDismissStart, $rendererDismissEnd - $rendererDismissStart)
+Assert-True ($rendererDismissSource.Contains(
+        "if (sessionGeneration <= 0)") -and
+    -not $rendererDismissSource.Contains(
+        "ref mirrorSessionActive") -and
+    $rendererDismissSource.Contains(
+        "ref lostConnectionRendererDismissedSessionGeneration") -and
+    $rendererDismissSource.Contains(
+        "QueueLostConnectionPlaceholderClose()")) `
+    "caption Close remains authoritative after native end already cleared the active-session flag"
 Assert-True ($source.Contains("CopyFromScreen(") -and
     -not $source.Contains("PrintWindow(")) `
     "the placeholder uses only a non-blocking desktop screen snapshot"
@@ -1436,6 +1568,25 @@ $staticFlags = [Reflection.BindingFlags]::Static -bor `
     [Reflection.BindingFlags]::NonPublic -bor `
     [Reflection.BindingFlags]::Public
 
+$pairingOverlayType = $assembly.GetType(
+    "AirPlayReceiverMvp.PairingPinOverlayForm", $true)
+$generatePairingPin = $pairingOverlayType.GetMethod(
+    "GenerateCryptographicPin", $staticFlags)
+Assert-True ($null -ne $generatePairingPin -and
+    $generatePairingPin.ReturnType -eq [string]) `
+    "compiled shell exposes the cryptographic session-PIN generator"
+$generatedPairingPins = [Collections.Generic.HashSet[string]]::new(
+    [StringComparer]::Ordinal)
+for ($pinIndex = 0; $pinIndex -lt 256; $pinIndex++) {
+    $generatedPairingPin = [string]$generatePairingPin.Invoke(
+        $null, [object[]]@())
+    Assert-True ([regex]::IsMatch($generatedPairingPin, '^[0-9]{4}$')) `
+        "every generated pairing PIN has exactly four ASCII digits"
+    $generatedPairingPins.Add($generatedPairingPin) | Out-Null
+}
+Assert-True ($generatedPairingPins.Count -ge 100) `
+    "session PIN generation has strong observed diversity"
+
 $rendererButtonType = $assembly.GetType(
     "AirPlayReceiverMvp.RendererFullscreenButtonForm", $false)
 $toggleStreamWindowFullscreen = $contextType.GetMethod(
@@ -1573,6 +1724,30 @@ foreach ($case in $quoteRoundTripCases) {
     }
 }
 
+function ConvertFrom-WindowsCommandLine([string]$Arguments) {
+    $commandLine = '"AeroMirrorTest.exe"'
+    if (-not [string]::IsNullOrWhiteSpace($Arguments)) {
+        $commandLine += " " + $Arguments
+    }
+    $argumentCount = 0
+    $argumentVector = $commandLineNativeType::CommandLineToArgvW(
+        $commandLine, [ref]$argumentCount)
+    Assert-True ($argumentVector -ne [IntPtr]::Zero) `
+        "Windows accepts the advanced argument test command line"
+    try {
+        $values = @()
+        for ($index = 1; $index -lt $argumentCount; $index++) {
+            $values += [Runtime.InteropServices.Marshal]::PtrToStringUni(
+                [Runtime.InteropServices.Marshal]::ReadIntPtr(
+                    $argumentVector, $index * [IntPtr]::Size))
+        }
+        return $values
+    }
+    finally {
+        $commandLineNativeType::LocalFree($argumentVector) | Out-Null
+    }
+}
+
 $testStorageRoot = [IO.Path]::GetFullPath((Join-Path `
     ([IO.Path]::GetTempPath()) ([Guid]::NewGuid().ToString("N"))))
 $testStorageRootInfo = [IO.DirectoryInfo]::new($testStorageRoot)
@@ -1636,6 +1811,7 @@ try {
         ReceiverKeyPath = Join-Path $testStorageRoot "receiver-key.pem"
         ReceiverDeviceIdPath = Join-Path $testStorageRoot "receiver-device-id.txt"
         TrustedClientsPath = Join-Path $testStorageRoot "trusted-clients.txt"
+        TrustResetPendingPath = Join-Path $testStorageRoot "trust-reset-pending"
     }
     foreach ($entry in $expectedStoragePaths.GetEnumerator()) {
         $storageProperty = $settingsType.GetProperty($entry.Key, $staticFlags)
@@ -1648,10 +1824,142 @@ try {
             "$($entry.Key) stays inside the isolated GUID storage root"
     }
 
+    $stopProbeContext =
+        [Runtime.Serialization.FormatterServices]::GetUninitializedObject(
+            $contextType)
+    $stopOperationField = $contextType.GetField(
+        "detachedCoreStopOperation", $instanceFlags)
+    $executeDetachedCoreStop = $contextType.GetMethod(
+        "ExecuteDetachedCoreStop", $instanceFlags)
+    $restartAfterStopPolicy = $contextType.GetMethod(
+        "ShouldRestartAfterConfirmedCoreStop", $staticFlags)
+    $tryConfirmExited = $contextType.GetMethod(
+        "TryConfirmExited", $staticFlags)
+    Assert-True ($null -ne $stopOperationField -and
+        $null -ne $executeDetachedCoreStop -and
+        $executeDetachedCoreStop.ReturnType -eq [bool] -and
+        $null -ne $restartAfterStopPolicy -and
+        $null -ne $tryConfirmExited) `
+        "core stop confirmation exposes an injectable operation, positive-exit boundary, and pure restart policy"
+    $stopFailure =
+        [Func[Diagnostics.Process, IntPtr, string, bool, bool]] {
+            param($process, $job, $reason, $graceful)
+            return $false
+        }
+    $stopOperationField.SetValue($stopProbeContext, $stopFailure)
+    $currentTestProcess = [Diagnostics.Process]::GetCurrentProcess()
+    $injectedStopResult = [bool]$executeDetachedCoreStop.Invoke(
+        $stopProbeContext,
+        [object[]]@(
+            $currentTestProcess, [IntPtr]::Zero,
+            "injected failure", $false))
+    Assert-True (-not $injectedStopResult -and
+        -not $currentTestProcess.HasExited) `
+        "an injected unconfirmed stop is reported as failure without touching the live test process"
+    Assert-True (-not [bool]$restartAfterStopPolicy.Invoke(
+            $null, [object[]]@($false, $true, $false)) -and
+        [bool]$restartAfterStopPolicy.Invoke(
+            $null, [object[]]@($true, $true, $false)) -and
+        -not [bool]$restartAfterStopPolicy.Invoke(
+            $null, [object[]]@($true, $true, $true))) `
+        "only a confirmed stop with a pending request outside shutdown may start a replacement core"
+    $runningExitArguments = [object[]]@($currentTestProcess, 0)
+    Assert-True (-not [bool]$tryConfirmExited.Invoke(
+            $null, $runningExitArguments)) `
+        "a running process is never treated as a confirmed exit"
+    $exitProbeStart = [Diagnostics.ProcessStartInfo]::new()
+    $exitProbeStart.FileName = "$env:SystemRoot\System32\cmd.exe"
+    $exitProbeStart.Arguments = "/d /c exit 23"
+    $exitProbeStart.UseShellExecute = $false
+    $exitProbeStart.CreateNoWindow = $true
+    $exitProbe = [Diagnostics.Process]::Start($exitProbeStart)
+    try {
+        Assert-True ($exitProbe.WaitForExit(5000)) `
+            "the positive-exit probe terminates within its bound"
+        $confirmedExitArguments = [object[]]@($exitProbe, 0)
+        Assert-True ([bool]$tryConfirmExited.Invoke(
+                $null, $confirmedExitArguments) -and
+            [int]$confirmedExitArguments[1] -eq 23) `
+            "only an observable exited process supplies a confirmed exit code"
+    }
+    finally {
+        $exitProbe.Dispose()
+    }
+    $confirmedStaleStart = $source.IndexOf(
+        "if (!TryConfirmExited(staleProcess, out staleCode))",
+        [StringComparison]::Ordinal)
+    $confirmedStaleClear = $source.IndexOf(
+        "ref blockAutomaticRestartAfterUnconfirmedStop, 0);",
+        $confirmedStaleStart,
+        [StringComparison]::Ordinal)
+    Assert-True ($confirmedStaleStart -ge 0 -and
+        $confirmedStaleClear -gt $confirmedStaleStart) `
+        "a confirmed stale exit clears the one-process restart block before a replacement can start"
+    $clearTrustAfterConfirmedStop = $contextType.GetMethod(
+        "TryClearTrustedDeviceStoreAfterConfirmedStop", $staticFlags)
+    $createTrustResetMarker = $contextType.GetMethod(
+        "TryCreateTrustResetPendingMarker", $staticFlags)
+    $isTrustResetPending = $contextType.GetMethod(
+        "IsTrustResetPending", $staticFlags)
+    $resolvePendingTrustReset = $contextType.GetMethod(
+        "TryResolvePendingTrustResetAfterConfirmedCoreExit", $staticFlags)
+    Assert-True ($null -ne $clearTrustAfterConfirmedStop -and
+        $null -ne $createTrustResetMarker -and
+        $null -ne $isTrustResetPending -and
+        $null -ne $resolvePendingTrustReset) `
+        "trust mutation exposes stop-confirmation and durable pending-reset boundaries"
+    $trustedClientsProbe = $expectedStoragePaths.TrustedClientsPath
+    [IO.File]::WriteAllText(
+        $trustedClientsProbe, "preserve-on-stop-failure",
+        [Text.UTF8Encoding]::new($false))
+    $clearAfterFailure = [bool]$clearTrustAfterConfirmedStop.Invoke(
+        $null, [object[]]@($false))
+    Assert-True (-not $clearAfterFailure -and
+        [IO.File]::ReadAllText($trustedClientsProbe) -ceq
+            "preserve-on-stop-failure") `
+        "an injected stop failure leaves the trusted-client store byte-for-byte unchanged"
+    [IO.File]::WriteAllText(
+        $trustedClientsProbe, "native-prepersisted-cancelled-key",
+        [Text.UTF8Encoding]::new($false))
+    Assert-True ([bool]$createTrustResetMarker.Invoke(
+            $null, [object[]]@()) -and
+        [bool]$isTrustResetPending.Invoke($null, [object[]]@())) `
+        "pairing cancellation can persist a durable trust-reset marker before native acknowledgement"
+    Assert-True (-not [bool]$resolvePendingTrustReset.Invoke(
+            $null, [object[]]@($false)) -and
+        [IO.File]::ReadAllText($trustedClientsProbe) -ceq
+            "native-prepersisted-cancelled-key" -and
+        [bool]$isTrustResetPending.Invoke($null, [object[]]@())) `
+        "an unconfirmed stop preserves both a native-prepersisted key and its pending reset marker"
+    Assert-True ([bool]$resolvePendingTrustReset.Invoke(
+            $null, [object[]]@($true)) -and
+        [IO.File]::ReadAllText($trustedClientsProbe) -ceq "" -and
+        -not [bool]$isTrustResetPending.Invoke($null, [object[]]@())) `
+        "a confirmed exit clears native-prepersisted trust before removing the durable marker"
+    $pendingResetStartBoundary = $source.IndexOf(
+        "TryResolvePendingTrustResetBeforeCoreStart()",
+        [StringComparison]::Ordinal)
+    $pendingResetExitBoundary = $source.IndexOf(
+        "TryResolvePendingTrustResetAfterConfirmedCoreExit(true)",
+        [StringComparison]::Ordinal)
+    Assert-True ($pendingResetStartBoundary -ge 0 -and
+        $pendingResetExitBoundary -ge 0) `
+        "receiver start and confirmed-exit handling both resolve durable trust reset before replacement"
+
     $testLogMarker = "AEROMIRROR_TEST_LOG_ISOLATION root=" +
         $testStorageRootInfo.Name
     $context = [Runtime.Serialization.FormatterServices]::GetUninitializedObject(
         $contextType)
+    $pairingUiEventSyncField = $contextType.GetField(
+        "pairingUiEventSync", $instanceFlags)
+    $pairingUiEventsField = $contextType.GetField(
+        "pairingUiEvents", $instanceFlags)
+    Assert-True ($null -ne $pairingUiEventSyncField -and
+        $null -ne $pairingUiEventsField) `
+        "pairing UI events have isolated synchronization and queue fields"
+    $pairingUiEventSyncField.SetValue($context, [object]::new())
+    $pairingUiEventsField.SetValue(
+        $context, [Activator]::CreateInstance($pairingUiEventsField.FieldType))
     $writeLog.Invoke(
         $null, [object[]]@($testLogMarker)) | Out-Null
 
@@ -1931,6 +2239,32 @@ try {
 
     [IO.File]::WriteAllText(
         $settingsPersistencePath,
+        "SettingsVersion=12`r`n" +
+        "ReceiverName=Legacy-pairing`r`n" +
+        "PairingMode=pin`r`n" +
+        "FixedPin=0427`r`n" +
+        "AdvancedArguments=-foo keep -pin 6789 -pw secret -bar keep`r`n",
+        (New-Object Text.UTF8Encoding($false)))
+    $loadedLegacyPairing = $settingsPersistenceLoad.Invoke(
+        $null, [object[]]@())
+    Assert-True ($loadedLegacyPairing.PairingMode -eq "trust" -and
+        $loadedLegacyPairing.FixedPin -eq "" -and
+        $loadedLegacyPairing.AdvancedArguments.Contains("-foo keep") -and
+        $loadedLegacyPairing.AdvancedArguments.Contains("-bar keep") -and
+        -not $loadedLegacyPairing.AdvancedArguments.Contains("6789") -and
+        -not $loadedLegacyPairing.AdvancedArguments.Contains("secret")) `
+        "legacy fixed and advanced pairing secrets migrate to mandatory per-device trust in memory"
+    $savedPairingProfile = [IO.File]::ReadAllText(
+        $settingsPersistencePath)
+    Assert-True (-not $savedPairingProfile.Contains("PairingMode=") -and
+        -not $savedPairingProfile.Contains("FixedPin=") -and
+        -not $savedPairingProfile.Contains("0427") -and
+        -not $savedPairingProfile.Contains("6789") -and
+        -not $savedPairingProfile.Contains("-pw")) `
+        "loading a legacy profile immediately removes persisted pairing secrets and obsolete choices"
+
+    [IO.File]::WriteAllText(
+        $settingsPersistencePath,
         "SettingsVersion=11`r`n" +
         "ReceiverName=Retained-v11`r`n" +
         "AlwaysOnTop=True`r`n" +
@@ -2058,6 +2392,137 @@ Assert-True ([regex]::Matches(
         $defaultAudioArguments,
         [regex]::Escape($resilientAudioArgument)).Count -eq 1) `
     "default audio emits exactly one resilient WASAPI2 sink argument"
+Assert-True ([regex]::IsMatch(
+        $defaultAudioArguments,
+        '(?:^|\s)-pin\s+-reg\s+"[^"]+"(?:\s|$)') -and
+    [regex]::Matches($defaultAudioArguments, '(?:^|\s)-pin(?:\s|$)').Count -eq 1 -and
+    [regex]::Matches($defaultAudioArguments, '(?:^|\s)-reg(?:\s|$)').Count -eq 1 -and
+    [regex]::Matches($defaultAudioArguments, '(?:^|\s)-key(?:\s|$)').Count -eq 1 -and
+    -not [regex]::IsMatch(
+        $defaultAudioArguments, '(?:^|\s)-pin\s+[0-9]{4}(?:\s|$)') -and
+    -not [regex]::IsMatch($defaultAudioArguments, '(?:^|\s)-pw(?:\s|$)')) `
+    "every native launch uses one persistent identity/register and a PIN mode with no command-line digits"
+$removeProtectedPairingArguments = $settingsType.GetMethod(
+    "RemoveProtectedPairingArguments", $staticFlags)
+$redactProtectedPairingArguments = $settingsType.GetMethod(
+    "RedactProtectedPairingArgumentValues", $staticFlags)
+Assert-True ($null -ne $removeProtectedPairingArguments -and
+    $null -ne $redactProtectedPairingArguments) `
+    "protected advanced arguments have focused Windows-token sanitizers"
+$protectedArgumentCases = @(
+    [pscustomobject]@{
+        Label = "quoted option tokens"
+        Input = '-foo keep "-pin" 6789 "-pw" "quoted secret" "-reg" "legacy path.txt" "-key" legacy.pem -bar keep'
+        Secrets = @('6789', 'quoted secret', 'legacy path.txt', 'legacy.pem')
+    },
+    [pscustomobject]@{
+        Label = "quote-spliced option tokens"
+        Input = '-foo keep -p""in 2468 -p""w legacy -r""eg legacy.txt -k""ey legacy.pem -bar keep'
+        Secrets = @('2468', 'legacy', 'legacy.txt', 'legacy.pem')
+    },
+    [pscustomobject]@{
+        Label = "double-dash and escaped values"
+        Input = '--pin "13\"57" --pw "secret\"quote" --reg "legacy\\\"register.txt" --key "legacy\\key.pem\\" -bar keep'
+        Secrets = @('13\"57', 'secret\"quote', 'legacy', 'register.txt', 'key.pem')
+    },
+    [pscustomobject]@{
+        Label = "leading-dash values and consecutive protected options"
+        Input = '-foo keep "-pw" "-secret" "-pin" "-1234" "-reg" "-key" legacy.pem -bar keep'
+        Secrets = @('-secret', '-1234', 'legacy.pem')
+    }
+)
+foreach ($case in $protectedArgumentCases) {
+    $originalArgv = @(ConvertFrom-WindowsCommandLine $case.Input)
+    Assert-True (($originalArgv | Where-Object {
+                $_ -in @('-pin', '-pw', '-reg', '-key',
+                    '--pin', '--pw', '--reg', '--key')
+            }).Count -gt 0) `
+        "$($case.Label) is interpreted as protected options by Windows"
+    $sanitized = [string]$removeProtectedPairingArguments.Invoke(
+        $null, [object[]]@($case.Input))
+    $sanitizedArgv = @(ConvertFrom-WindowsCommandLine $sanitized)
+    $protectedSurvivors = @($sanitizedArgv | Where-Object {
+                $_ -in @('-pin', '-pw', '-reg', '-key',
+                    '--pin', '--pw', '--reg', '--key')
+            })
+    Assert-True ($protectedSurvivors.Count -eq 0 -and
+        ($sanitizedArgv -contains '-foo' -or
+         $sanitizedArgv -contains '-bar')) `
+        "$($case.Label) cannot survive protected argument normalization"
+    foreach ($secret in $case.Secrets) {
+        Assert-True (-not $sanitized.Contains($secret)) `
+            "$($case.Label) removes protected value fragment $secret"
+    }
+    $redacted = [string]$redactProtectedPairingArguments.Invoke(
+        $null, [object[]]@($case.Input))
+    foreach ($secret in $case.Secrets) {
+        Assert-True (-not $redacted.Contains($secret)) `
+            "$($case.Label) cannot expose $secret in diagnostics"
+    }
+    Assert-True ($redacted.Contains('****')) `
+        "$($case.Label) visibly redacts protected values"
+}
+$advancedPairingSettings = [Activator]::CreateInstance($settingsType, $true)
+$advancedPairingSettings.AdvancedArguments =
+    '-foo keep -pin 1111 -pw legacy -reg legacy.txt -key legacy.pem -bar keep'
+$advancedPairingArguments = Invoke-UxPlayArguments $advancedPairingSettings
+Assert-True ($advancedPairingArguments.Contains('-foo keep') -and
+    $advancedPairingArguments.Contains('-bar keep') -and
+    -not $advancedPairingArguments.Contains('1111') -and
+    -not $advancedPairingArguments.Contains('legacy.txt') -and
+    -not $advancedPairingArguments.Contains('legacy.pem') -and
+    [regex]::Matches(
+        $advancedPairingArguments, '(?:^|\s)-pin(?:\s|$)').Count -eq 1 -and
+    [regex]::Matches(
+        $advancedPairingArguments, '(?:^|\s)-reg(?:\s|$)').Count -eq 1 -and
+    [regex]::Matches(
+        $advancedPairingArguments, '(?:^|\s)-key(?:\s|$)').Count -eq 1) `
+    "advanced arguments cannot override trust or place a pairing secret on the process command line"
+$quotedAdvancedPairingSettings = [Activator]::CreateInstance(
+    $settingsType, $true)
+$quotedAdvancedPairingSettings.AdvancedArguments =
+    '-foo keep "-pin" 4321 -p""w hidden "-reg" old.txt -k""ey old.pem -bar keep'
+$quotedAdvancedPairingArguments = Invoke-UxPlayArguments `
+    $quotedAdvancedPairingSettings
+$quotedAdvancedArgv = @(ConvertFrom-WindowsCommandLine `
+    $quotedAdvancedPairingArguments)
+Assert-True ($quotedAdvancedPairingArguments.Contains('-foo keep') -and
+    $quotedAdvancedPairingArguments.Contains('-bar keep') -and
+    -not $quotedAdvancedPairingArguments.Contains('4321') -and
+    -not $quotedAdvancedPairingArguments.Contains('hidden') -and
+    -not $quotedAdvancedPairingArguments.Contains('old.txt') -and
+    -not $quotedAdvancedPairingArguments.Contains('old.pem') -and
+    ($quotedAdvancedArgv | Where-Object { $_ -eq '-pin' }).Count -eq 1 -and
+    ($quotedAdvancedArgv | Where-Object { $_ -eq '-reg' }).Count -eq 1 -and
+    ($quotedAdvancedArgv | Where-Object { $_ -eq '-key' }).Count -eq 1 -and
+    ($quotedAdvancedArgv | Where-Object { $_ -eq '-pw' }).Count -eq 0) `
+    "quoted and quote-spliced overrides leave only the mandatory trust suffix"
+$normalizeSettings.Invoke(
+    $quotedAdvancedPairingSettings, [object[]]@()) | Out-Null
+$legacyPinSanitizationField = $settingsType.GetField(
+    "LegacyFixedPinForSanitization", $instanceFlags)
+Assert-True ($quotedAdvancedPairingSettings.AdvancedArguments -eq
+        '-foo keep -bar keep' -and
+    [string]$legacyPinSanitizationField.GetValue(
+        $quotedAdvancedPairingSettings) -eq '4321') `
+    "migration captures and removes a quoted legacy PIN before persistence"
+$malformedAdvancedPairingSettings = [Activator]::CreateInstance(
+    $settingsType, $true)
+$malformedAdvancedPairingSettings.AdvancedArguments = '-n "'
+$malformedAdvancedPairingArguments = Invoke-UxPlayArguments `
+    $malformedAdvancedPairingSettings
+$malformedAdvancedArgv = @(ConvertFrom-WindowsCommandLine `
+    $malformedAdvancedPairingArguments)
+Assert-True (
+    ($malformedAdvancedArgv | Where-Object { $_ -eq '-pin' }).Count -eq 1 -and
+    ($malformedAdvancedArgv | Where-Object { $_ -eq '-reg' }).Count -eq 1 -and
+    ($malformedAdvancedArgv | Where-Object { $_ -eq '-key' }).Count -eq 1 -and
+    ($malformedAdvancedArgv | Where-Object { $_ -eq '-n' }).Count -eq 1) `
+    "an unmatched advanced quote cannot swallow the mandatory trust suffix"
+$normalizeSettings.Invoke(
+    $malformedAdvancedPairingSettings, [object[]]@()) | Out-Null
+Assert-True ($malformedAdvancedPairingSettings.AdvancedArguments -eq '') `
+    "malformed advanced arguments fail closed during settings normalization"
 $longNameSettings = [Activator]::CreateInstance($settingsType, $true)
 $longNameSettings.ReceiverName = $cyrillicBoundary
 $longNameArguments = Invoke-UxPlayArguments $longNameSettings
@@ -2119,16 +2584,23 @@ Assert-True ($settingsProbe.StreamWindowWidth -eq 0 -and
     "an incomplete persisted renderer placement is cleared as one unit"
 $settingsProbe.PairingMode = "garbage"
 $settingsProbe.FixedPin = "1234"
+$settingsProbe.AdvancedArguments = '-foo 1 -pin 6789 -pw secret -reg old.txt -key old.pem -bar 2'
 $settingsProbe.QualityPreset = "unknown-quality"
 $settingsProbe.Renderer = "vulkan"
 $settingsProbe.LatencyProfile = "turbo"
 $settingsProbe.AudioOutput = "custom"
 $settingsProbe.ThemeMode = "sepia"
 $normalizeSettings.Invoke($settingsProbe, [object[]]@()) | Out-Null
-Assert-True ($settingsProbe.PairingMode -eq "none") `
-    "an unknown pairing mode becomes unprotected so network policy fails closed"
-Assert-True ($settingsProbe.FixedPin -eq "") `
-    "an invalid pairing mode does not retain a misleading PIN"
+Assert-True ($settingsProbe.PairingMode -eq "trust" -and
+    $settingsProbe.FixedPin -eq "") `
+    "every legacy pairing mode normalizes to per-device trust without a persisted fixed PIN"
+Assert-True ($settingsProbe.AdvancedArguments.Contains('-foo 1') -and
+    $settingsProbe.AdvancedArguments.Contains('-bar 2') -and
+    -not $settingsProbe.AdvancedArguments.Contains('-pin') -and
+    -not $settingsProbe.AdvancedArguments.Contains('-pw') -and
+    -not $settingsProbe.AdvancedArguments.Contains('-reg') -and
+    -not $settingsProbe.AdvancedArguments.Contains('-key')) `
+    "advanced arguments cannot persist a PIN, password, trust register, or identity override"
 Assert-True ($settingsProbe.QualityPreset -eq "1080p60") `
     "an unknown quality preset receives the stable default"
 Assert-True ($settingsProbe.Renderer -eq "d3d11") `
@@ -2146,20 +2618,22 @@ Assert-True ($settingsProbe.ThemeMode -eq "system") `
 $settingsProbe.PairingMode = "password"
 $settingsProbe.FixedPin = "1234"
 $normalizeSettings.Invoke($settingsProbe, [object[]]@()) | Out-Null
-Assert-True ($settingsProbe.PairingMode -eq "none") `
-    "the obsolete password mode migrates to the fail-closed unprotected state"
+Assert-True ($settingsProbe.PairingMode -eq "trust" -and
+    $settingsProbe.FixedPin -eq "") `
+    "the obsolete password mode migrates to per-device trust"
 $settingsProbe.PairingMode = "pin"
 $settingsProbe.FixedPin = -join @(
     [char]0xFF11, [char]0xFF12, [char]0xFF13, [char]0xFF14)
 $normalizeSettings.Invoke($settingsProbe, [object[]]@()) | Out-Null
-Assert-True ($settingsProbe.PairingMode -eq "none") `
-    "PIN protection requires four ASCII digits"
+Assert-True ($settingsProbe.PairingMode -eq "trust" -and
+    $settingsProbe.FixedPin -eq "") `
+    "non-ASCII legacy PIN text is discarded during trust migration"
 $settingsProbe.PairingMode = " PIN "
 $settingsProbe.FixedPin = " 0427 "
 $normalizeSettings.Invoke($settingsProbe, [object[]]@()) | Out-Null
-Assert-True ($settingsProbe.PairingMode -eq "pin" -and
-    $settingsProbe.FixedPin -eq "0427") `
-    "a valid persisted PIN is canonicalized and preserved"
+Assert-True ($settingsProbe.PairingMode -eq "trust" -and
+    $settingsProbe.FixedPin -eq "") `
+    "a valid legacy fixed PIN is retained only for in-memory log sanitization"
 
 $atomicWriter = $settingsType.GetMethod(
     "WriteAllLinesAtomically", $staticFlags)
@@ -2287,12 +2761,21 @@ $httpResetStatus = Field "lostConnectionHttpResetStatus"
 $httpResetPort = Field "lostConnectionHttpResetPort"
 $dnsSdStatus = Field "coreDnsSdStatus"
 $bleStatus = Field "coreBleStatus"
+$receiverReady = Field "receiverReady"
+$coreBonjourUnavailable = Field "coreBonjourUnavailable"
+$coreBonjourStateChanged = Field "coreBonjourStateChanged"
 $discoveryRecoveryPending = Field "coreDiscoveryRecoveryPending"
 $discoveryRecoveryAttempts = Field "coreDiscoveryRecoveryAttempts"
 $discoveryRecoveryPid = Field "coreDiscoveryRecoveryPid"
 $discoveryRecoveryDue = Field "coreDiscoveryRecoveryDueTicks"
 $placeholderShowPending = Field "lostConnectionPlaceholderShowPending"
 $placeholderClosePending = Field "lostConnectionPlaceholderClosePending"
+$placeholderDismissedSession =
+    Field "lostConnectionPlaceholderDismissedSessionGeneration"
+$placeholderDismissedSession.SetValue($context, -1)
+$rendererDismissedSession =
+    Field "lostConnectionRendererDismissedSessionGeneration"
+$rendererDismissedSession.SetValue($context, -1)
 $rendererHandoffPending = Field "lostConnectionRendererHandoffPending"
 $lostStatePending = Field "lostConnectionLostStatePending"
 $reconnectHintPending = Field "lostConnectionReconnectHintPending"
@@ -2657,6 +3140,51 @@ $lastSuppressedVideoSize.SetValue($context, [Drawing.Size]::Empty)
 
 $observe = $contextType.GetMethod("ObserveCoreOutput", $instanceFlags)
 Assert-True ($null -ne $observe) "core-output observer exists"
+$queueLostConnectionPlaceholder = $contextType.GetMethod(
+    "QueueLostConnectionPlaceholder", $instanceFlags)
+$queueLostConnectionReconnectHint = $contextType.GetMethod(
+    "QueueLostConnectionReconnectHint", $instanceFlags)
+Assert-True ($null -ne $queueLostConnectionPlaceholder -and
+    $null -ne $queueLostConnectionReconnectHint) `
+    "lost-connection queues expose deterministic session-latch tests"
+$activePid.SetValue($context, 42)
+$mirrorSessionGeneration.SetValue($context, 77)
+$mirrorActive.SetValue($context, 0)
+$rendererDismissedSession.SetValue($context, -1)
+$placeholderShowPending.SetValue($context, 0)
+$placeholderClosePending.SetValue($context, 0)
+$reconnectHintPending.SetValue($context, 0)
+$observe.Invoke(
+    $context,
+    [object[]]@(42,
+        "prefix AEROMIRROR_VIDEO_WINDOW state=minimized source=caption-close")) |
+    Out-Null
+Assert-True ([int]$rendererDismissedSession.GetValue($context) -eq -1) `
+    "caption-close text embedded in an ordinary native line cannot dismiss continuity"
+$observe.Invoke(
+    $context,
+    [object[]]@(42,
+        "AEROMIRROR_VIDEO_WINDOW state=minimized source=caption-close")) |
+    Out-Null
+$queueLostConnectionPlaceholder.Invoke($context, [object[]]@()) | Out-Null
+$queueLostConnectionReconnectHint.Invoke($context, [object[]]@()) | Out-Null
+Assert-True ([int]$rendererDismissedSession.GetValue($context) -eq 77 -and
+    [int]$placeholderShowPending.GetValue($context) -eq 0 -and
+    [int]$placeholderClosePending.GetValue($context) -eq 1 -and
+    [int]$reconnectHintPending.GetValue($context) -eq 1) `
+    "lock then native end then caption Close suppresses both delayed loss and reconnect UI for that session"
+$mirrorSessionGeneration.SetValue($context, 78)
+$placeholderClosePending.SetValue($context, 0)
+$reconnectHintPending.SetValue($context, 0)
+$queueLostConnectionPlaceholder.Invoke($context, [object[]]@()) | Out-Null
+Assert-True ([int]$placeholderShowPending.GetValue($context) -eq 1) `
+    "caption-close suppression expires when the next mirroring generation starts"
+$mirrorSessionGeneration.SetValue($context, 0)
+$mirrorActive.SetValue($context, 1)
+$rendererDismissedSession.SetValue($context, -1)
+$placeholderShowPending.SetValue($context, 0)
+$placeholderClosePending.SetValue($context, 0)
+$reconnectHintPending.SetValue($context, 0)
 $observeVideoPresentation = $contextType.GetMethod(
     "ObserveRecoveredVideoPresentation", $instanceFlags)
 $proofReadyMarker =
@@ -2695,6 +3223,14 @@ $observe.Invoke(
 Assert-True ([int]$httpMarkersReady.GetValue($context) -eq 0 -and
     [int]$httpPort.GetValue($context) -eq 0) `
     "an HTTP-ready marker from a stale native PID is ignored"
+$observe.Invoke(
+    $context,
+    [object[]]@(42,
+        "connection request from AEROMIRROR_HTTP_READY stage=initial port=53999")) |
+    Out-Null
+Assert-True ([int]$httpMarkersReady.GetValue($context) -eq 0 -and
+    [int]$httpPort.GetValue($context) -eq 0) `
+    "an HTTP-ready marker embedded in an ordinary log is ignored"
 $observe.Invoke(
     $context,
     [object[]]@(42,
@@ -2803,7 +3339,75 @@ Assert-True ([long]$coreDiscoveryRefreshPendingRequest.GetValue($context) -eq
     [int]$coreDiscoveryRefreshFallbackPending.GetValue($context) -eq 0 -and
     [int]$dnsSdStatus.GetValue($context) -eq 1) `
     "one correlated same-PID same-port READY atomically settles and clears its command"
+$restartPending.SetValue($context, $false)
+$dnsSdStatus.SetValue($context, 1)
+$receiverReady.SetValue($context, 1)
+$coreBonjourUnavailable.SetValue($context, 0)
+$coreBonjourStateChanged.SetValue($context, 0)
+$observe.Invoke(
+    $context,
+    [object[]]@(42,
+        "AEROMIRROR_DISCOVERY_REFRESH_FAILED request=0 generation=10 error=-65563 pid=42 raop_port=53998 airplay_port=53999")) |
+    Out-Null
+Assert-True ([int]$dnsSdStatus.GetValue($context) -eq 1 -and
+    [int]$receiverReady.GetValue($context) -eq 1 -and
+    [int]$coreBonjourUnavailable.GetValue($context) -eq 0 -and
+    [int]$coreBonjourStateChanged.GetValue($context) -eq 0) `
+    "an autonomous ServiceNotRunning marker with mismatched current ports cannot regress healthy state"
+$observe.Invoke(
+    $context,
+    [object[]]@(42,
+        "AEROMIRROR_DISCOVERY_REFRESH_FAILED request=0 generation=10 error=-65563 pid=42 raop_port=53999 airplay_port=53999")) |
+    Out-Null
+Assert-True ([int]$dnsSdStatus.GetValue($context) -eq -1 -and
+    [int]$receiverReady.GetValue($context) -eq 0 -and
+    [int]$coreBonjourUnavailable.GetValue($context) -eq 1 -and
+    [int]$coreBonjourStateChanged.GetValue($context) -eq 1 -and
+    -not [bool]$restartPending.GetValue($context)) `
+    "an autonomous ServiceNotRunning result removes readiness without restarting the core"
+
+$coreDiscoveryRefreshPendingRequest.SetValue($context, [long]701)
+$coreDiscoveryRefreshPendingPid.SetValue($context, 42)
+$coreDiscoveryRefreshPendingPort.SetValue($context, 53999)
+$coreDiscoveryRefreshFallbackPending.SetValue($context, 1)
+$coreDiscoveryRefreshPhase.SetValue($context, 2)
+$coreDiscoveryRefreshDueTicks.SetValue(
+    $context, [DateTime]::UtcNow.AddSeconds(12).Ticks)
+$restartPending.SetValue($context, $false)
+$observe.Invoke(
+    $context,
+    [object[]]@(42,
+        "AEROMIRROR_DISCOVERY_REFRESH_FAILED request=701 generation=11 error=-65563 pid=42 raop_port=53999 airplay_port=53999")) |
+    Out-Null
+Assert-True ([long]$coreDiscoveryRefreshPendingRequest.GetValue($context) -eq
+        0 -and
+    [int]$coreDiscoveryRefreshFallbackPending.GetValue($context) -eq 0 -and
+    -not [bool]$restartPending.GetValue($context)) `
+    "a correlated ServiceNotRunning result settles the request without using the process-restart fallback"
+$dnsSdStatus.SetValue($context, 1)
+$receiverReady.SetValue($context, 1)
+$coreBonjourUnavailable.SetValue($context, 0)
+$coreBonjourStateChanged.SetValue($context, 0)
+$coreDiscoveryRefreshPendingRequest.SetValue($context, [long]702)
+$coreDiscoveryRefreshPendingPid.SetValue($context, 42)
+$coreDiscoveryRefreshPendingPort.SetValue($context, 53999)
+$observe.Invoke(
+    $context,
+    [object[]]@(42,
+        "AEROMIRROR_DISCOVERY_REFRESH_FAILED request=701 generation=12 error=-65563 pid=42 raop_port=53999 airplay_port=53999")) |
+    Out-Null
+Assert-True ([long]$coreDiscoveryRefreshPendingRequest.GetValue($context) -eq
+        702 -and
+    [int]$dnsSdStatus.GetValue($context) -eq 1 -and
+    [int]$receiverReady.GetValue($context) -eq 1 -and
+    [int]$coreBonjourUnavailable.GetValue($context) -eq 0 -and
+    [int]$coreBonjourStateChanged.GetValue($context) -eq 0) `
+    "a stale correlated ServiceNotRunning result cannot regress the current healthy generation"
+$coreDiscoveryRefreshPendingRequest.SetValue($context, [long]0)
+$coreDiscoveryRefreshPendingPid.SetValue($context, 0)
+$coreDiscoveryRefreshPendingPort.SetValue($context, 0)
 $dnsSdStatus.SetValue($context, 0)
+$receiverReady.SetValue($context, 0)
 
 $recoveryPending.SetValue($context, 1)
 $recoveryPid.SetValue($context, 42)
@@ -3096,15 +3700,18 @@ Assert-True ($null -ne $readiness) "core-readiness predicate exists"
 Assert-True (-not [bool]$readiness.Invoke(
         $null, [object[]]@($false, $true, 1, 1))) `
     "native markers never replace the ready-socket baseline"
-Assert-True ([bool]$readiness.Invoke(
+Assert-True (-not [bool]$readiness.Invoke(
         $null, [object[]]@($true, $true, 0, 0))) `
-    "legacy core readiness remains valid without native markers"
+    "a running Windows service cannot replace explicit DNS-SD publication readiness"
 Assert-True ([bool]$readiness.Invoke(
         $null, [object[]]@($true, $false, 1, 0))) `
     "direct DNS-SD confirmation can replace a service-status lookup"
-Assert-True ([bool]$readiness.Invoke(
+Assert-True (-not [bool]$readiness.Invoke(
         $null, [object[]]@($true, $false, -1, 1))) `
-    "healthy BLE discovery can back up degraded DNS-SD"
+    "BLE cannot make the AirPlay receiver ready while DNS-SD is degraded"
+Assert-True (-not [bool]$readiness.Invoke(
+        $null, [object[]]@($true, $false, 0, 1))) `
+    "BLE cannot replace Bonjour before DNS-SD readiness is confirmed"
 Assert-True (-not [bool]$readiness.Invoke(
         $null, [object[]]@($true, $false, -1, -1))) `
     "sockets alone do not confirm readiness without Bonjour or a healthy marker"
@@ -3114,8 +3721,6 @@ Assert-True (-not [bool]$readiness.Invoke(
 
 $connectionMarker = $contextType.GetMethod(
     "IsIncomingAirPlayConnectionRequestMarker", $staticFlags)
-$pinMarker = $contextType.GetMethod(
-    "IsAirPlayPinEntryMarker", $staticFlags)
 $deferDisruptive = $contextType.GetMethod(
     "ShouldDeferDisruptiveMaintenance", $staticFlags)
 $getIdleRenewalDelay = $contextType.GetMethod(
@@ -3436,12 +4041,12 @@ Assert-True ([bool]$connectionMarker.Invoke(
 Assert-True (-not [bool]$connectionMarker.Invoke(
         $null, [object[]]@("rejecting new connection request from iPhone"))) `
     "a rejected request is not treated as successful client activity"
-Assert-True ([bool]$pinMarker.Invoke(
-        $null, [object[]]@('*** CLIENT MUST NOW ENTER PIN = "1234" AS AIRPLAY PASSWORD'))) `
-    "the exact pre-auth PIN progress prefix is recognized"
-Assert-True (-not [bool]$pinMarker.Invoke(
-        $null, [object[]]@("CLIENT MUST NOW ENTER PIN"))) `
-    "a PIN-marker near miss is ignored"
+Assert-True ($pairingContextSource.Contains(
+        '@"^AEROMIRROR_PAIRING_PIN_REQUIRED request=([1-9]\d{0,18}) timeout_seconds=60$"') -and
+    $pairingContextSource.Contains(
+        '@"^AEROMIRROR_PAIRING_STATE request=([1-9]\d{0,18}) state=(trusted|cancelled|timeout|persist-failed)$"') -and
+    -not $receiverCoreSource.Contains('CLIENT MUST NOW ENTER PIN')) `
+    "pre-auth pairing consumes whole-line structured markers that never contain PIN digits"
 $graceProbeNow = [DateTime]::UtcNow.Ticks
 Assert-True ([bool]$deferDisruptive.Invoke(
         $null, [object[]]@($true, [long]0, $graceProbeNow))) `
@@ -3554,7 +4159,13 @@ Assert-True ([int]$dnsSdStatus.GetValue($context) -eq 0) `
 $socketsReady.SetValue($context, 1)
 $observe.Invoke(
     $context,
-    [object[]]@(42, "UxPlay: AEROMIRROR_DNSSD_DEGRADED")) | Out-Null
+    [object[]]@(42,
+        "connection request from AEROMIRROR_DNSSD_DEGRADED")) | Out-Null
+Assert-True ([int]$dnsSdStatus.GetValue($context) -eq 0) `
+    "a protocol-marker substring inside an ordinary client log is ignored"
+$observe.Invoke(
+    $context,
+    [object[]]@(42, "AEROMIRROR_DNSSD_DEGRADED")) | Out-Null
 Assert-True ([int]$dnsSdStatus.GetValue($context) -eq -1) `
     "degraded DNS-SD registration is recorded"
 Assert-True ([int]$discoveryRecoveryPending.GetValue($context) -eq 0) `
@@ -3613,7 +4224,12 @@ Assert-True ([int]$bleStatus.GetValue($context) -eq -1) `
     "alternate BLE advertising-failed wording is recognized"
 $observe.Invoke(
     $context,
-    [object[]]@(42, "UxPlay: AEROMIRROR_DNSSD_READY")) | Out-Null
+    [object[]]@(42, "metadata: AEROMIRROR_DNSSD_READY")) | Out-Null
+Assert-True ([int]$dnsSdStatus.GetValue($context) -eq -1) `
+    "a ready-marker substring inside an ordinary log cannot change DNS-SD state"
+$observe.Invoke(
+    $context,
+    [object[]]@(42, "AEROMIRROR_DNSSD_READY")) | Out-Null
 Assert-True ([int]$dnsSdStatus.GetValue($context) -eq 1) `
     "successful DNS-SD registration is recorded"
 Assert-True ([int]$discoveryRecoveryPending.GetValue($context) -eq 0) `
@@ -3640,6 +4256,12 @@ Assert-True ([long]$feedbackPlaceholderDue.GetValue($context) -eq 0) `
 $feedbackEpisodeActive.SetValue($context, 0)
 $feedbackEpisodeCount.SetValue($context, 0)
 $feedbackLongest.SetValue($context, 0)
+$observe.Invoke(
+    $context,
+    [object[]]@(42,
+        "metadata AEROMIRROR_FEEDBACK_HEALTH_READY")) | Out-Null
+Assert-True ([int]$feedbackMarkersReady.GetValue($context) -eq 0) `
+    "a feedback capability substring inside an ordinary log is ignored"
 $observe.Invoke(
     $context,
     [object[]]@(42, "AEROMIRROR_FEEDBACK_HEALTH_READY")) | Out-Null
@@ -3871,7 +4493,9 @@ $mirrorActive.SetValue($context, 1)
 $before = [DateTime]::UtcNow.Ticks
 $observe.Invoke(
     $context,
-    [object[]]@(42, "raop_rtp_mirror error in recv: 10054")) | Out-Null
+    [object[]]@(42,
+        "*** ERROR: raop_rtp_mirror error in recv: 10054 socket reset")) |
+    Out-Null
 $armedDue = [long]$recoveryDue.GetValue($context)
 Assert-True ([int]$recoveryPending.GetValue($context) -eq 1) `
     "fatal mirror recv error arms recovery"
@@ -4072,7 +4696,7 @@ $pinBefore = [DateTime]::UtcNow
 $observe.Invoke(
     $context,
     [object[]]@(42,
-        '*** CLIENT MUST NOW ENTER PIN = "1234" AS AIRPLAY PASSWORD')) |
+        'AEROMIRROR_PAIRING_PIN_REQUIRED request=7 timeout_seconds=60')) |
     Out-Null
 Assert-True ([bool]$coreReadyPending.GetValue($context) -eq $false) `
     "PIN-entry progress resolves readiness without waiting for DNS-SD checks"

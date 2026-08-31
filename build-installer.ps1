@@ -1,6 +1,6 @@
 param(
     [string]$PortableZip = "",
-    [string]$Version = "0.12.20"
+    [string]$Version = "0.12.22"
 )
 
 $ErrorActionPreference = "Stop"
@@ -274,6 +274,7 @@ finally {
     /reference:System.Drawing.dll `
     /reference:System.IO.Compression.dll `
     /reference:System.IO.Compression.FileSystem.dll `
+    /reference:System.ServiceProcess.dll `
     /reference:System.Web.Extensions.dll `
     /reference:System.Windows.Forms.dll `
     "/resource:$provenancePath,AeroMirrorSourceProvenance" `
@@ -295,6 +296,7 @@ if ($LASTEXITCODE -ne 0) {
     /reference:System.Drawing.dll `
     /reference:System.IO.Compression.dll `
     /reference:System.IO.Compression.FileSystem.dll `
+    /reference:System.ServiceProcess.dll `
     /reference:System.Web.Extensions.dll `
     /reference:System.Windows.Forms.dll `
     $source
@@ -306,6 +308,18 @@ $builtVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo(
     $output).FileVersion
 if ($builtVersion -ne ($Version + ".0")) {
     throw "Built installer version $builtVersion does not match $Version."
+}
+$runtimeCheck = Start-Process `
+    -FilePath $output `
+    -ArgumentList "/verify-runtime" `
+    -WorkingDirectory $projectRoot `
+    -WindowStyle Hidden `
+    -Wait `
+    -PassThru
+if ($runtimeCheck.ExitCode -ne 0) {
+    throw (
+        "Installer runtime verification failed with exit code " +
+        $runtimeCheck.ExitCode + ".")
 }
 $shortcutCheck = Start-Process `
     -FilePath $output `
@@ -329,6 +343,18 @@ if ($updateLifecycleCheck.ExitCode -ne 0) {
     throw (
         "Installer update-lifecycle verification failed with exit code " +
         $updateLifecycleCheck.ExitCode + ".")
+}
+$bonjourRecoveryCheck = Start-Process `
+    -FilePath $output `
+    -ArgumentList "/verify-bonjour-recovery" `
+    -WorkingDirectory $projectRoot `
+    -WindowStyle Hidden `
+    -Wait `
+    -PassThru
+if ($bonjourRecoveryCheck.ExitCode -ne 0) {
+    throw (
+        "Installer Bonjour recovery-policy verification failed with exit " +
+        "code " + $bonjourRecoveryCheck.ExitCode + ".")
 }
 
 Write-Host "Built $output"

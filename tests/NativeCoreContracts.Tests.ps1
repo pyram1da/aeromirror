@@ -91,6 +91,7 @@ if ([string]::IsNullOrWhiteSpace($CompilerPath)) {
 
 $libRoot = (Resolve-Path -LiteralPath $LibUxPlayRoot).Path
 $compiler = (Resolve-Path -LiteralPath $CompilerPath).Path
+$cxxCompiler = Join-Path (Split-Path -Parent $compiler) "g++.exe"
 $ucrtRoot = Split-Path -Parent (Split-Path -Parent $compiler)
 $opensslInclude = Join-Path $ucrtRoot "include"
 $cryptoImportLibrary = Join-Path $ucrtRoot "lib\libcrypto.dll.a"
@@ -98,8 +99,10 @@ $cryptoImportLibrary = Join-Path $ucrtRoot "lib\libcrypto.dll.a"
 $cryptoSource = Join-Path $libRoot "lib\crypto.c"
 $cryptoHeader = Join-Path $libRoot "lib\crypto.h"
 $pairingSource = Join-Path $libRoot "lib\pairing.c"
+$pairingHeader = Join-Path $libRoot "lib\pairing.h"
 $mirrorBufferSource = Join-Path $libRoot "lib\mirror_buffer.c"
 $raopBufferSource = Join-Path $libRoot "lib\raop_buffer.c"
+$raopSource = Join-Path $libRoot "lib\raop.c"
 $handlersSource = Join-Path $libRoot "lib\raop_handlers.h"
 $ntpSource = Join-Path $libRoot "lib\raop_ntp.c"
 $ntpHeader = Join-Path $libRoot "lib\raop_ntp.h"
@@ -111,19 +114,35 @@ $mirrorSource = Join-Path $libRoot "lib\raop_rtp_mirror.c"
 $raopHeader = Join-Path $libRoot "lib\raop.h"
 $httpRequestSource = Join-Path $libRoot "lib\http_request.c"
 $httpRequestHeader = Join-Path $libRoot "lib\http_request.h"
+$llhttpApiSource = Join-Path $libRoot "lib\llhttp\api.c"
+$llhttpHttpSource = Join-Path $libRoot "lib\llhttp\http.c"
+$llhttpParserSource = Join-Path $libRoot "lib\llhttp\llhttp.c"
+$httpHandlersSource = Join-Path $libRoot "lib\http_handlers.h"
+$fcupRequestSource = Join-Path $libRoot "lib\fcup_request.h"
 $httpdSource = Join-Path $libRoot "lib\httpd.c"
+$airplayVideoSource = Join-Path $libRoot "lib\airplay_video.c"
+$airplayVideoHeader = Join-Path $libRoot "lib\airplay_video.h"
 $fairplaySource = Join-Path $libRoot "lib\fairplay_playfair.c"
 $videoRendererSource = Join-Path $libRoot "renderers\video_renderer.c"
 $audioRendererSource = Join-Path $libRoot "renderers\audio_renderer.c"
 $uxplaySource = Join-Path $libRoot "uxplay.cpp"
+$uxplayApiHeader = Join-Path $libRoot "uxplay_api.h"
+$logProtocolHeader = Join-Path $libRoot "aeromirror_log_protocol.h"
+$loggerSource = Join-Path $libRoot "lib\logger.c"
+$loggerHeader = Join-Path $libRoot "lib\logger.h"
+$wrapperRoot = Split-Path -Parent $libRoot
+$wrapperWindowSource = Join-Path $wrapperRoot "src\mainwindow.cpp"
+$wrapperWindowHeader = Join-Path $wrapperRoot "src\mainwindow.h"
 $harnessSource = Join-Path $PSScriptRoot "NativeCryptoHappyPathHarness.c"
 
 foreach ($path in @(
     $cryptoSource,
     $cryptoHeader,
     $pairingSource,
+    $pairingHeader,
     $mirrorBufferSource,
     $raopBufferSource,
+    $raopSource,
     $handlersSource,
     $ntpSource,
     $ntpHeader,
@@ -135,12 +154,26 @@ foreach ($path in @(
     $raopHeader,
     $httpRequestSource,
     $httpRequestHeader,
+    $llhttpApiSource,
+    $llhttpHttpSource,
+    $llhttpParserSource,
+    $httpHandlersSource,
+    $fcupRequestSource,
     $httpdSource,
+    $airplayVideoSource,
+    $airplayVideoHeader,
     $fairplaySource,
     $videoRendererSource,
     $audioRendererSource,
     $uxplaySource,
+    $uxplayApiHeader,
+    $logProtocolHeader,
+    $loggerSource,
+    $loggerHeader,
+    $wrapperWindowSource,
+    $wrapperWindowHeader,
     $harnessSource,
+    $cxxCompiler,
     $opensslInclude,
     $cryptoImportLibrary
 )) {
@@ -151,8 +184,10 @@ foreach ($path in @(
 $cryptoText = Get-Content -LiteralPath $cryptoSource -Raw
 $cryptoHeaderText = Get-Content -LiteralPath $cryptoHeader -Raw
 $pairingText = Get-Content -LiteralPath $pairingSource -Raw
+$pairingHeaderText = Get-Content -LiteralPath $pairingHeader -Raw
 $mirrorBufferText = Get-Content -LiteralPath $mirrorBufferSource -Raw
 $raopBufferText = Get-Content -LiteralPath $raopBufferSource -Raw
+$raopText = Get-Content -LiteralPath $raopSource -Raw
 $handlersText = Get-Content -LiteralPath $handlersSource -Raw
 $ntpText = Get-Content -LiteralPath $ntpSource -Raw
 $ntpHeaderText = Get-Content -LiteralPath $ntpHeader -Raw
@@ -164,11 +199,739 @@ $mirrorText = Get-Content -LiteralPath $mirrorSource -Raw
 $raopHeaderText = Get-Content -LiteralPath $raopHeader -Raw
 $httpRequestText = Get-Content -LiteralPath $httpRequestSource -Raw
 $httpRequestHeaderText = Get-Content -LiteralPath $httpRequestHeader -Raw
+$httpHandlersText = Get-Content -LiteralPath $httpHandlersSource -Raw
+$fcupRequestText = Get-Content -LiteralPath $fcupRequestSource -Raw
 $httpdText = Get-Content -LiteralPath $httpdSource -Raw
+$airplayVideoText = Get-Content -LiteralPath $airplayVideoSource -Raw
+$airplayVideoHeaderText = Get-Content -LiteralPath $airplayVideoHeader -Raw
 $fairplayText = Get-Content -LiteralPath $fairplaySource -Raw
 $videoRendererText = Get-Content -LiteralPath $videoRendererSource -Raw
 $audioRendererText = Get-Content -LiteralPath $audioRendererSource -Raw
 $uxplayText = Get-Content -LiteralPath $uxplaySource -Raw
+$uxplayApiText = Get-Content -LiteralPath $uxplayApiHeader -Raw
+$logProtocolText = Get-Content -LiteralPath $logProtocolHeader -Raw
+$loggerText = Get-Content -LiteralPath $loggerSource -Raw
+$loggerHeaderText = Get-Content -LiteralPath $loggerHeader -Raw
+$wrapperWindowText = Get-Content -LiteralPath $wrapperWindowSource -Raw
+$wrapperWindowHeaderText = Get-Content -LiteralPath $wrapperWindowHeader -Raw
+
+# First-device trust is orchestrated by the shell. The native receiver emits
+# only a request id, accepts the four digits over inherited stdin, and retains
+# them only for the bounded SRP exchange.
+Assert-True ($raopHeaderText.Contains(
+        'bool  (*request_pairing_pin) (void *cls, char pin[5], uint64_t *request_id);') -and
+    $raopHeaderText.Contains(
+        'bool  (*pairing_pin_is_active) (void *cls, uint64_t request_id);') -and
+    $raopHeaderText.Contains(
+        'void  (*pairing_pin_failed) (void *cls, uint64_t request_id);') -and
+    $raopHeaderText.Contains(
+        'bool  (*register_client) (void *cls, const char *device_id, const char *pk_str, const char *name, uint64_t request_id);') -and
+    $uxplayApiText.Contains('submit_pairing_pin(') -and
+    $uxplayApiText.Contains('cancel_pairing_pin(')) `
+    "native pairing exposes a bounded shell-to-SRP callback contract"
+Assert-True ($handlersText.Contains(
+        'raop->callbacks.request_pairing_pin') -and
+    $handlersText.Contains('raop->callbacks.pairing_pin_failed') -and
+    $handlersText.Contains('conn->pairing_pin_request_id') -and
+    $handlersText.Contains('conn->pairing_pin') -and
+    $handlersText.Contains(
+        'raop_clear_transient_pin(pin, sizeof(pin))') -and
+    $handlersText.Contains('Client Authentication Failure') -and
+    $handlersText.Contains('Pairing PIN is ready for entry on the client') -and
+    -not $handlersText.Contains(
+        'CLIENT MUST NOW ENTER PIN = \"%s\"')) `
+    "pair-pin-start blocks for the shell response without logging PIN digits"
+$initialPairSetupSlice = Get-SourceSlice $handlersText `
+    '/* this is the initial pair-setup-pin request */' `
+    '} else if (PLIST_IS_DATA(req_pk_node)' `
+    "initial pair-setup-pin request"
+Assert-True ($initialPairSetupSlice.Contains(
+        'pair-setup-pin: processing initial request') -and
+    -not [regex]::IsMatch(
+        $initialPairSetupSlice,
+        'logger_log\s*\([^;]*(?:%s|device_id|,\s*user\s*\))')) `
+    "initial PIN pairing never logs the untrusted SRP user or device identifier"
+
+# Ordinary logs and authenticated shell-control markers share stdout, but not
+# an emitter. Remote metadata is flattened to one line and every marker token
+# is neutralized before an ordinary log can reach stdout.
+$ordinaryLogSlice = Get-SourceSlice $uxplayText `
+    'static void log(int level, const char* format, ...)' `
+    'static void aeromirror_protocol_marker(' `
+    "ordinary native log writer"
+$protocolLogSlice = Get-SourceSlice $uxplayText `
+    'static void aeromirror_protocol_marker(' `
+    '#define LOGD' `
+    "native protocol marker writer"
+$logCallbackSlice = Get-SourceSlice $uxplayText `
+    'extern "C" void log_callback' `
+    'static int start_raop_server' `
+    "native logger callback"
+$clientRequestSlice = Get-SourceSlice $uxplayText `
+    'extern "C" void report_client_request' `
+    'extern "C" void audio_process' `
+    "client request reporting"
+Assert-True ($logProtocolText.Contains(
+        '#define AEROMIRROR_PROTOCOL_PREFIX "AEROMIRROR_"') -and
+    $logProtocolText.Contains('value < 0x20 || value == 0x7f') -and
+    $logProtocolText.Contains("*cursor = ' '") -and
+    $logProtocolText.Contains(
+        'aeromirror_ascii_equal_ignore_case(') -and
+    $logProtocolText.Contains(
+        "candidate[prefix_length - 1] = '-'") -and
+    $ordinaryLogSlice.Contains(
+        'aeromirror_sanitize_ordinary_log(line);')) `
+    "ordinary native logs flatten controls and neutralize every control-marker token"
+Assert-InOrder $ordinaryLogSlice @(
+    'vsnprintf(',
+    'aeromirror_sanitize_ordinary_log(line);',
+    "line[length++] = '\n';",
+    'fwrite(line, 1, length, stdout)'
+) "ordinary log sanitization occurs after formatting and before the sole line terminator"
+$ordinaryOutputSlice = Get-SourceSlice $logProtocolText `
+    'static inline int aeromirror_ordinary_output(' `
+    '#endif' `
+    "shared ordinary output writer"
+Assert-InOrder $ordinaryOutputSlice @(
+    'vsnprintf(',
+    'aeromirror_sanitize_ordinary_log(line);',
+    "line[length++] = '\n';",
+    'fwrite(line, 1, length, stream)',
+    'fflush(stream)'
+) "direct ordinary output is flattened, marker-neutralized, and emitted as one bounded line"
+Assert-True ($protocolLogSlice.Contains(
+        'aeromirror_sanitize_control_bytes(line + 1);') -and
+    $protocolLogSlice.Contains(
+        'if (!aeromirror_is_protocol_marker(line + 1)) return;') -and
+    $loggerHeaderText.Contains('#define LOGGER_PROTOCOL') -and
+    $loggerHeaderText.Contains('void logger_protocol(') -and
+    $loggerText.Contains(
+        'logger->callback(logger->cls, LOGGER_PROTOCOL, buffer);') -and
+    $logCallbackSlice.Contains('case LOGGER_PROTOCOL:') -and
+    $logCallbackSlice.Contains(
+        'aeromirror_protocol_marker("%s", msg);')) `
+    "genuine machine markers use a dedicated validated logger callback path"
+$markerEmitterText = [string]::Join("`n", @(
+    $uxplayText,
+    $handlersText,
+    $mirrorText,
+    $videoRendererText))
+Assert-NoMatch $markerEmitterText `
+    'LOG[DIWE]\s*\(\s*"AEROMIRROR_' `
+    "no genuine control marker uses the ordinary executable logger"
+Assert-NoMatch $markerEmitterText `
+    'logger_log\s*\([^;]*?"AEROMIRROR_' `
+    "no genuine control marker uses the ordinary library logger"
+Assert-True ($clientRequestSlice.Contains(
+        'LOGI("connection request from an AirPlay client")') -and
+    $clientRequestSlice.Contains(
+        'client connection denied because its device ID is not allowlisted') -and
+    $clientRequestSlice.Contains(
+        'attempt to connect by a blocked client: DENIED') -and
+    -not $clientRequestSlice.Contains('connection request from %') -and
+    -not $clientRequestSlice.Contains('clientID %') -and
+    -not $clientRequestSlice.Contains('"-allow %s"')) `
+    "client request diagnostics retain activity signals without logging remote identifiers"
+$clientLogSurface = [string]::Join("`n", @(
+    $raopText,
+    $httpHandlersText,
+    $fcupRequestText,
+    $handlersText,
+    $httpdText,
+    $ntpText,
+    $rtpText,
+    $mirrorText,
+    $raopBufferText,
+    $uxplayText))
+Assert-NoMatch $clientLogSurface `
+    'logger_log\s*\([^;]*(?:ip_address|ipaddr|client_session_id|apple_session_id|dacp_id|active_remote_header|user_agent|rtpinfo|playback_uuid|fcup_response_url|stream_connection_id|packet_description)' `
+    "ordinary native logs do not interpolate client identifiers"
+Assert-NoMatch $clientLogSurface `
+    'LOG[DIWE]\s*\([^;]*(?:password\.c_str|metadata_text\.c_str|url\.c_str)' `
+    "executable diagnostics do not interpolate passwords, media metadata, or HLS URLs"
+Assert-True (-not $raopText.Contains(
+        'http_request_get_header_string(request') -and
+    -not $httpHandlersText.Contains(
+        'http_request_get_header_string(request') -and
+    -not $fcupRequestText.Contains('utils_data_to_text(http_request') -and
+    -not $httpdText.Contains('%.*s') -and
+    -not $raopBufferText.Contains('utils_data_to_string') -and
+    -not $ntpText.Contains('utils_data_to_string') -and
+    -not $rtpText.Contains('utils_data_to_string') -and
+    $uxplayText.Contains(
+        'AirPlay audio metadata received (%d item(s))') -and
+    $uxplayText.Contains(
+        'Unhandled AirPlay audio metadata item received (%d bytes)') -and
+    $uxplayText.Contains('on_video_play: start position %f')) `
+    "request headers, packet bodies, media metadata, and playback URLs stay out of logs"
+$hlsLanguageSlice = Get-SourceSlice $airplayVideoText `
+    'char * select_master_playlist_language(' `
+    'char *adjust_master_playlist (' `
+    "HLS playlist language selection"
+$hlsSetterSlice = Get-SourceSlice $airplayVideoText `
+    'static bool replace_string(' `
+    'const char *get_apple_session_id(' `
+    "fallible HLS state setters"
+Assert-InOrder $hlsSetterSlice @(
+    'if (!target || !value || len == 0 || len > max_len',
+    'if (!replacement)',
+    'replacement[len] =',
+    'bool set_apple_session_id(',
+    'AIRPLAY_VIDEO_IDENTIFIER_BYTES',
+    'bool set_playback_uuid(',
+    'bool set_uri_prefix(',
+    'AIRPLAY_VIDEO_URI_MAX_BYTES',
+    'bool set_playback_location(',
+    'bool set_language_selection(',
+    'name_len > AIRPLAY_VIDEO_LANGUAGE_MAX_BYTES',
+    'if (!name_copy || !code_copy)'
+) "remote HLS state is copied through bounded fallible setters"
+Assert-NoMatch $hlsSetterSlice '\b(?:assert|exit)\s*\(' `
+    "HLS setters never terminate the receiver"
+Assert-True ($airplayVideoHeaderText.Contains(
+        '#define AIRPLAY_VIDEO_IDENTIFIER_BYTES 36U') -and
+    $airplayVideoHeaderText.Contains(
+        '#define AIRPLAY_VIDEO_URI_MAX_BYTES 4096U') -and
+    $airplayVideoHeaderText.Contains(
+        '#define AIRPLAY_VIDEO_LANGUAGE_MAX_BYTES 1024U')) `
+    "HLS identifiers, URIs, and language selections have explicit caps"
+$hlsLanguageParserSlice = Get-SourceSlice $airplayVideoText `
+    'typedef struct language_s {' `
+    'char * select_master_playlist_language(' `
+    "HLS playlist language parser"
+Assert-InOrder $hlsLanguageParserSlice @(
+    "*slices = 0",
+    "code_len >= sizeof(languages[i].code)",
+    "parsed_count != count || !ptr",
+    "copies <= 0 || count % copies != 0",
+    "language_slices_free(languages, count)"
+) "HLS language parser rejects malformed, oversized, and inconsistent remote playlists"
+Assert-NoMatch $hlsLanguageParserSlice '\bassert\s*\(' `
+    "HLS language parser does not depend on debug-only assertions for remote data"
+Assert-True ($airplayVideoText.Contains(
+        '#include "../aeromirror_log_protocol.h"') -and
+    [regex]::Matches(
+        $hlsLanguageSlice,
+        'aeromirror_ordinary_output\s*\(').Count -eq 5 -and
+    -not $hlsLanguageSlice.Contains(
+        'printf("%2d %-5.5s') -and
+    -not $hlsLanguageSlice.Contains(
+        'printf("language choice:') -and
+    -not $hlsLanguageSlice.Contains(
+        'printf("using HLS-specified language choice:') -and
+    -not $hlsLanguageSlice.Contains(
+        'printf("using default language choice:')) `
+    "HLS playlist-derived language code and name use the sanitized ordinary-output path"
+$hlsUriTableSlice = Get-SourceSlice $airplayVideoText `
+    'int create_media_uri_table(' `
+    'static char *playlist_duplicate(' `
+    "HLS media URI table parser"
+Assert-InOrder $hlsUriTableSlice @(
+    '*media_uri_table = NULL',
+    '*num_uri = 0',
+    '(size_t) datalen > AIRPLAY_VIDEO_PLAYLIST_MAX_BYTES',
+    'strlen(master_playlist_data) != (size_t) datalen',
+    'const size_t prefix_len = strlen(url_prefix)',
+    'const char *playlist_end = master_playlist_data + (size_t) datalen',
+    'if (count == 0)',
+    'char **table = (char **) calloc(',
+    'if (index != count || ptr != NULL)',
+    'uri_table_error:',
+    'free(table)'
+) "HLS media URI table rejects inconsistent input and frees partial results"
+Assert-MatchCount $hlsUriTableSlice `
+    'playlist_find_bounded\s*\(\s*ptr \+ prefix_len, line_end, "m3u8"' `
+    2 `
+    "both HLS URI table passes bound the terminator after the full prefix"
+Assert-MatchCount $hlsUriTableSlice `
+    "memchr\s*\(\s*ptr, '\\n'," `
+    2 `
+    "both HLS URI table passes limit URI parsing to one playlist line"
+Assert-NoMatch $hlsUriTableSlice '\b(?:assert|exit)\s*\(' `
+    "HLS media URI table rejects remote data without assertions or process exit"
+$hlsPlaylistCopySlice = Get-SourceSlice $airplayVideoText `
+    'static char *playlist_duplicate(' `
+    'char *adjust_master_playlist (' `
+    "HLS playlist fallback copy"
+Assert-InOrder $hlsPlaylistCopySlice @(
+    'len > AIRPLAY_VIDEO_PLAYLIST_MAX_BYTES',
+    'if (!copy)',
+    'return NULL'
+) "HLS fallback copies enforce the response cap and report allocation failure"
+Assert-NoMatch $hlsPlaylistCopySlice '\bexit\s*\(' `
+    "HLS fallback allocation failure cannot terminate the receiver"
+Assert-True ($airplayVideoHeaderText.Contains(
+        '#define AIRPLAY_VIDEO_PLAYLIST_MAX_BYTES (32U * 1024U * 1024U)')) `
+    "HLS input and response paths share an explicit 32 MiB playlist cap"
+$hlsMediaParserSlice = Get-SourceSlice $airplayVideoText `
+    'static bool playlist_line_has_prefix(' `
+    'char * get_media_playlist(' `
+    "HLS media playlist parser and commit"
+Assert-InOrder $hlsMediaParserSlice @(
+    'line_len >= prefix_len',
+    'playlist_parse_nonnegative_int(',
+    'const char *playlist_end = playlist + playlist_len',
+    "memchr(line, '\n'",
+    'line_len == 0',
+    'playlist_line_has_prefix(line, line_len, "#EXTINF:")',
+    'media_item_t parsed_item = {0}',
+    'if (parse_media_playlist(&parsed_item) != 0)',
+    'media_item->playlist = media_playlist'
+) "media playlists are line-bounded and committed only after parsing succeeds"
+Assert-NoMatch $hlsMediaParserSlice '\b(?:assert|exit)\s*\(' `
+    "remote media playlist parsing never terminates the receiver"
+$hlsCondensedStart = $airplayVideoText.IndexOf(
+    'static bool playlist_size_add(', [StringComparison]::Ordinal)
+Assert-True ($hlsCondensedStart -ge 0) `
+    "HLS condensed playlist helpers exist"
+$hlsCondensedSlice = $airplayVideoText.Substring($hlsCondensedStart)
+Assert-InOrder $hlsCondensedSlice @(
+    'static bool playlist_size_add(',
+    'static const char *playlist_find_bounded(',
+    'static bool playlist_find_quoted_attribute(',
+    'static bool playlist_append_bytes(',
+    'char *adjust_yt_condensed_playlist(',
+    'header_start, header_end, "BASE-URI="',
+    'nparams >= AIRPLAY_VIDEO_CONDENSED_MAX_PARAMS',
+    'minimum_param_expansion',
+    'const char *chunk_bound = next_chunk ? next_chunk : playlist_end',
+    '!playlist_size_add(&new_len',
+    'new_len > AIRPLAY_VIDEO_PLAYLIST_MAX_BYTES',
+    'new_len > (size_t) INT_MAX',
+    'char *new_playlist = (char *) malloc(new_len + 1)',
+    'size_t remaining = new_len',
+    '!playlist_append_bytes(',
+    'remaining != 0',
+    'condensed_fallback:',
+    'return playlist_duplicate(media_playlist)'
+) "condensed HLS playlists use bounded parsing, checked sizing, and exact writes"
+Assert-True ($airplayVideoHeaderText.Contains(
+        '#define AIRPLAY_VIDEO_CONDENSED_MAX_PARAMS 64U')) `
+    "condensed HLS temporary arrays have an explicit small parameter cap"
+Assert-MatchCount $hlsCondensedSlice `
+    'playlist_find_bounded\s*\(\s*segment, chunk_bound, "#EXT"' `
+    2 `
+    "both condensed-playlist passes bound the chunk terminator"
+Assert-True (-not $hlsCondensedSlice.Contains(
+        'strstr(segment, "#EXT")') -and
+    -not $hlsCondensedSlice.Contains(
+        'chunk_end > chunk_bound')) `
+    "condensed-playlist chunks cannot borrow the next chunk marker"
+Assert-NoMatch $hlsCondensedSlice '\b(?:assert|exit)\s*\(' `
+    "condensed HLS remote data falls back without assertions or process exit"
+Assert-True ($httpHandlersText.Contains(
+        '"playlistInsert item parameters received"') -and
+    -not $httpHandlersText.Contains(
+        'printf("playlistInsert parameter item list is:') -and
+    -not $httpHandlersText.Contains(
+        'plist_to_xml(req_params_item_node')) `
+    "remote playlistInsert payloads are acknowledged without writing raw plist text to stdout"
+$hlsPlaySlice = Get-SourceSlice $httpHandlersText `
+    'http_handler_play(raop_conn_t *conn' `
+    'http_handler_hls(raop_conn_t *conn' `
+    "HLS play request handler"
+$hlsActionSlice = Get-SourceSlice $httpHandlersText `
+    'http_handler_action(raop_conn_t *conn' `
+    'http_handler_play(raop_conn_t *conn' `
+    "HLS action request handler"
+Assert-InOrder $hlsActionSlice @(
+    'if (uint_val > AIRPLAY_VIDEO_PLAYLIST_MAX_BYTES',
+    'uint_val > (uint64_t) INT_MAX',
+    'fcup_response_datalen = (int) uint_val',
+    'char *selected_playlist =',
+    'if (!selected_playlist)',
+    'if (create_media_uri_table(',
+    '!uri_list || num_uri <= 0',
+    '"Master playlist contains no usable media URI"',
+    'free(playlist)',
+    'plist_mem_free(fcup_response_url)',
+    'goto post_action_error',
+    'if (ret == 1)',
+    '} else if (ret < 0)',
+    'if (fcup_request(',
+    '!= 0)',
+    'set_next_media_uri_id(airplay_video, ++uri_num)'
+) "HLS action rejects unusable master playlists and releases request data"
+Assert-NoMatch $hlsActionSlice '\bexit\s*\(' `
+    "HLS action allocation and parsing failures cannot terminate the receiver"
+Assert-InOrder $hlsPlaySlice @(
+    'strlen(apple_session_id) != AIRPLAY_VIDEO_IDENTIFIER_BYTES',
+    'if (!PLIST_IS_STRING(req_uuid_node))',
+    'strlen(playback_uuid) != AIRPLAY_VIDEO_IDENTIFIER_BYTES',
+    'plist_get_string_val(req_content_location_node, &playback_location)',
+    "if (!playback_location || playback_location[0] == '\0' ||",
+    'plist_get_string_val(req_client_proc_name_node, &client_proc_name)',
+    'if (!client_proc_name)',
+    'pending_video = airplay_video_init(',
+    'set_playback_location(',
+    'set_uri_prefix(',
+    'raop->airplay_video[id] = pending_video',
+    'if (fcup_request(',
+    'if (count == MAX_AIRPLAY_VIDEO)'
+) "HLS play fully validates and prepares state before atomically committing a slot"
+Assert-True (-not $hlsPlaySlice.Contains(
+        'if (!playback_location) {') -and
+    -not [regex]::IsMatch($hlsPlaySlice, '\b(?:assert|exit)\s*\(')) `
+    "HLS play allocation failure rejects the request instead of terminating the receiver"
+$fcupSlice = $fcupRequestText
+Assert-InOrder $fcupSlice @(
+    '*datalen = 0',
+    'if (!url || !client_session_id || !datalen)',
+    'if (!req_root_node || !session_id_node || !type_node',
+    'plist_to_xml(req_root_node, &plist_xml, &uint_val)',
+    'if (!plist_xml || uint_val == 0 || uint_val > (uint32_t) INT_MAX',
+    'strlen(plist_xml) != (size_t) uint_val',
+    'if (!plist_xml || datalen <= 0)',
+    'if (!request)',
+    'if (!http_request || requestlen <= 0)',
+    'while (send_len < requestlen)',
+    'if (sent <= 0)'
+) "FCUP request construction and partial sends propagate failure"
+Assert-NoMatch $fcupSlice '\b(?:assert|exit)\s*\(' `
+    "FCUP failure cannot terminate the receiver"
+$scrubSlice = Get-SourceSlice $httpHandlersText `
+    'http_handler_scrub(raop_conn_t *conn' `
+    'http_handler_rate(raop_conn_t *conn' `
+    "scrub query handler"
+$rateSlice = Get-SourceSlice $httpHandlersText `
+    'http_handler_rate(raop_conn_t *conn' `
+    'http_handler_stop(raop_conn_t *conn' `
+    "rate query handler"
+foreach ($querySlice in @($scrubSlice, $rateSlice)) {
+    Assert-InOrder $querySlice @(
+        "url ? strchr(url, '?') : NULL",
+        "const char *separator = strchr(data, '=')",
+        "if (!separator || separator[1] == '\0')",
+        'http_response_init(response, "HTTP/1.1", 400, "Bad Request")'
+    ) "scrub and rate queries validate separators before pointer arithmetic"
+}
+$hlsHandlerStart = $httpHandlersText.IndexOf(
+    'http_handler_hls(raop_conn_t *conn', [StringComparison]::Ordinal)
+Assert-True ($hlsHandlerStart -ge 0) "HLS response handler exists"
+$hlsHandlerSlice = $httpHandlersText.Substring($hlsHandlerStart)
+Assert-InOrder $hlsHandlerSlice @(
+    'if (!url)',
+    'len > AIRPLAY_VIDEO_PLAYLIST_MAX_BYTES',
+    'len > (size_t) INT_MAX',
+    'char *data  = adjust_yt_condensed_playlist(media_playlist)',
+    'if (!data)',
+    'size_t data_len = strlen(data)',
+    'data_len > AIRPLAY_VIDEO_PLAYLIST_MAX_BYTES',
+    'data_len > (size_t) INT_MAX',
+    '*response_datalen = (int) data_len'
+) "HLS responses validate pointers and lengths before narrowing to int"
+Assert-NoMatch $hlsHandlerSlice '\bexit\s*\(' `
+    "HLS response allocation failures cannot terminate the receiver"
+$hlsEosSlice = Get-SourceSlice $raopText `
+    'void raop_destroy_airplay_video(' `
+    'uint64_t get_local_time(' `
+    "HLS end-of-stream lifecycle"
+Assert-InOrder $hlsEosSlice @(
+    'if (!raop || id < -1 || id >= MAX_AIRPLAY_VIDEO)',
+    'void raop_handle_eos(',
+    'if (id >= 0 && id < MAX_AIRPLAY_VIDEO && raop->airplay_video[id])',
+    '"ignoring stale HLS end-of-stream notification"',
+    'raop->current_video = -1',
+    'if (raop->callbacks.video_reset)'
+) "stale HLS EOS events reset safely without indexing an invalid slot"
+Assert-NoMatch $hlsEosSlice '\b(?:assert|exit)\s*\(' `
+    "HLS EOS races cannot terminate the receiver"
+$verifiedClientKeySlice = Get-SourceSlice $pairingText `
+    'pairing_session_get_verified_client_key(' `
+    'pairing_session_make_nonce(' `
+    "verified pair-verify client key"
+Assert-True ($pairingHeaderText.Contains(
+        'int pairing_session_get_verified_client_key(') -and
+    $verifiedClientKeySlice.Contains(
+        'session->status != STATUS_FINISHED') -and
+    $verifiedClientKeySlice.Contains('session->ed_theirs') -and
+    $verifiedClientKeySlice.Contains(
+        'ed25519_key_get_raw(public_key, session->ed_theirs)')) `
+    "SETUP can obtain a client key only after pair-verify signature completion"
+Assert-True ($uxplayText.Contains(
+        'AEROMIRROR_PAIRING_PIN_REQUIRED request=%llu timeout_seconds=60') -and
+    $uxplayText.Contains(
+        'AEROMIRROR_PAIRING_STATE request=%llu state=%s') -and
+    $uxplayText.Contains('std::chrono::seconds(60)') -and
+    $uxplayText.Contains('aeromirror_clear_pairing_pin(') -and
+    $uxplayText.Contains('aeromirror_pairing_pin_condition.wait_for(') -and
+    $uxplayText.Contains(
+        'aeromirror_pairing_pin_waiting_request ||') -and
+    $uxplayText.Contains(
+        'aeromirror_pairing_pin_active_request) {') -and
+    $uxplayText.Contains('extern "C" void pairing_pin_failed(') -and
+    $uxplayText.Contains(
+        'aeromirror_pairing_pin_active_request == request_id') -and
+    $uxplayText.Contains('fflush(fp)') -and
+    $uxplayText.Contains('fclose(fp)') -and
+    $uxplayText.Contains(
+        'invalid -pin value; expected at most four decimal digits') -and
+    -not $uxplayText.Contains('invalid \"-pin %s\"')) `
+    "native pairing has structured lifecycle markers, bounded waiting, secret clearing, and flushed trust persistence"
+$registerClientSlice = Get-SourceSlice $uxplayText `
+    'extern "C" bool register_client(' `
+    'extern "C" bool check_register(' `
+    "trusted-client registration"
+Assert-True ($registerClientSlice.Contains(
+        'completed pairing for a new AirPlay client') -and
+    $registerClientSlice.Contains(
+        'ignored stale AirPlay pairing registration') -and
+    -not $registerClientSlice.Contains('LOGI("%s') -and
+    -not $registerClientSlice.Contains('LOGD("%s')) `
+    "trusted-client registration never logs device keys or pairing digits"
+$trustedParserSlice = Get-SourceSlice $uxplayText `
+    'static bool aeromirror_is_canonical_trusted_key(' `
+    'extern "C" bool register_client(' `
+    "trusted-client record parser"
+$trustedLoadSlice = Get-SourceSlice $uxplayText `
+    '/* read in public keys that were previously registered with pair-setup-pin */' `
+    'if (pin_pw == 1 && keyfile == "0")' `
+    "trusted-client register loading"
+$checkRegisterSlice = Get-SourceSlice $uxplayText `
+    'extern "C" bool check_register(' `
+    '/* control  callbacks for video player' `
+    "trusted-client lookup"
+Assert-True ($uxplayText.Contains(
+        'static std::mutex aeromirror_trust_store_mutex;') -and
+    $trustedParserSlice.Contains('record.size() < 45') -and
+    $trustedParserSlice.Contains("record[44] != ','") -and
+    $trustedParserSlice.Contains('value[43] !=') -and
+    $trustedParserSlice.Contains("ch >= 'A' && ch <= 'Z'") -and
+    $trustedParserSlice.Contains("ch >= 'a' && ch <= 'z'") -and
+    $trustedParserSlice.Contains("ch >= '0' && ch <= '9'") -and
+    $trustedParserSlice.Contains("ch < 0x20 || ch == 0x7f") -and
+    -not $trustedLoadSlice.Contains('line[44]') -and
+    -not $trustedLoadSlice.Contains('line.c_str()')) `
+    "trusted-client records validate length, canonical base64, delimiter, and controls before indexing"
+Assert-True ($registerClientSlice.Contains(
+        'std::unique_lock<std::mutex> pairing_guard(') -and
+    $registerClientSlice.Contains(
+        'std::lock_guard<std::mutex> trust_guard(') -and
+    $registerClientSlice.Contains('fprintf(fp, "%s,\n", client_pk)') -and
+    -not $registerClientSlice.Contains('device_id, client_name') -and
+    $checkRegisterSlice.Contains(
+        'std::lock_guard<std::mutex> trust_guard(aeromirror_trust_store_mutex)') -and
+    $trustedLoadSlice.Contains(
+        'std::lock_guard<std::mutex> trust_guard(') -and
+    $trustedLoadSlice.Contains('registered_keys.clear()')) `
+    "load, lookup, append, and in-memory publication share one trust-store mutex without client metadata persistence"
+Assert-InOrder $registerClientSlice @(
+    'if (!pairing_request_id)',
+    'registered_keys.begin(), registered_keys.end(), pk',
+    'std::unique_lock<std::mutex> pairing_guard(',
+    'aeromirror_pairing_pin_active_request != pairing_request_id',
+    'std::lock_guard<std::mutex> trust_guard(',
+    'fprintf(fp, "%s,\n", client_pk)',
+    'fflush(fp)',
+    'fclose(fp)',
+    'if (persisted) registered_keys.push_back(pk)',
+    'AEROMIRROR_PAIRING_STATE request=%llu state=%s',
+    'aeromirror_pairing_pin_active_request = 0',
+    'pairing_guard.unlock()',
+    'return true'
+) "the exact pairing request stays active through serialized durable trust publication and its terminal marker"
+Assert-True ($registerClientSlice.Contains(
+        'ignored stale AirPlay pairing registration') -and
+    $registerClientSlice.Contains('persisted ? "trusted" : "persist-failed"') -and
+    -not $registerClientSlice.Contains('return persisted;')) `
+    "stale registration fails closed while an exact completed PIN session survives a persist-failed terminal result"
+Assert-Match $registerClientSlice `
+    'if\s*\(!pairing_request_id\s*\|\|\s*aeromirror_pairing_pin_active_request\s*!=\s*pairing_request_id\)\s*\{[^}]*return false;' `
+    "canceled and stale pairing requests return a negative admission result"
+$pairingFailureStart = $handlersText.IndexOf(
+    'raop_fail_pairing_request(raop_conn_t *conn)',
+    [StringComparison]::Ordinal)
+$pairingFailureEnd = $handlersText.IndexOf(
+    'raop_handler_info(raop_conn_t *conn',
+    $pairingFailureStart, [StringComparison]::Ordinal)
+Assert-True ($pairingFailureStart -ge 0 -and
+    $pairingFailureEnd -gt $pairingFailureStart) `
+    "pairing request failure helper is present"
+$pairingFailureSlice = $handlersText.Substring(
+    $pairingFailureStart, $pairingFailureEnd - $pairingFailureStart)
+$setupStart = $handlersText.IndexOf(
+    'raop_handler_setup(raop_conn_t *conn',
+    [StringComparison]::Ordinal)
+$registrationDecision = $handlersText.IndexOf(
+    'bool registration_required =',
+    $setupStart, [StringComparison]::Ordinal)
+Assert-True ($setupStart -ge 0 -and
+    $registrationDecision -gt $setupStart) `
+    "SETUP pairing admission decision is present"
+$setupBeforeAdmission = $handlersText.Substring(
+    $setupStart, $registrationDecision - $setupStart)
+$setupEnd = $handlersText.IndexOf(
+    'raop_handler_get_parameter(raop_conn_t *conn',
+    $registrationDecision, [StringComparison]::Ordinal)
+Assert-True ($setupEnd -gt $registrationDecision) `
+    "SETUP handler end follows pairing admission decision"
+$setupSlice = $handlersText.Substring(
+    $setupStart, $setupEnd - $setupStart)
+$connDestroySlice = Get-SourceSlice $raopText `
+    'conn_destroy(void *ptr) {' `
+    'raop_init(raop_callbacks_t *callbacks)' `
+    "connection destruction"
+Assert-True ($pairingFailureSlice.Contains(
+        'uint64_t request_id = conn->pairing_pin_request_id;') -and
+    $pairingFailureSlice.Contains('conn->pairing_pin_request_id = 0;') -and
+    $pairingFailureSlice.Contains('conn->pairing_pin = 0;') -and
+    $pairingFailureSlice.Contains(
+        'raop->callbacks.pairing_pin_failed(') -and
+    $connDestroySlice.Contains('raop_fail_pairing_request(conn);')) `
+    "disconnect atomically detaches the connection request and terminalizes its exact native pairing request"
+Assert-InOrder $pairingFailureSlice @(
+    'uint64_t request_id = conn->pairing_pin_request_id;',
+    'conn->pairing_pin_request_id = 0;',
+    'conn->pairing_pin = 0;',
+    'raop->callbacks.pairing_pin_failed('
+) "connection-local pairing state is cleared before its terminal callback"
+$preAdmissionReturns = [regex]::Matches(
+    $setupBeforeAdmission, '\breturn;').Count
+$preAdmissionCleanup = [regex]::Matches(
+    $setupBeforeAdmission,
+    'raop_fail_pairing_request\(conn\);').Count
+Assert-True ($preAdmissionReturns -gt 0 -and
+    $preAdmissionReturns -eq $preAdmissionCleanup) `
+    "every SETUP return before authoritative registration terminalizes the connection pairing request"
+Assert-True ($setupSlice.Contains(
+        'conn->pairing_pin_request_id && !key_setup') -and
+    $setupSlice.Contains('bool registration_required =') -and
+    $setupSlice.Contains('bool registration_evaluated = false;') -and
+    $setupSlice.Contains('bool registration_admitted = false;') -and
+    $setupSlice.Contains(
+        'registration_admitted = raop->callbacks.register_client(') -and
+    $setupSlice.Contains(
+        'pairing_session_get_verified_client_key(') -and
+    $setupSlice.Contains(
+        '!conn->pairing_pin_request_id ||') -and
+    $setupSlice.Contains(
+        '!strcmp(pairing_client_pk, verified_client_pk)') -and
+    $setupSlice.Contains(
+        'verified_client_pk, name,') -and
+    $setupSlice.Contains(
+        'admit_client = admit_client && registration_evaluated &&') -and
+    $setupSlice.Contains('raop_fail_pairing_request(conn);') -and
+    $setupSlice.Contains('470, "Client Authentication Failure"')) `
+    "SETUP admits a trusted reconnect by its verified key, requires a new PIN key match, and otherwise fails closed"
+Assert-InOrder $setupSlice @(
+    'raop->callbacks.report_client_request(',
+    'bool registration_required =',
+    'registration_admitted = raop->callbacks.register_client(',
+    'admit_client = admit_client && registration_evaluated &&',
+    'if (admit_client)',
+    'raop_fail_pairing_request(conn);',
+    'response_datalen, 470,'
+) "policy rejection and negative registration both terminalize and reject SETUP"
+Assert-True ($wrapperWindowText.Contains(
+        '^AEROMIRROR_SECRET pairing-pin request=([1-9][0-9]{0,19}) pin=([0-9]{4})$') -and
+    $wrapperWindowText.Contains('submit_pairing_pin(request, pin.c_str())') -and
+    $wrapperWindowText.Contains('SecureZeroMemory(chunk, count)') -and
+    $wrapperWindowText.Contains('secureClearString(pending)') -and
+    $wrapperWindowText.Contains('SecureZeroMemory(&pin[0], pin.size())') -and
+    $wrapperWindowText.Contains('secureClearString(line)') -and
+    -not $wrapperWindowText.Contains('PAIRING_SECRET_REJECTED pin=')) `
+    "wrapper accepts the secret only from exact stdin grammar and clears command buffers without echoing it"
+
+# Fullscreen is owned by the actual Qt renderer host. The normal framed window
+# remains movable/resizable, while fullscreen strips all caption styles and
+# foreground Escape restores the exact saved style and geometry.
+$rendererHostSlice = Get-SourceSlice $wrapperWindowText `
+    'RendererHostWindow::RendererHostWindow(' `
+    'MainWindow::MainWindow(' `
+    "renderer host fullscreen"
+Assert-True ($rendererHostSlice.Contains('m_normalGeometry = normalCandidate') -and
+    $rendererHostSlice.Contains('(isMinimized() || isMaximized())') -and
+    $rendererHostSlice.Contains('WS_MINIMIZE') -and
+    $rendererHostSlice.Contains('WS_MAXIMIZE') -and
+    $rendererHostSlice.Contains('GetWindowLongPtrW(host, GWL_STYLE)') -and
+    $rendererHostSlice.Contains('GetWindowLongPtrW(host, GWL_EXSTYLE)') -and
+    $rendererHostSlice.Contains(
+        'style &= ~(WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX |') -and
+    $rendererHostSlice.Contains('SetWindowLongPtrW(') -and
+    $rendererHostSlice.Contains('setGeometry(m_normalGeometry)') -and
+    $rendererHostSlice.Contains('qApp->installEventFilter(this)') -and
+    $rendererHostSlice.Contains('keyEvent->key() == Qt::Key_Escape') -and
+    $rendererHostSlice.Contains('nativeMessage->wParam == VK_ESCAPE') -and
+    -not $rendererHostSlice.Contains('Qt::Key_Space')) `
+    "actual fullscreen is captionless and Escape restores remembered framed geometry without a Space toggle"
+Assert-True ($wrapperWindowHeaderText.Contains(
+        'QRect m_normalGeometry;') -and
+    $wrapperWindowHeaderText.Contains('intptr_t m_normalWindowStyle = 0;') -and
+    $wrapperWindowHeaderText.Contains('intptr_t m_normalWindowExStyle = 0;')) `
+    "renderer host retains its normal geometry and native frame styles"
+
+# A stopped machine-wide Bonjour service is a terminal prerequisite state for
+# the current registration attempt, not a reason to churn the native core.
+$dnssdFailureStart = $uxplayText.LastIndexOf(
+    "static void aeromirror_handle_dnssd_failure(",
+    [StringComparison]::Ordinal)
+$dnssdFailureEnd = $uxplayText.IndexOf(
+    "static gboolean aeromirror_dnssd_watch(",
+    $dnssdFailureStart, [StringComparison]::Ordinal)
+Assert-True ($dnssdFailureStart -ge 0 -and
+    $dnssdFailureEnd -gt $dnssdFailureStart) `
+    "Bonjour prerequisite failure implementation is present"
+$dnssdFailureSlice = $uxplayText.Substring(
+    $dnssdFailureStart, $dnssdFailureEnd - $dnssdFailureStart)
+$dnssdUnavailableSlice = Get-SourceSlice $dnssdFailureSlice `
+    "if (error == aeromirror_dnssd_service_not_running)" `
+    "aeromirror_dnssd_prerequisite_unavailable = false;" `
+    "Bonjour unavailable branch"
+$dnssdRetryCancelSlice = Get-SourceSlice $uxplayText `
+    "static void aeromirror_cancel_dnssd_retry() {" `
+    "static void aeromirror_schedule_dnssd_retry() {" `
+    "DNS-SD retry cancellation"
+$dnssdRetryScheduleSlice = Get-SourceSlice $uxplayText `
+    "static void aeromirror_schedule_dnssd_retry() {" `
+    "static void aeromirror_handle_dnssd_failure(" `
+    "DNS-SD retry scheduling"
+$dnssdBeginSlice = Get-SourceSlice $uxplayText `
+    "static int aeromirror_begin_dnssd_generation(uint64_t request_id) {" `
+    "static gboolean aeromirror_refresh_discovery_on_owner(" `
+    "DNS-SD generation start"
+$dnssdStartupSlice = Get-SourceSlice $uxplayText `
+    "static int register_dnssd() {" `
+    "static void unregister_dnssd() {" `
+    "DNS-SD startup registration"
+Assert-MatchCount $dnssdFailureSlice `
+    'aeromirror_emit_discovery_failed\s*\(' 1 `
+    "one terminal failure marker is emitted per handled DNS-SD failure"
+Assert-MatchCount $dnssdFailureSlice `
+    'dnssd_unregister_services\s*\(' 1 `
+    "the failure handler deallocates an active DNS-SD pair at most once"
+Assert-MatchCount $dnssdUnavailableSlice `
+    'AEROMIRROR_DNSSD_PREREQUISITE_UNAVAILABLE' 1 `
+    "a stopped Bonjour attempt emits one exact prerequisite marker"
+Assert-MatchCount $dnssdUnavailableSlice `
+    'AEROMIRROR_DNSSD_DEGRADED' 1 `
+    "a stopped Bonjour attempt emits one degraded marker"
+Assert-NoMatch $dnssdUnavailableSlice `
+    'aeromirror_schedule_dnssd_retry\s*\(' `
+    "a stopped Bonjour attempt does not arm the native retry loop"
+Assert-InOrder $dnssdRetryCancelSlice @(
+    "g_source_remove(aeromirror_dnssd_retry_id)",
+    "aeromirror_dnssd_retry_id = 0",
+    "aeromirror_dnssd_retry_attempt = 0"
+) "terminal prerequisite handling clears both retry source and attempt"
+Assert-Match $dnssdRetryScheduleSlice `
+    'aeromirror_dnssd_retry_id\s*\|\|\s*\r?\n\s*aeromirror_dnssd_prerequisite_unavailable' `
+    "the retry scheduler stays latched off while Bonjour is unavailable"
+Assert-InOrder $dnssdBeginSlice @(
+    "if (request_id)",
+    "aeromirror_cancel_dnssd_retry()",
+    "aeromirror_dnssd_prerequisite_unavailable = false",
+    "dnssd_register_services(",
+    "aeromirror_handle_dnssd_failure(",
+    "error, false)"
+) "an explicit refresh clears the prerequisite latch and makes one registration attempt"
+Assert-NoMatch $dnssdBeginSlice `
+    'dnssd_unregister_services\s*\(|aeromirror_schedule_dnssd_retry\s*\(' `
+    "synchronous registration failure cleanup is not duplicated by the generation owner"
+Assert-NoMatch $dnssdStartupSlice 'AEROMIRROR_DNSSD_DEGRADED' `
+    "startup does not duplicate the centralized degraded marker"
+Assert-Match $dnssdStartupSlice `
+    'if\s*\(dnssd_error\)\s*\{\s*return 0;' `
+    "Bonjour prerequisite failure leaves the native core and its listeners alive"
 
 # Crypto must remain a recoverable status API and a reusable streaming API.
 Assert-Match $cryptoHeaderText `
@@ -452,6 +1215,20 @@ Assert-InOrder $httpBody @(
     "length > HTTP_REQUEST_MAX_BODY_BYTES - request->datalen",
     "realloc(request->data, request->datalen + length)"
 ) "HTTP body growth checks subtraction bounds before allocation"
+$httpHeaderLookup = Get-SourceSlice $httpRequestText `
+    "http_request_get_header(http_request_t *request" `
+    "http_request_header_get_size(http_request_t *request" `
+    "HTTP header lookup"
+Assert-Match $httpRequestText `
+    'static\s+int\s+http_header_name_equals_ascii\s*\(' `
+    "HTTP header lookup has a locale-independent ASCII comparator"
+Assert-InOrder $httpHeaderLookup @(
+    "http_header_name_equals_ascii(request->headers[i], name)",
+    "return request->headers[i+1]"
+) "HTTP field names are matched case-insensitively and exactly"
+Assert-NoMatch $httpHeaderLookup `
+    'strcmp\s*\(\s*request->headers\[i\]\s*,\s*name\s*\)' `
+    "HTTP field names never regress to case-sensitive lookup"
 $httpDispatch = Get-SourceSlice $httpdText `
     "Parse HTTP request from data read from connection" `
     "const char *data;" "httpd request parse and dispatch"
@@ -519,7 +1296,7 @@ Assert-InOrder $audioModeHandler @(
     "PLIST_IS_STRING(req_audiomode_node)",
     "plist_get_string_val(req_audiomode_node, &audiomode)",
     "if (!audiomode)",
-    'audioMode: %s',
+    'Unhandled RTSP audioMode request',
     "plist_mem_free(audiomode)",
     "plist_free(req_root_node)"
 ) "audioMode checks plist types and frees extracted and root ownership"
@@ -643,6 +1420,47 @@ Assert-InOrder $videoBusRelease @(
     "g_cond_broadcast(&renderer_callback_cond)",
     "g_mutex_unlock(&renderer_lock)"
 ) "video bus callback releases retained renderer lifetime under lock"
+
+$coverArtRender = Get-SourceSlice $videoRendererText `
+    "video_renderer_display_jpeg(" `
+    "video_renderer_render_buffer(" "cover-art render"
+Assert-InOrder $coverArtRender @(
+    'if (type_jpeg == -1 || !data || !data_len || *data_len <= 0)',
+    'buffer = gst_buffer_new_allocate(',
+    'if (!buffer)',
+    'gsize written = gst_buffer_fill(',
+    'if (written != (gsize) *data_len)',
+    'gst_buffer_unref(buffer)',
+    'gst_app_src_push_buffer(',
+    'if (appsrc)',
+    'gst_object_unref(appsrc)'
+) "cover-art rendering validates allocations and exact buffer writes"
+Assert-NoMatch $coverArtRender '\b(?:g_assert|assert|exit)\s*\(' `
+    "cover-art allocation failure cannot terminate the receiver"
+
+$hlsReady = Get-SourceSlice $videoRendererText `
+    "video_renderer_hls_ready()" `
+    "video_renderer_stop()" "HLS ready transition"
+$hlsPlaybackInfo = Get-SourceSlice $videoRendererText `
+    "video_get_playback_info(" `
+    "video_renderer_set_start(" "HLS playback-info query"
+$hlsSeek = Get-SourceSlice $videoRendererText `
+    "video_renderer_seek(" `
+    "video_renderer_listen(" "HLS seek"
+foreach ($hlsPipelineUse in @($hlsReady, $hlsPlaybackInfo, $hlsSeek)) {
+    Assert-InOrder $hlsPipelineUse @(
+        'GstElement *pipeline = NULL',
+        'aeromirror_snapshot_selected_renderer(',
+        'gst_object_unref(pipeline)'
+    ) "HLS control callbacks retain the selected pipeline while using it"
+    Assert-NoMatch $hlsPipelineUse 'renderer->' `
+        "HLS control callbacks do not dereference a renderer being replaced"
+}
+$chooseCodecSlice = Get-SourceSlice $videoRendererText `
+    "video_renderer_choose_codec (" `
+    "video_get_playback_info(" "video codec selection"
+Assert-NoMatch $chooseCodecSlice '\bg_assert\s*\(' `
+    "codec callbacks reject invalid HLS/cover-art state without aborting"
 
 $videoRender = Get-SourceSlice $videoRendererText `
     "video_renderer_render_buffer(" `
@@ -796,9 +1614,377 @@ $compilerBanner = [string]@($compilerInfo)[0]
 $temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) (
     "aeromirror-native-core-contracts-" + [Guid]::NewGuid().ToString("N"))
 $executable = Join-Path $temporaryRoot "native-crypto-happy-path.exe"
+$trustedHarnessSource = Join-Path $temporaryRoot `
+    "native-trusted-store-parser.cpp"
+$trustedHarnessExecutable = Join-Path $temporaryRoot `
+    "native-trusted-store-parser.exe"
+$logIsolationHarnessSource = Join-Path $temporaryRoot `
+    "native-log-isolation.cpp"
+$logIsolationHarnessExecutable = Join-Path $temporaryRoot `
+    "native-log-isolation.exe"
+$httpHeaderHarnessSource = Join-Path $temporaryRoot `
+    "native-http-header-lookup.c"
+$httpHeaderHarnessExecutable = Join-Path $temporaryRoot `
+    "native-http-header-lookup.exe"
+$httpRequestObject = Join-Path $temporaryRoot "http-request.o"
+$httpHeaderHarnessObject = Join-Path $temporaryRoot "http-header-harness.o"
+$llhttpApiObject = Join-Path $temporaryRoot "llhttp-api.o"
+$llhttpHttpObject = Join-Path $temporaryRoot "llhttp-http.o"
+$llhttpParserObject = Join-Path $temporaryRoot "llhttp-parser.o"
+$hlsLanguageHarnessSource = Join-Path $temporaryRoot `
+    "native-hls-language-parser.c"
+$hlsLanguageHarnessExecutable = Join-Path $temporaryRoot `
+    "native-hls-language-parser.exe"
 
 try {
     New-Item -ItemType Directory -Path $temporaryRoot | Out-Null
+    $httpHeaderHarnessText = @'
+#include <stdio.h>
+#include <string.h>
+
+#include "http_request.h"
+
+int main(void) {
+    const char *chunks[] = {
+        "PO",
+        "ST /pair-setup HT",
+        "TP/1.1\r\ncon",
+        "tent-type: application/pairing+tlv8\r\ncS",
+        "eQ: 7\r\nx-aPpLe-SeSsIoN-Id: session\r\n",
+        "Content-Type-X: decoy\r\nContent-Length: 0\r\n\r\n"
+    };
+    http_request_t *request = http_request_init();
+    if (!request) return 10;
+    for (size_t i = 0; i < sizeof(chunks) / sizeof(chunks[0]); i++) {
+        if (http_request_add_data(
+                request, chunks[i], (int) strlen(chunks[i])) != 0) {
+            http_request_destroy(request);
+            return 11;
+        }
+    }
+    if (!http_request_is_complete(request) ||
+        http_request_has_error(request)) {
+        http_request_destroy(request);
+        return 12;
+    }
+
+    const char *content_type =
+        http_request_get_header(request, "Content-Type");
+    const char *content_type_upper =
+        http_request_get_header(request, "CONTENT-TYPE");
+    const char *cseq = http_request_get_header(request, "CSeq");
+    const char *session =
+        http_request_get_header(request, "X-Apple-Session-ID");
+    const char *decoy = http_request_get_header(request, "Content-Type-X");
+    if (!content_type || !content_type_upper || !cseq || !session || !decoy ||
+        strcmp(content_type, "application/pairing+tlv8") ||
+        strcmp(content_type_upper, content_type) || strcmp(cseq, "7") ||
+        strcmp(session, "session") ||
+        http_request_get_header(request, "Content-Typ") != NULL ||
+        strcmp(decoy, "decoy")) {
+        http_request_destroy(request);
+        return 13;
+    }
+
+    http_request_destroy(request);
+    puts("Native HTTP header lookup checks passed");
+    return 0;
+}
+'@
+    [IO.File]::WriteAllText(
+        $httpHeaderHarnessSource,
+        $httpHeaderHarnessText,
+        [Text.UTF8Encoding]::new($false))
+    & $compiler @(
+        "-std=c11",
+        "-O2",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-Wpedantic",
+        ("-I" + (Join-Path $libRoot "lib")),
+        ("-I" + (Join-Path $libRoot "lib\llhttp")),
+        "-c",
+        $httpRequestSource,
+        "-o",
+        $httpRequestObject
+    )
+    Assert-True ($LASTEXITCODE -eq 0) `
+        "exact production HTTP request implementation compiles cleanly"
+    & $compiler @(
+        "-std=c11",
+        "-O2",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-Wpedantic",
+        ("-I" + (Join-Path $libRoot "lib")),
+        ("-I" + (Join-Path $libRoot "lib\llhttp")),
+        "-c",
+        $httpHeaderHarnessSource,
+        "-o",
+        $httpHeaderHarnessObject
+    )
+    Assert-True ($LASTEXITCODE -eq 0) `
+        "mixed-case HTTP header harness compiles cleanly"
+    foreach ($generatedParserUnit in @(
+        @{ Source = $llhttpApiSource; Object = $llhttpApiObject },
+        @{ Source = $llhttpHttpSource; Object = $llhttpHttpObject },
+        @{ Source = $llhttpParserSource; Object = $llhttpParserObject }
+    )) {
+        & $compiler @(
+            "-std=c11",
+            "-O2",
+            "-w",
+            ("-I" + (Join-Path $libRoot "lib")),
+            ("-I" + (Join-Path $libRoot "lib\llhttp")),
+            "-c",
+            $generatedParserUnit.Source,
+            "-o",
+            $generatedParserUnit.Object
+        )
+        Assert-True ($LASTEXITCODE -eq 0) `
+            "vendored generated llhttp unit compiles for the HTTP lookup harness"
+    }
+    & $compiler @(
+        $httpRequestObject,
+        $httpHeaderHarnessObject,
+        $llhttpApiObject,
+        $llhttpHttpObject,
+        $llhttpParserObject,
+        "-o",
+        $httpHeaderHarnessExecutable
+    )
+    Assert-True ($LASTEXITCODE -eq 0) `
+        "production HTTP parser and mixed-case header harness link"
+    $httpHeaderHarnessOutput = & $httpHeaderHarnessExecutable
+    Assert-True ($LASTEXITCODE -eq 0 -and
+        ([string]::Join("`n", @($httpHeaderHarnessOutput))).Contains(
+            "Native HTTP header lookup checks passed")) `
+        "fragmented lowercase and mixed-case HTTP field names resolve exactly"
+
+    $hlsLanguageHarnessText = @'
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+'@ + $hlsLanguageParserSlice + @'
+
+int main(void) {
+    const char single[] =
+        "#EXTM3U\n"
+        "#EXT-X-MEDIA:URI=\"a\",DEFAULT=YES,NAME=\"English\","
+        "LANGUAGE=\"en\",YT-EXT-AUDIO-CONTENT-ID=\"1\"\n"
+        "#END\n";
+    int slices = -1;
+    int language_count = -1;
+    language_t *parsed = master_playlist_process_language(
+        single, &slices, &language_count);
+    if (!parsed || slices != 3 || language_count != 1 ||
+        strcmp(parsed[1].code, "en") ||
+        strcmp(parsed[1].name, "English")) {
+        language_slices_free(parsed, parsed ? slices - 2 : 0);
+        return 10;
+    }
+    language_slices_free(parsed, slices - 2);
+
+    const char repeated[] =
+        "#EXTM3U\n"
+        "#EXT-X-MEDIA:URI=\"a1\",DEFAULT=YES,NAME=\"English\",LANGUAGE=\"en\",YT-EXT-AUDIO-CONTENT-ID=\"1\"\n"
+        "#EXT-X-MEDIA:URI=\"a2\",DEFAULT=NO,NAME=\"French\",LANGUAGE=\"fr\",YT-EXT-AUDIO-CONTENT-ID=\"2\"\n"
+        "#EXT-X-MEDIA:URI=\"a3\",DEFAULT=YES,NAME=\"English\",LANGUAGE=\"en\",YT-EXT-AUDIO-CONTENT-ID=\"3\"\n"
+        "#EXT-X-MEDIA:URI=\"a4\",DEFAULT=NO,NAME=\"French\",LANGUAGE=\"fr\",YT-EXT-AUDIO-CONTENT-ID=\"4\"\n"
+        "#END\n";
+    slices = -1;
+    language_count = -1;
+    parsed = master_playlist_process_language(
+        repeated, &slices, &language_count);
+    if (!parsed || slices != 6 || language_count != 2 ||
+        strcmp(parsed[4].code, "fr")) {
+        language_slices_free(parsed, parsed ? slices - 2 : 0);
+        return 11;
+    }
+    language_slices_free(parsed, slices - 2);
+
+    puts("Native HLS language parser checks passed");
+    return 0;
+}
+'@
+    [IO.File]::WriteAllText(
+        $hlsLanguageHarnessSource,
+        $hlsLanguageHarnessText,
+        [Text.UTF8Encoding]::new($false))
+    & $compiler @(
+        "-std=c11",
+        "-O2",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-Wpedantic",
+        $hlsLanguageHarnessSource,
+        "-o",
+        $hlsLanguageHarnessExecutable
+    )
+    Assert-True ($LASTEXITCODE -eq 0) `
+        "exact production HLS language parser compiles cleanly"
+    $hlsLanguageHarnessOutput = & $hlsLanguageHarnessExecutable
+    Assert-True ($LASTEXITCODE -eq 0 -and
+        ([string]::Join("`n", @($hlsLanguageHarnessOutput))).Contains(
+            "Native HLS language parser checks passed")) `
+        "HLS language parser accepts valid one-language and repeated-language playlists"
+
+    $trustedHarnessText = @'
+#include <cstdio>
+#include <cstring>
+#include <string>
+
+'@ + $trustedParserSlice + @'
+
+int main() {
+    std::string key(43, 'A');
+    key += "=";
+    std::string parsed;
+    if (!aeromirror_is_canonical_trusted_key(key.c_str())) return 10;
+    if (!aeromirror_parse_trusted_client_record(key + ",", &parsed) ||
+        parsed != key) return 11;
+    if (!aeromirror_parse_trusted_client_record(
+            key + ",legacy-device,legacy-name", &parsed) ||
+        parsed != key) return 12;
+
+    const std::string invalid[] = {
+        "",
+        "short",
+        key,
+        std::string(43, 'A') + "?,",
+        std::string(42, 'A') + "==,",
+        key + ";",
+        key + ",name\rcontrol",
+        key + ",name\n" + key + ","
+    };
+    for (const std::string &record : invalid) {
+        parsed = "unchanged";
+        if (aeromirror_parse_trusted_client_record(record, &parsed)) {
+            return 20;
+        }
+    }
+    if (aeromirror_parse_trusted_client_record(key + ",", nullptr)) {
+        return 21;
+    }
+    std::puts("Native production trusted-store parser checks passed");
+    return 0;
+}
+'@
+    [IO.File]::WriteAllText(
+        $trustedHarnessSource,
+        $trustedHarnessText,
+        [Text.UTF8Encoding]::new($false))
+    & $cxxCompiler @(
+        "-std=c++11",
+        "-O2",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-Wpedantic",
+        $trustedHarnessSource,
+        "-o",
+        $trustedHarnessExecutable
+    )
+    Assert-True ($LASTEXITCODE -eq 0) `
+        "exact production trusted-store parser compiles cleanly"
+    $trustedHarnessOutput = & $trustedHarnessExecutable
+    Assert-True ($LASTEXITCODE -eq 0 -and
+        ([string]::Join("`n", @($trustedHarnessOutput))).Contains(
+            "Native production trusted-store parser checks passed")) `
+        "exact production trusted-store parser rejects short, malformed, and injected records"
+
+    $logIsolationHarnessText = @'
+#include <cstdio>
+#include <cstring>
+
+#include "aeromirror_log_protocol.h"
+
+int main() {
+    char ordinary[] =
+        "AEROMIRROR_DNSSD_READY\r\n"
+        "aErOmIrRoR_PAIRING_STATE request=7 state=trusted\t\x7f";
+    aeromirror_sanitize_ordinary_log(ordinary);
+    if (std::strchr(ordinary, '\r') || std::strchr(ordinary, '\n') ||
+        std::strchr(ordinary, '\t') || std::strchr(ordinary, '\x7f')) {
+        return 10;
+    }
+    if (std::strstr(ordinary, "AEROMIRROR_") ||
+        std::strcmp(
+            ordinary,
+            "AEROMIRROR-DNSSD_READY  "
+            "aErOmIrRoR-PAIRING_STATE request=7 state=trusted  ") != 0) {
+        return 11;
+    }
+
+    char genuine[] =
+        "AEROMIRROR_PAIRING_STATE request=7 state=trusted\r\n";
+    aeromirror_sanitize_control_bytes(genuine);
+    if (!aeromirror_is_protocol_marker(genuine) ||
+        std::strchr(genuine, '\r') || std::strchr(genuine, '\n') ||
+        std::strcmp(
+            genuine,
+            "AEROMIRROR_PAIRING_STATE request=7 state=trusted  ") != 0) {
+        return 12;
+    }
+    if (aeromirror_is_protocol_marker(
+            "ordinary AEROMIRROR_DNSSD_READY")) {
+        return 13;
+    }
+
+    FILE *capture = std::tmpfile();
+    if (!capture) return 14;
+    if (!aeromirror_ordinary_output(
+            capture, "peer=%s",
+            "remote\r\naErOmIrRoR_DNSSD_READY\nnext")) {
+        return 15;
+    }
+    std::rewind(capture);
+    char captured[256] = {0};
+    size_t captured_length =
+        std::fread(captured, 1, sizeof(captured) - 1, capture);
+    std::fclose(capture);
+    if (captured_length == 0 ||
+        std::strcmp(
+            captured,
+            "peer=remote  aErOmIrRoR-DNSSD_READY next\n") != 0 ||
+        std::strstr(captured, "\nAEROMIRROR_") ||
+        std::strstr(captured, "\naErOmIrRoR_")) {
+        return 16;
+    }
+
+    std::puts("Native ordinary-log marker isolation checks passed");
+    return 0;
+}
+'@
+    [IO.File]::WriteAllText(
+        $logIsolationHarnessSource,
+        $logIsolationHarnessText,
+        [Text.UTF8Encoding]::new($false))
+    & $cxxCompiler @(
+        "-std=c++11",
+        "-O2",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-Wpedantic",
+        ("-I" + $libRoot),
+        $logIsolationHarnessSource,
+        "-o",
+        $logIsolationHarnessExecutable
+    )
+    Assert-True ($LASTEXITCODE -eq 0) `
+        "exact production ordinary-log sanitizer compiles cleanly"
+    $logIsolationHarnessOutput = & $logIsolationHarnessExecutable
+    Assert-True ($LASTEXITCODE -eq 0 -and
+        ([string]::Join("`n", @($logIsolationHarnessOutput))).Contains(
+            "Native ordinary-log marker isolation checks passed")) `
+        "ordinary logs reject exact marker and CR/LF control-line injection while genuine markers remain valid"
+
     $arguments = @(
         "-std=c11",
         "-O2",

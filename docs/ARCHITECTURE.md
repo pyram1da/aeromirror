@@ -34,10 +34,10 @@ Framework `AeroMirror.exe` assembly:
   discovery and reconnect supervision, renderer-window policy, diagnostics,
   fatal-loss presentation continuity, and logging;
 - `UI` owns the active settings window, diagnostic viewer, theme helpers,
-  application icon, the managed lost-connection placeholder, and custom
-  controls;
-- `Updates` owns release parsing, update metadata, download, and digest
-  verification;
+  application icon, the managed lost-connection placeholder, the first-device
+  pairing overlay, and custom controls;
+- `Updates` owns release parsing, update metadata, bounded download, digest
+  verification, protected staging, and next-start handoff;
 - `Network` owns physical-adapter selection and Private/Public/Unknown trust
   classification while excluding virtual overlays;
 - `Interop` contains the Win32 declarations shared by receiver supervision and
@@ -67,20 +67,54 @@ that directory.
 
 ### Installed update and reinstall lifecycle
 
-The shell downloads and verifies the exact versioned Setup asset, asks once
-whether to proceed, launches it with `/update`, and exits. Setup owns the rest
-of the transaction. When `/update` is present, or Setup detects an installed
-version that is not newer than itself, it does not create an options window.
-It snapshots the existing Start menu and desktop shortcut state, stops every
-process whose executable is inside the per-user install directory, installs
-through the existing backup/rollback transaction, recreates only those
-shortcuts, and starts the installed shell again.
+Manual update keeps one explicit application confirmation: the shell downloads
+and verifies the exact versioned Setup asset, launches it with `/update`, and
+exits. Setup owns the rest of the transaction. When `/update` is present, or
+Setup detects an installed version that is not newer than itself, it does not
+create an options window. It snapshots the existing Start menu and desktop
+shortcut state, stops every process whose executable is inside the per-user
+install directory, installs through the existing backup/rollback transaction,
+recreates only those shortcuts, and starts the installed shell again.
+
+Setup 0.12.22 and later serialize every install/update/uninstall worker for the
+same Windows user with one SID-derived global mutex. A clean-install options
+window does not hold that mutex while waiting for input; its worker acquires it
+immediately before mutation. Every automatic or interactive route then rereads
+the primary installed `AeroMirror.exe` version under the mutex. A present
+primary executable is authoritative over legacy filenames and uninstall
+registry metadata; invalid primary version metadata enters repair instead of
+trusting stale registry state. Failure recovery holds the same mutex through
+installed-path resolution, process creation, and a bounded early-exit check.
+
+Automatic updates are a separate opt-in policy and default to off. When
+enabled, the shell checks the fixed public repository without interrupting an
+active receiver. Background download and staging may complete during a
+mirroring/client session, but cannot stop or restart it. The shell accepts only
+a newer exact three-part tag and its exact
+versioned Setup asset, validates every HTTPS redirect, bounds the download, and
+verifies GitHub's SHA-256 digest. It moves the verified installer into a
+per-user staging directory and protects the manifest with Windows DPAPI for the
+current user. Setup is never launched in the middle of the running session.
+On a later safe application start, before the receiver and normal UI start, the
+shell revalidates version, age, path, regular-file status, and digest, records a
+bounded launch attempt, and starts the existing unattended Setup transaction.
+Invalid or expired staging fails open to the normal receiver. Disabling
+automatic updates removes known staged files.
 
 A clean first install remains interactive. A detected newer installed version
-does not enter the automatic path, so a downgrade retains the explicit warning
-and confirmation boundary. Settings, logs, receiver identity, trust state, and
-the verified runtime cache live outside the replaced application directory and
-are not members of this file transaction.
+is revalidated under the transaction mutex and an older Setup aborts rather
+than silently downgrading it. Settings, logs, receiver identity, trust state,
+and the verified runtime cache live outside the replaced application directory
+and are not members of this file transaction. Historical Setup executables
+published before 0.12.22 are immutable and do not know this mutex; deliberately
+running one concurrently with a 0.12.22-or-newer transaction is unsupported.
+
+After the application transaction commits, Setup may invoke one separate,
+bounded administrator helper to configure an existing Apple Bonjour system
+service. That helper is best-effort: declining elevation, a timeout, or an
+unsafe/missing service cannot roll back the already successful per-user
+installation. The helper does not write the per-user receiver log or run the
+application payload as administrator.
 
 ## Integration contract
 
@@ -91,8 +125,11 @@ The current shell depends on these native integration behaviors:
    `--headless --beacon-ipv4 <physical-ipv4> --uxplay <arguments>`.
 3. Renderer windows belong to the core process.
 4. The reviewed patches write explicit `AEROMIRROR_DNSSD_READY`,
-   `AEROMIRROR_DNSSD_DEGRADED`, and `AEROMIRROR_BLE ...` discovery-health
-   markers. Listening sockets remain the readiness baseline.
+   `AEROMIRROR_DNSSD_DEGRADED`,
+   `AEROMIRROR_DNSSD_PREREQUISITE_UNAVAILABLE`, and `AEROMIRROR_BLE ...`
+   discovery-health markers. Receiver readiness requires listening sockets and
+   successful paired DNS-SD publication; BLE is supplemental and cannot replace
+   failed DNS-SD.
 5. Existing native log lines still provide heuristic mirroring start, normal
    stop, and lost-client observations. A fatal loss marker arms one bounded
    recovery decision: an active stalled session can restart, while completed
@@ -112,7 +149,31 @@ The current shell depends on these native integration behaviors:
    activity grace. A later end marker belonging to the previous session must
    not erase that newer grace or allow deferred settings/network maintenance
    to interrupt the new handshake.
-8. A patched core announces `AEROMIRROR_FEEDBACK_HEALTH_READY` and emits
+8. An unknown client causes a structured
+   `AEROMIRROR_PAIRING_PIN_REQUIRED` request marker. The shell generates a
+   cryptographic four-digit session PIN, shows it in a fullscreen overlay on
+   the active display, and returns it only through redirected stdin for that
+   exact process/request pair. Terminal trusted/cancelled/timeout/persist-failed
+   markers dismiss the matching overlay. The native command reader consumes
+   and clears the secret; it is not a command-line argument or ordinary log
+   field. The per-user trusted-client register controls later prompt-free
+   reconnection and can be atomically revoked from Settings.
+   Registration is an authoritative native admission decision: timeout, Escape,
+   disconnect, malformed setup, a stale request, or mismatch between the
+   verified pair-verify key and the PIN request rejects SETUP. A successful
+   exact request may finish the current connection if durable trust persistence
+   fails, but emits `persist-failed` and requires pairing again next time.
+   Cancellation and Settings revocation first create a durable pending-reset
+   marker. If native exit cannot be confirmed, the receiver remains blocked;
+   after confirmed exit the trust file is replaced with an empty file before
+   the marker is removed and before another core can start. This closes the
+   race where native registration persisted a key just before cancellation.
+   Genuine `AEROMIRROR_*` control lines use a dedicated native emitter.
+   Ordinary library, client, and HLS output flattens C0/DEL controls and
+   neutralizes every marker token before it reaches stdout; raw client
+   identifiers are not logged. The shell accepts exact anchored marker grammars
+   rather than substring matches.
+9. A patched core announces `AEROMIRROR_FEEDBACK_HEALTH_READY` and emits
    `AEROMIRROR_CLIENT_FEEDBACK_RECOVERED gap_seconds=<n> epoch=<e>` when
    periodic client feedback resumes. Only after that capability marker may the
    shell use the native three-second warning to arm a four-second local
@@ -254,9 +315,10 @@ changes user input. The native DNS-SD layer independently enforces the same
 or advanced argument overrides. AirPlay, RAOP, and `/info` use that one stored
 canonical name; blank input falls back to `AeroMirror`.
 
-`Restart Discovery` remains an explicit full DNS-SD-and-BLE process restart.
-A physical IPv4 change also uses the full restart because the separate BLE
-helper does not yet support in-process reconfiguration. The wrapper buffers
+There is no user-facing discovery-restart or Bonjour-repair control on the
+main page or tray. A physical IPv4 change still uses an internal full restart
+because the separate BLE helper does not yet support in-process
+reconfiguration. The wrapper buffers
 the helper's arbitrary output chunks into complete lines, forwards them to
 stderr with an `AEROMIRROR_BLE` prefix, and the managed shell observes those
 PID-scoped lines as a second discovery-health path. Unexpected helper start
@@ -266,32 +328,49 @@ during receiver maintenance does not.
 An acknowledged DNS-SD ready result proves that the local Bonjour registration
 callbacks completed for the new paired generation; it does not continuously
 attest that an iPhone can see the advertisement or force a phone to invalidate
-a cached browse result. Bonjour remains an external machine-wide service. The
-receiver observes its state but does not start, stop, repair, uninstall, or
-otherwise mutate that service.
+a cached browse result. Bonjour remains an external machine-wide service.
 
-Version 0.12.20 assesses one exact external Windows Firewall
-condition: an enabled inbound Allow rule for the validated Bonjour
-`mDNSResponder.exe`, Private profile, UDP 5353, remote `LocalSubnet`, with edge
-traversal disabled. AeroMirror changes nothing automatically. Only the explicit
-main-card action and Windows UAC may add that narrow rule; the click itself is
-the application-level confirmation. It does not repair or reconfigure the
-Bonjour service, open Public/TCP/Any traffic, or provide uninstall cleanup for
-the external rule.
+Version 0.12.22 retains the unpublished 0.12.21 native correction that treats
+DNS-SD error `-65563` as a terminal unavailable-
+prerequisite state for the current generation. The native core emits one failed
+result, one prerequisite marker, and one degraded marker, releases the paired
+registration references, cancels its retry source, and keeps TCP, BLE, and the
+process alive. Managed renewal does not consume its renewal count or use a
+process-restart fallback while the service is stopped.
 
-The background read-only assessment resolves the strict
-`mDNSResponder.exe` service path and accepts only an enabled inbound Allow rule
-for that exact executable, the Private profile, UDP local port 5353, remote
-`LocalSubnet`, and no edge traversal. Ordinary startup never changes the
-firewall. If the exact rule is missing, the main network card explains the
-scope and invokes one UAC-gated system `netsh.exe` command when clicked.
-Success updates the card and refreshes discovery without another modal. If
-Bonjour itself is missing, the card reports that prerequisite and offers no
-firewall action; the headless core emits a stable marker and exits without
-interactive dialogs or installing its bundled responder as a system service.
-Public, TCP, arbitrary-port/address, Bonjour-service, and automatic-startup
-mutation remain outside this path. Local rule presence is still not proof of
-current iPhone browse visibility.
+Ordinary application startup and monitoring remain read-only and unelevated.
+While discovery is degraded, the shell assesses the exact service state on a
+short background interval. `Stopped`, `StopPending`, and `Unknown` do not
+restore ready or spend a DNS-SD refresh. When the validated service returns to
+`Running`, one atomic recovery latch submits a same-process refresh; only a
+failed writer may schedule one final submission, so at most two requests occur
+for the recovery event. A correlated `AEROMIRROR_DNSSD_READY` result is required
+before ready returns. The UI may report the problem, but it provides no button
+that starts the service, edits its configuration, or changes the firewall.
+
+Machine configuration belongs to Setup after the per-user install commit. The
+elevated branch accepts only the exact Apple Bonjour service identities and a
+canonical `mDNSResponder.exe` below the protected Program Files Bonjour
+directory. It rejects reparse points, an unexpected owner, a NULL DACL, or
+untrusted write access before using direct Windows Service Control Manager
+APIs. It sets Automatic start, starts the service when needed, and configures
+three restart actions after 5, 30, and 120 seconds plus the non-crash failure
+flag. The operation is idempotent and bounded.
+
+The same helper uses the Windows Firewall COM policy to ensure exactly one
+enabled inbound Allow rule for that executable: Private profile, UDP local port
+5353, remote `LocalSubnet`, and edge traversal disabled. It never opens Public,
+TCP, arbitrary ports/addresses, or a broad application path. The runtime uses
+the same exact matcher for read-only status. If Bonjour is absent or unsafe,
+the card reports the prerequisite and the headless core exits with its stable
+code without registering the bundled per-user responder as a service.
+
+Bonjour is shared machine software, so removing a per-user AeroMirror install
+does not undo the narrowly scoped service-recovery policy or firewall rule. An
+uninstall-time administrator prompt would make ordinary removal less reliable,
+and another Bonjour consumer may still need the configuration. A later Setup
+pass converges the same exact state. Local service/rule success is still not
+proof that a physical iPhone currently receives the multicast advertisement.
 
 ## Native worker, protocol, and renderer ownership
 
@@ -626,20 +705,24 @@ renegotiation path plus an IPC command from the Windows shell.
 
 ## Security notes
 
-- No listening service is installed by the shell itself.
-- The receiver accepts connections from the local network. A fresh
-  installation uses no PIN on a trusted/private profile. When Windows reports
-  an active Public profile, the shell pauses an unprotected receiver until a
-  four-digit PIN is enabled.
-- This gate depends on Windows network classification and is not a substitute
-  for correctly scoped firewall rules or network isolation.
-- AeroMirror never creates a firewall rule silently. The optional Bonjour
-  repair requires an exact executable/rule assessment, explicit confirmation,
-  and Windows administrator approval; it is confined to Private UDP 5353 from
-  the local subnet.
-- Persisted pairing mode is untrusted input. Only no-PIN mode or PIN mode with
-  exactly four ASCII digits is canonical; unknown, obsolete, or malformed
-  values become unprotected so a Public/Unknown physical profile fails closed.
+- The shell does not install its bundled per-user responder as a Windows
+  service. Setup may configure only an already installed, exact Apple Bonjour
+  service after separate administrator approval and after the application
+  transaction has committed.
+- Every previously unknown receiver client uses a fresh four-digit PIN and a
+  persistent per-device trust register. Windows network classification remains
+  visible diagnostic context, not a switch that disables pairing protection.
+- The session PIN exists only in the fullscreen overlay and the exact
+  process/request-scoped stdin command. It is never persisted in settings,
+  placed on the native command line, or intentionally logged. Legacy fixed PIN,
+  password, key-path, and register-path overrides are stripped before use.
+- Runtime discovery checks are read-only. Setup's elevated helper accepts only
+  a protected canonical Apple executable and converges one Private UDP 5353
+  LocalSubnet firewall rule plus bounded service recovery. It fails closed for
+  unsafe identity/path/ACL state and never broadens Public/TCP/address scope.
+- The system Bonjour recovery policy and firewall rule intentionally outlive a
+  per-user AeroMirror uninstall. They are machine state for shared Apple
+  software, not executable or credentials owned by the removed user profile.
 - Settings are published through same-directory atomic replacement. Receiver
   keys and trusted-client state remain separate files and are not transaction
   members of an ordinary settings save.

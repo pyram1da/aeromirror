@@ -7,11 +7,13 @@ namespace AirPlayReceiverMvp
     internal sealed partial class ReceiverContext
     {
         private static readonly Regex CoreHttpReadyMarker = new Regex(
-            @"\bAEROMIRROR_HTTP_READY\s+stage=(initial|reset)\s+" +
-                @"port=(\d+)(?:\s|$)",
+            @"^AEROMIRROR_HTTP_READY stage=(initial|reset) " +
+                @"port=(\d+)$",
             RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
         private static readonly Regex CoreHttpFailedMarker = new Regex(
-            @"\bAEROMIRROR_HTTP_FAILED\s+stage=(initial|reset)\b",
+            @"^AEROMIRROR_HTTP_FAILED stage=(initial|reset) " +
+                @"(?:port=\d+ code=-?\d+|" +
+                @"expected_port=\d+ port=\d+ code=-?\d+)$",
             RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 
         // The initial marker establishes support and the exact AirPlay port for

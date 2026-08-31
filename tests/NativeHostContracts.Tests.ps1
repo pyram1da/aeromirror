@@ -131,11 +131,12 @@ Assert-InOrder $fullscreenState @(
     'showFullScreen()'
 ) "a stale fullscreen request cannot reshow a lifecycle-hidden host"
 Assert-Match $fullscreenState (
-    'const QRect normalCandidate = isMinimized\(\)\s*' +
+    'const QRect normalCandidate = \(isMinimized\(\)\s*\|\|\s*' +
+    'isMaximized\(\)\)\s*' +
     '\? normalGeometry\(\) : geometry\(\);[\s\S]*' +
     'normalCandidate\.isValid\(\)[\s\S]*' +
     'm_normalGeometry = normalCandidate') `
-    "fullscreen preserves the current restore geometry even from minimized"
+    "fullscreen preserves the current restore geometry from minimized or maximized"
 Assert-NoMatch $fullscreenState `
     'if\s*\(\s*!isMinimized\(\)\s*\)' `
     "minimized fullscreen entry does not retain stale restore geometry"
@@ -162,9 +163,9 @@ Assert-NoMatch $libAdded `
 
 # Acks have one closed grammar. The Qt host is the sole applied/noop owner.
 Assert-Match $wrapperAdded (
-    'AEROMIRROR_VIDEO_FULLSCREEN requested=%d actual=%d "\s*' +
+    '\\nAEROMIRROR_VIDEO_FULLSCREEN requested=%d actual=%d "\s*' +
     '"result=%s generation=%llu source=%s\\n') `
-    "native host emits exact requested/actual/generation acknowledgements"
+    "native host frames fullscreen acknowledgements after any unterminated progress line"
 Assert-Match $wrapperAdded '"noop"' `
     "idempotent requests acknowledge noop"
 Assert-Match $wrapperAdded '"applied"\s*:\s*"unavailable"' `
@@ -250,9 +251,18 @@ $closeEvent = Get-SourceSlice $wrapperAdded `
     'renderer host close event'
 Assert-InOrder $closeEvent @(
     'applyFullscreenState(false, "lifecycle")',
+    'AEROMIRROR_VIDEO_WINDOW state=minimized source=caption-close',
     'showMinimized()',
     'event->ignore()'
 ) "caption close is an explicit minimize-equivalent for the active session"
+Assert-True ([regex]::Matches(
+        $closeEvent,
+        'AEROMIRROR_VIDEO_WINDOW state=minimized source=caption-close').Count -eq
+        1) `
+    "caption close emits one exact session-dismissal marker before minimizing"
+Assert-Match $closeEvent `
+    '"\\nAEROMIRROR_VIDEO_WINDOW state=minimized source=caption-close\\n"' `
+    "caption close begins on a fresh line even after unterminated native progress output"
 Assert-NoMatch $closeEvent `
     'hideRenderer\(\)|(?m)^\s*hide\(\);' `
     "caption close neither hides the HWND nor clears the active-session state"

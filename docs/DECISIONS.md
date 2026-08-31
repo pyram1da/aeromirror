@@ -17,17 +17,19 @@ native UI or interop rewrite and would not inherently reduce media latency.
 A future change should introduce versioned local IPC before reconsidering the
 process boundary.
 
-## D-002 — Derive trust from the physical Windows network
+## D-002 — Use the physical Windows network for routing and diagnosis, not pairing policy
 
 **Status:** accepted
 
-A Windows Private physical Wi-Fi/Ethernet network may receive without a PIN,
-while PIN protection remains optional. A Public or unknown physical network
-fails closed without a PIN. VPN, tunnel, Hyper-V, and other virtual adapters
-do not override the physical network category.
+Every previously unknown device now uses the per-device PIN trust contract in
+D-016, including on a Windows Private network. Public/Unknown therefore never
+selects an unprotected mode, and Private never silently disables pairing.
 
-This is conservative by design: a wrongly classified network should block an
-unprotected receiver rather than expose it.
+The physical Wi-Fi/Ethernet profile still supplies the preferred IPv4 address,
+network name, and visible Windows category. VPN, tunnel, Hyper-V, and other
+virtual adapters do not replace that physical route or redefine its category.
+This preserves useful diagnosis without asking a normal user to choose an
+access-control mode from Windows' sometimes confusing network labels.
 
 ## D-003 — Use physical IPv4 for receiver startup and discovery
 
@@ -38,8 +40,9 @@ physical adapter. DNS-SD remains the primary LAN discovery path; the optional
 BLE beacon advertises the same physical address instead of selecting a route
 through a VPN.
 
-Readiness requires listening sockets and at least one viable discovery signal.
-Explicit failure of both DNS-SD and BLE must not produce a false ready state.
+Readiness requires listening sockets and successful publication of the paired
+RAOP/AirPlay DNS-SD records. BLE is supplemental discovery and must not
+substitute for failed or unavailable DNS-SD publication.
 
 ## D-004 — Use normal GitHub Releases for the review update channel
 
@@ -150,6 +153,11 @@ and make numeric update comparisons wrong for machines already running an
 intermediate build. A corrective change after a frozen candidate always gets a
 newer version; a published tag and its assets remain immutable under D-004.
 
+The local 0.12.21 candidate is one such unpublished number. Its manual
+**Start Bonjour**/`sc.exe` design was superseded by 0.12.22 before publication;
+no `v0.12.21` tag, draft, prerelease, normal Release, or reconstructed asset set
+may be created.
+
 ## D-012 — Keep idle AirPlay DNS-SD maintenance recurring in place
 
 **Status:** accepted
@@ -166,8 +174,18 @@ Real AirPlay/PIN/client activity and active mirroring take priority and defer
 maintenance. To avoid turning a local registration problem into recurring
 process churn, only automatic renewals one and two may use the historical full-
 process fallback. Later failure leaves the listener alive and schedules the
-next same-process attempt. Manual **Restart discovery** and a physical IPv4
-change remain explicit full DNS-SD-and-BLE restarts.
+next same-process attempt. The normal UI exposes no discovery-restart or
+Bonjour-repair button. A real physical IPv4 change remains an internal full
+DNS-SD-and-BLE restart because the helper address cannot change in place.
+
+A known stopped Bonjour service is an unavailable external prerequisite, not a
+failed receiver process. Scheduled renewal must not consume its generation or
+use the process fallback while the service is stopped. When the validated
+service returns to `Running`, the shell starts one bounded recovery epoch. The
+recovery latch may submit at most two same-process DNS-SD attempts for one
+service-return event and must never become a recurring three-second command
+loop. A correlated native ready acknowledgement is required before restoring
+ready.
 
 This policy treats low-frequency re-registration as inexpensive receiver
 upkeep; it does not claim that Bonjour callbacks attest remote iPhone browse
@@ -188,10 +206,20 @@ shortcut state already chosen by the user and relaunches AeroMirror after
 successful replacement.
 
 A clean first install remains interactive because no prior shortcut preference
-exists. A newer installed version is excluded from the unattended path so a
-downgrade continues to require an explicit warning and confirmation. This
-choice changes presentation only; it does not weaken download-digest checks,
-the backup/rollback transaction, per-user identity, or settings persistence.
+exists. A newer installed version is excluded from replacement and an older
+Setup aborts instead of offering or performing a downgrade. This choice changes
+presentation only; it does not weaken download-digest checks, the
+backup/rollback transaction, per-user identity, or settings persistence.
+
+Setup 0.12.22 and later serialize mutation for one Windows user with a
+SID-derived global mutex. Interactive UI does not hold it while idle; the
+worker acquires it before mutation. Automatic and interactive routes re-read
+the authoritative primary executable version under that mutex, and failure
+recovery retains it through the bounded replacement-shell launch check. A
+present but unreadable/invalid primary executable enters repair rather than
+falling back to stale registry or legacy-executable metadata. Already-published
+older Setup binaries cannot participate in this new mutex, so concurrently
+running a pre-0.12.22 Setup with a current transaction remains unsupported.
 
 ## D-014 — Do not crop a Photos transport canvas without a trusted content rectangle
 
@@ -206,8 +234,9 @@ silently losing real image pixels.
 
 Fullscreen and the visible video window have one native owner. The GStreamer
 surface is embedded into that viewer without a crop rectangle and keeps
-aspect-ratio containment. The standard caption fullscreen control, Escape,
-Alt+Enter, and the shell's tray action all use one idempotent setter. The shell
+aspect-ratio containment. Caption maximize, Escape, Alt+Enter, and the shell's
+tray action all use one idempotent setter. Fullscreen is borderless and contains
+no floating shell controls. The shell
 must not create a second top-level overlay or keyboard hook and must use the
 native acknowledged state instead of inferring the next toggle from delayed
 window geometry.
@@ -221,29 +250,90 @@ remains discoverable by the shell even when the taskbar setting gives it
 requested visibility and hides the host, so the next session can SHOW it once
 without retaining stale state.
 
-## D-015 — Keep Bonjour firewall repair exact, explicit, and separate from service ownership
+## D-015 — Configure exact Bonjour resilience in Setup and keep runtime read-only
 
 **Status:** accepted
 
-Bonjour is an external machine-wide service. AeroMirror may diagnose whether
-its exact `mDNSResponder.exe` lacks a narrowly scoped inbound Windows Firewall
-rule, but ordinary startup must remain read-only. Clicking the visible repair
-action on the network card is the explicit user decision; no duplicate
-application confirmation follows. Windows administrator approval is still
-required. Repair is limited to the exact executable, Private profile, UDP
-local port 5353, remote `LocalSubnet`, and no edge traversal. Public, TCP,
-arbitrary-address, broad application, and automatic Bonjour-service changes
-are prohibited.
+Bonjour is shared machine-wide Apple software. The per-user application runtime
+may assess its exact service, executable, status, recovery configuration, and
+firewall rule, but it never elevates, starts or reconfigures the service, or
+edits the firewall. The main page and tray expose no Bonjour/discovery repair
+action. A blocking state may be shown with diagnostic or reinstall guidance.
 
-If Bonjour is absent or its service path cannot be validated, the application
-shows that prerequisite instead of offering the firewall action. The native
-core must exit with a stable prerequisite code in headless mode; it must not
-register a bundled executable from the per-user installation directory as a
-machine-wide service.
+After the application install/update transaction commits, Setup may request
+Windows administrator approval for one bounded best-effort configuration pass.
+The elevated branch accepts only the exact Apple service identity and a
+canonical `mDNSResponder.exe` beneath the protected Program Files Bonjour
+directory. It rejects reparse points, untrusted ownership/write access, and a
+NULL DACL. It uses direct Service Control Manager APIs to select Automatic
+start, start the service when needed, and configure restart actions after 5,
+30, and 120 seconds plus the non-crash failure flag. It does not run a shell
+command, `sc.exe`, or the per-user AeroMirror executable as administrator.
 
-Version 0.12.19 does not wire removal of this external rule into uninstall and
-must not promise automatic cleanup.
+The same branch uses Windows Firewall policy APIs to converge one enabled
+inbound Allow rule for the exact executable: Private profile, UDP local port
+5353, remote `LocalSubnet`, and no edge traversal. Public, TCP, arbitrary
+address/port, and broad application rules are prohibited. Missing or unsafe
+Bonjour, declined elevation, timeout, or helper failure leaves the successful
+per-user installation intact and is reported as best-effort system status.
+
+The exact recovery policy and firewall rule intentionally remain after a
+normal AeroMirror uninstall. Removing shared machine state would require a new
+administrator prompt during per-user removal and could disrupt another Bonjour
+consumer. A later install/update is idempotent and revalidates the same narrow
+state. Separate administrator maintenance may remove it if the Apple Bonjour
+installation itself is retired.
 
 The rule proves only a local Windows prerequisite. It cannot be described as
 continuous iPhone visibility, successful DNS-SD browsing, BLE/AWDL support, or
 physical interoperability without separate device evidence.
+
+## D-016 — Use one-time per-device PIN trust
+
+**Status:** accepted
+
+The old user-selected fixed/no-PIN modes are retired. Every unknown iPhone
+receives a fresh cryptographically generated four-digit session PIN, while an
+already trusted device reconnects without another prompt. The receiver key and
+trusted-client register remain per-user and survive in-place updates. Settings
+provides one explicit action to revoke the complete trusted-device register.
+
+The native boundary emits a structured, process/request-scoped pairing event.
+The shell displays the PIN in a high-contrast fullscreen overlay on the active
+display for at most one minute and delivers it only through redirected stdin to
+that exact request. Escape cancels the request. The PIN must not enter process
+arguments, settings, ordinary logs, AeroMirror diagnostic exports, or the
+trusted-client file. The native core necessarily holds the value transiently
+for SRP and must clear its request buffers after success, cancellation, timeout,
+or failure. This does not claim that an external full process-memory dump could
+never capture a live in-flight secret. Legacy fixed secrets and advanced
+pairing/identity overrides are stripped during migration and cannot weaken this
+contract.
+
+Pairing cancellation is authoritative, not cosmetic. Timeout, Escape,
+connection destruction, malformed SETUP, a stale request, or mismatch with the
+signature-verified client key must make native admission fail. Machine-readable
+`AEROMIRROR_*` output uses a dedicated emitter. Ordinary native and HLS output
+must flatten control bytes and neutralize marker tokens before stdout, while the
+shell accepts only exact anchored marker grammars. Client name, model, device
+identifier, public key, and PIN are not ordinary log fields.
+
+## D-017 — Keep automatic updates opt-in and apply them only at a later safe start
+
+**Status:** accepted
+
+Automatic updates default to off. Enabling the setting authorizes AeroMirror to
+check the fixed public GitHub repository, download only the exact installer for
+an exact newer three-part release, enforce HTTPS redirect and size limits,
+verify SHA-256, and stage the result for the current Windows user. Finding or
+staging a release must not stop or restart an active mirroring session or the
+current receiver. Download and verified staging may finish in the background;
+only installation is deferred to a later application start.
+
+The staged manifest is protected with Windows DPAPI and includes the exact
+version, installer name, digest, timestamp, and bounded launch-attempt state.
+Only a later safe AeroMirror start, before receiver/UI startup, may revalidate
+and launch the existing unattended Setup transaction. Invalid, expired, stale,
+or exhausted staging fails open to normal receiver startup. Disabling the
+setting removes known staged update files. Manual **Check for updates** remains
+available and keeps its explicit download/install confirmation.

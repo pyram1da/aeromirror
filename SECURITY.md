@@ -4,7 +4,7 @@
 
 Only the latest published AeroMirror release receives security fixes.
 
-Public `v0.12.19` is currently the latest published normal-channel review
+Public `v0.12.20` is currently the latest published normal-channel review
 release. Its immutable annotated tag, exact four assets, API digests, and
 public re-download verification pass. Physical gallery/fullscreen, UAC
 firewall, and iPhone discovery rows are reported separately and are not
@@ -42,12 +42,27 @@ AeroMirror is a local-network receiver built on UxPlay. Reports about UxPlay,
 GStreamer, Qt, Bonjour/mDNS, or bundled codec libraries may need coordinated
 disclosure to their upstream maintainers as well.
 
-Ordinary startup observes but does not mutate the machine-wide Bonjour service
-or Windows Firewall. The 0.12.19 explicit repair action is offered only when
-the exact Bonjour executable lacks the narrow Private/UDP 5353/LocalSubnet
-inbound rule; it requires user confirmation and Windows UAC. Treat any
-automatic mutation, Public/TCP/Any-address widening, executable-path
-substitution, or deletion of unrelated firewall rules as a security defect.
+Ordinary startup only observes the machine-wide Bonjour service and Windows
+Firewall; it never starts or reconfigures the service, edits the firewall, or
+elevates. After installation has committed, Setup may request Windows UAC for
+one bounded best-effort pass. That elevated branch accepts only the exact Apple
+Bonjour service and canonical `Program Files\Bonjour\mDNSResponder.exe`,
+rejects unsafe ownership, access control, and reparse points, configures
+Automatic start with bounded Windows restart-on-failure actions, starts the
+service when needed, and converges the narrow Private/UDP 5353/LocalSubnet
+firewall rule. Treat broader service rights, automatic runtime mutation,
+Public/TCP/Any-address widening, executable-path substitution, or deletion of
+unrelated firewall rules as a security defect.
+
+Every unknown AirPlay client uses a fresh request-scoped PIN. The PIN is sent
+only through redirected stdin for the exact native PID/request and is not a
+command-line, settings, trust-file, or ordinary-log field. Cancellation and
+trust revocation create a durable pending-reset marker before native shutdown;
+if exit is not confirmed, receiver restart remains blocked. After confirmed
+exit, the trust store is atomically emptied before the marker is removed.
+Treat prompt bypass, reuse or disclosure of a live PIN, persistence after a
+confirmed reset, or replacement-core startup while a reset is unresolved as a
+security defect.
 
 The connection-loss continuity view may copy unobscured renderer client pixels
 from the Windows desktop into process memory. It rejects capture when another

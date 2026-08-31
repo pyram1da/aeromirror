@@ -124,6 +124,36 @@ It does not open an installer prompt or register a bundled per-user executable
 as a machine-wide service. The original interactive upstream path remains
 separate from AeroMirror's headless launch.
 
+The 0.12.21 extension handles a different case: Bonjour existed when the
+receiver started but later became unavailable. DNS-SD error `-65563` is
+terminal for that registration generation. The core emits one failed marker,
+one `AEROMIRROR_DNSSD_PREREQUISITE_UNAVAILABLE` marker, and one degraded
+marker, releases the paired service references, and cancels automatic native
+retry while leaving TCP, BLE, and the receiver process alive. An explicit
+same-process discovery refresh clears the latch and begins a new generation;
+normal native timers do not silently restart it.
+
+The 0.12.22 extension makes first-use pairing request-correlated and
+per-device. Native code asks the shell for a fresh four-digit PIN only for an
+unknown client, accepts the answer only for the exact live request and
+connection, and retains the resulting trusted public key in the existing
+per-user register. PIN digits travel only over inherited stdin, are not logged
+or placed in process arguments, and transient native buffers are cleared when
+the SRP request ends. Cancellation, timeout, and late packets from an older
+connection cannot clear or complete a newer pairing attempt.
+
+The same boundary gives genuine `AEROMIRROR_*` lines a dedicated protocol
+emitter. Ordinary UxPlay, libuxplay, client-metadata, and HLS-language output
+flattens control bytes and neutralizes marker tokens before stdout, while raw
+client identifiers are omitted. Native registration returns a boolean
+admission result so cancellation, disconnect, malformed or stale SETUP, and a
+verified-key mismatch fail closed.
+
+The same extension makes fullscreen a genuinely borderless Qt/Win32 state:
+caption, resize, minimize, maximize, and system-menu styles are removed on
+entry, while Escape and lifecycle exit restore the exact saved styles and
+normal geometry. The ordinary viewer remains framed, movable, and resizable.
+
 The receiver's shared AirPlay identity is canonicalized to at most 50 UTF-8
 bytes at a complete character boundary. This keeps the six-byte-MAC RAOP label
 (`MAC@name`) within Bonjour's 63-byte service-label limit while AirPlay, RAOP,
@@ -203,13 +233,20 @@ build/staging prefix; it must not be described as the redistributed runtime.
    `2.0.0.1736`, verifies it, and runs `--loader-test` before installation.
 
    ```powershell
-   .\build-headless-runtime.ps1 `
-       -UpstreamRoot C:\src\uxplay-windows `
-       -OriginalRuntime C:\inputs\uxplay-windows-2.0.0.1736 `
-       -OriginalRuntimeArchive C:\inputs\uxplay-windows.zip `
-       -HeadlessExecutable C:\src\uxplay-windows\out\headless-x64-qt610\uxplay-windows.exe `
-       -MsysRoot C:\msys64
-   ```
+    .\build-headless-runtime.ps1 `
+        -UpstreamRoot C:\src\uxplay-windows `
+        -OriginalRuntime C:\inputs\uxplay-windows-2.0.0.1736 `
+        -OriginalRuntimeArchive C:\inputs\uxplay-windows.zip `
+        -HeadlessExecutable C:\src\uxplay-windows\out\headless-x64-qt610\uxplay-windows.exe `
+        -MsysRoot C:\msys64 `
+        -QtPrefix C:\inputs\qt610\ucrt64
+    ```
+
+   `-QtPrefix` is optional when the required Qt 6.10.1 deployment tools already
+   live under the selected MSYS2 prefix. Dependency inspection runs against an
+   ASCII temporary copy because the MSYS2 `objdump` build cannot reliably open
+   every Unicode Windows path; only the validated result is moved back to the
+   normal artifact directory.
 7. Run upstream `scripts/verify-bundle.ps1` against the staged runtime.
 
 The runtime builder deliberately stages the hardware H.264/H.265 decoders for
@@ -223,15 +260,15 @@ both ASCII and Cyrillic application paths. Setup uses `--loader-test` against
 the separately pinned upstream runtime before committing installation; the
 broader self-test remains a staged-bundle gate.
 
-For the local 0.12.20 candidate, staged inspection covered 199 binaries and
-148 DLLs; all 44 requested GStreamer features resolved to 27 plug-ins, and the
-staged `--loader-test` exited 0. Provenance pins 42 patched sources in total,
-including the new `libuxplay/aeromirror_host_protocol.h`. The versioned
-corresponding-source ZIP has 148 entries. Its extracted no-Git tree validated
-every pinned hash and completed a clean 57/57 rebuild reproducing core
-SHA-256
-`4336B9DBFCDE87123EC4796FE43FAA4F1952E27224932B3DD5E8FEAFBAD41832`.
-The local review payload and x64 Setup gates also pass. These automated results
-do not establish physical Photos containment, fullscreen/Escape behavior,
-installed update behavior, or iPhone visibility; those 0.12.20 checks remain
-pending, and this candidate is not yet published.
+For the 0.12.22 release candidate, two independently materialized clean source
+trees complete 57/57 targets and reproduce core SHA-256
+`E4601B1BDAE661AF63A3F92C9FDA01CA66E54B6E2C5A36EDF802BAF0338CE6F6`.
+Staged inspection covers 200 binaries and copies 148 DLLs; all 44 requested GStreamer
+features resolve to 27 plug-ins, and the isolated runtime `--self-test` passes.
+The same core passes `--loader-test` against the unchanged pinned GStreamer
+1.28.1/Qt 6.10.1 upstream runtime. Provenance pins 49 patched sources in total,
+including `libuxplay/aeromirror_host_protocol.h`. The 149-entry corresponding-
+source archive's extracted no-Git tree validates every pinned input and
+completes 57/57 to the same core hash. These automated results do not
+establish installed recovery, first-device trust, fullscreen restoration, or
+iPhone visibility; those physical 0.12.22 checks remain pending.

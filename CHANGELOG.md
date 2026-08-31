@@ -1,5 +1,96 @@
 # Changelog
 
+## 0.12.22 — automatic discovery recovery, first-device trust, and safer updates (review candidate)
+
+### Changes
+
+- Removes Bonjour repair and discovery-restart controls from the main window
+  and tray. Normal operation remains a background receiver: the shell monitors
+  discovery health without elevation and republishes AirPlay automatically
+  after the validated Apple Bonjour service returns to `Running`.
+- Makes Bonjour resilience an installer responsibility. After the per-user
+  application transaction commits, Setup best-effort configures only an exact,
+  safely installed Apple Bonjour service for Automatic start, bounded Windows
+  service-recovery actions, and one Private/UDP 5353/LocalSubnet firewall rule.
+  A declined or failed administrator step does not roll back the application.
+- Treats DNS-SD error `-65563` as an unavailable prerequisite instead of
+  repeatedly restarting the receiver. BLE cannot create a false ready state,
+  and a recovered service receives at most two same-process DNS-SD submissions
+  on the existing AirPlay ports before another health event is required.
+- Replaces fixed/no-PIN choices with per-device trust. An unknown iPhone gets a
+  fresh cryptographic four-digit code in a high-contrast fullscreen PC overlay;
+  the code is delivered to the current native request through redirected stdin,
+  never through the process command line, and is not written to logs. Trusted
+  devices reconnect without another code until the user resets trust.
+- Makes pairing cancellation authoritative at the native admission boundary.
+  Timeout, Escape, disconnect, malformed setup, a stale request, or a verified
+  key mismatch rejects that SETUP instead of allowing registration to continue.
+- Makes cancellation and Settings trust revocation durable across a native
+  persistence race. A pending-reset marker blocks replacement core startup;
+  after confirmed native exit, AeroMirror atomically empties the trust store
+  before clearing the marker or permitting a restart.
+- Separates machine-readable `AEROMIRROR_*` markers from ordinary native logs.
+  Ordinary client/HLS metadata is flattened to one line, control bytes and
+  marker tokens are neutralized, raw client identifiers are not logged, and the
+  shell accepts only exact anchored control-line grammars.
+- Hardens inherited HLS/gallery parsing: HTTP header names are matched without
+  regard to ASCII case, language playlists use bounded checked parsing, URI
+  replacement handles shorter and zero-match prefixes, media-URI terminators
+  and condensed chunks stay within their own playlist lines, expanded output
+  is capped at 32 MiB, and malformed fields or allocation failures reject the
+  request instead of terminating the receiver.
+- Keeps fullscreen inside the native renderer window. The normal caption
+  maximize action and Alt+Enter enter the borderless monitor-sized view; Escape
+  exits it and restores the saved normal geometry. No delayed shell-owned
+  floating fullscreen button or keyboard hook is used.
+- Adds optional automatic updates, disabled by default. When enabled, AeroMirror
+  checks the fixed public repository, downloads only the exact versioned Setup
+  through validated HTTPS redirects, enforces size and SHA-256 checks, protects
+  the staged manifest for the current Windows user, and starts Setup only at a
+  later safe application launch without interrupting the active receiver.
+- Serializes 0.12.22-and-newer Setup transactions for the current Windows user.
+  Version and recovery decisions are revalidated under the same lock, the
+  primary installed executable is authoritative over stale registry/legacy
+  metadata, and recovery never launches from a tree another current Setup is
+  still replacing.
+- Reworks the README opening and FAQ around the actual product value,
+  first-device trust, Bonjour, privacy, supported Windows versions, updates,
+  and the explicit absence of remote control, AirDrop, accounts, ads, and
+  telemetry.
+
+### Evidence and status
+
+- Managed build and focused Bonjour, automatic-update, pairing, fullscreen, and
+  native contract checks pass. Two clean native builds and the extracted
+  no-Git corresponding source reproduce core SHA-256
+  `E4601B1BDAE661AF63A3F92C9FDA01CA66E54B6E2C5A36EDF802BAF0338CE6F6`.
+  Runtime staging inspects 200 binaries, copies 148 dependency DLLs, resolves
+  all 44 requested GStreamer features to 27 plug-ins, and passes isolated
+  self-tests from ASCII and Cyrillic paths. The 149-entry corresponding-source
+  archive rebuild, exact review payload, x64 Setup, embedded-input equality,
+  and all four non-installing Setup self-checks pass. Exact-tag publication and
+  public-asset re-download checks remain pre-publication gates. Source packaging
+  tolerates only canonical LF/CRLF patch-index metadata differences while still
+  pinning every reviewed patch and packaged modified/protected source by hash.
+- Installed Windows 10/11 behavior, first/second-device pairing, iPhone
+  visibility after idle/service recovery, fullscreen keys, and automatic-update
+  handoff remain physical-test items until recorded in the 0.12.22 test plan.
+- Concurrent current Setup invocations are guarded, but immutable pre-0.12.22
+  Setup binaries cannot join that mutex and must not be deliberately run at the
+  same time as a current transaction.
+- Public `v0.12.20` and its four assets remain immutable and updater-visible
+  latest until 0.12.22 is published. No public 0.12.21 tag or Release exists;
+  that candidate was superseded by 0.12.22 and must not be reconstructed.
+
+## 0.12.21 — stopped Bonjour recovery (unpublished, superseded candidate)
+
+0.12.21 established the native stopped-Bonjour prerequisite state and bounded
+same-process recovery contract, but its visible **Start Bonjour**/`sc.exe` flow
+was not published. The user rejected that manual main/tray action, so 0.12.22
+supersedes the candidate with installer-owned machine configuration and
+read-only automatic runtime recovery. No `v0.12.21` tag or GitHub Release may
+be reconstructed from this internal history.
+
 ## 0.12.20 — native fullscreen ownership and quieter repair flow (review release)
 
 ### Changes

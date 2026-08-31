@@ -11,6 +11,11 @@ namespace AirPlayReceiverMvp
 {
     internal static class UpdateService
     {
+        private const int MaximumInstallerBytes = 64 * 1024 * 1024;
+        private const int MaximumDownloadRedirects = 5;
+        private const int DownloadTimeoutMilliseconds = 30000;
+        private const string ExpectedRepository = "Nadejny/aeromirror";
+
         internal static string RepositoryFilePath
         {
             get
@@ -36,6 +41,15 @@ namespace AirPlayReceiverMvp
             using (var client = CreateClient())
                 json = client.DownloadString(api);
 
+            return ParseLatestRelease(json, AppVersion.Current);
+        }
+
+        internal static UpdateInfo ParseLatestRelease(
+            string json, Version currentVersion)
+        {
+            if (currentVersion == null)
+                throw new ArgumentNullException("currentVersion");
+
             var serializer = new JavaScriptSerializer();
             var root = serializer.DeserializeObject(json)
                 as Dictionary<string, object>;
@@ -56,7 +70,7 @@ namespace AirPlayReceiverMvp
             info.Notes = CleanReleaseNotes(GetString(root, "body"));
             info.ReleasePage = GetString(root, "html_url");
             info.IsNewer = latest.CompareTo(
-                AppVersion.Current) > 0;
+                currentVersion) > 0;
 
             object assetsValue;
             object[] assets = root.TryGetValue("assets", out assetsValue)
@@ -74,8 +88,9 @@ namespace AirPlayReceiverMvp
                     if (string.Equals(
                             name,
                             expectedInstaller,
-                            StringComparison.OrdinalIgnoreCase))
+                            StringComparison.Ordinal))
                     {
+                        info.InstallerName = name;
                         info.InstallerUrl =
                             GetString(asset, "browser_download_url");
                         string digest = GetString(asset, "digest");
@@ -91,39 +106,37 @@ namespace AirPlayReceiverMvp
 
         internal static string DownloadAndVerify(UpdateInfo info)
         {
-            if (info == null || string.IsNullOrWhiteSpace(info.InstallerUrl))
-                throw new InvalidOperationException(
-                    "В GitHub Release нет установщика обновления.");
-            if (string.IsNullOrWhiteSpace(info.InstallerSha256))
-                throw new InvalidOperationException(
-                    "GitHub Release не содержит SHA-256 установщика. " +
-                    "Автоматическое обновление остановлено для безопасности.");
+            return DownloadAndVerify(
+                info,
+                DownloadInstallerWithValidatedRedirects);
+        }
 
-            var uri = new Uri(info.InstallerUrl);
-            if (!string.Equals(
-                uri.Scheme, Uri.UriSchemeHttps,
-                StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException(
-                    "Установщик обновления должен загружаться по HTTPS.");
-
-            string name = Path.GetFileName(uri.AbsolutePath);
-            if (string.IsNullOrWhiteSpace(name) ||
-                !name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
-                name = "AeroMirror-Update.exe";
-            string path = Path.Combine(
-                Path.GetTempPath(),
-                "AeroMirror-" + Guid.NewGuid().ToString("N") + "-" + name);
+        internal static string DownloadAndVerify(
+            UpdateInfo info, Action<Uri, string> download)
+        {
+            if (download == null)
+                throw new ArgumentNullException("download");
+            Uri uri;
+            string name;
+            ValidateDownloadCandidate(info, out uri, out name);
+            string path = AutomaticUpdateService.CreateDownloadPath(name);
             bool complete = false;
             try
             {
-                using (var client = CreateClient())
-                    client.DownloadFile(uri, path);
+                download(uri, path);
 
-                string actual;
-                using (var stream = File.OpenRead(path))
-                using (var sha = SHA256.Create())
-                    actual = BitConverter.ToString(
-                        sha.ComputeHash(stream)).Replace("-", "");
+                if (!File.Exists(path))
+                    throw new InvalidDataException(
+                        "Загрузка не создала файл установщика.");
+                FileAttributes attributes = File.GetAttributes(path);
+                if (!IsAcceptableDownloadedInstallerFile(
+                        attributes, new FileInfo(path).Length))
+                {
+                    throw new InvalidDataException(
+                        "Загруженный установщик не является допустимым файлом.");
+                }
+
+                string actual = ComputeSha256(path);
                 if (!string.Equals(
                     actual, info.InstallerSha256,
                     StringComparison.OrdinalIgnoreCase))
@@ -140,6 +153,223 @@ namespace AirPlayReceiverMvp
                     catch { }
                 }
             }
+        }
+
+        private static bool IsAcceptableDownloadedInstallerFile(
+            FileAttributes attributes, long length)
+        {
+            return length >= 0 && length <= MaximumInstallerBytes &&
+                (attributes & FileAttributes.ReparsePoint) == 0 &&
+                (attributes & FileAttributes.Directory) == 0;
+        }
+
+        internal static string ComputeSha256(string path)
+        {
+            using (var stream = File.OpenRead(path))
+            using (var sha = SHA256.Create())
+                return BitConverter.ToString(
+                    sha.ComputeHash(stream)).Replace("-", "");
+        }
+
+        private static void ValidateDownloadCandidate(
+            UpdateInfo info, out Uri uri, out string expectedName)
+        {
+            if (info == null || info.Version == null ||
+                string.IsNullOrWhiteSpace(info.InstallerUrl))
+            {
+                throw new InvalidOperationException(
+                    "В GitHub Release нет установщика обновления.");
+            }
+            if (info.Version.CompareTo(AppVersion.Current) <= 0)
+            {
+                throw new InvalidOperationException(
+                    "Установщик не новее текущей версии AeroMirror.");
+            }
+            if (!IsSha256(info.InstallerSha256))
+            {
+                throw new InvalidOperationException(
+                    "GitHub Release не содержит корректный SHA-256 установщика. " +
+                    "Автоматическое обновление остановлено для безопасности.");
+            }
+
+            expectedName = "AeroMirror-Setup-" +
+                info.Version.ToString(3) + ".exe";
+            if (!string.Equals(
+                    info.InstallerName,
+                    expectedName,
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "Имя установщика не совпадает с версией GitHub Release.");
+            }
+
+            if (!Uri.TryCreate(info.InstallerUrl, UriKind.Absolute, out uri) ||
+                !string.Equals(
+                    uri.Scheme, Uri.UriSchemeHttps,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    "Установщик обновления должен загружаться по HTTPS.");
+            }
+            string expectedPath = "/" + ExpectedRepository +
+                "/releases/download/v" + info.Version.ToString(3) +
+                "/" + expectedName;
+            if (!string.Equals(
+                    uri.Host, "github.com",
+                    StringComparison.OrdinalIgnoreCase) ||
+                !uri.IsDefaultPort ||
+                uri.UserInfo.Length != 0 ||
+                uri.Query.Length != 0 ||
+                uri.Fragment.Length != 0 ||
+                !string.Equals(
+                    Uri.UnescapeDataString(uri.AbsolutePath),
+                    expectedPath,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    "Адрес установщика не привязан к ожидаемому GitHub Release.");
+            }
+            string urlName = Uri.UnescapeDataString(
+                Path.GetFileName(uri.AbsolutePath));
+            if (!string.Equals(
+                    urlName, expectedName, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "Адрес установщика не содержит ожидаемое точное имя файла.");
+            }
+        }
+
+        private static void DownloadInstallerWithValidatedRedirects(
+            Uri initialUri, string destinationPath)
+        {
+            Uri current = initialUri;
+            for (int redirect = 0;
+                redirect <= MaximumDownloadRedirects;
+                redirect++)
+            {
+                ValidateDownloadHop(current, redirect == 0);
+                var request = (HttpWebRequest)WebRequest.Create(current);
+                request.Method = "GET";
+                request.AllowAutoRedirect = false;
+                request.Timeout = DownloadTimeoutMilliseconds;
+                request.ReadWriteTimeout = DownloadTimeoutMilliseconds;
+                request.UserAgent = "AeroMirror-Windows/" +
+                    AppVersion.Display;
+                request.Accept = "application/octet-stream";
+
+                using (var response =
+                    (HttpWebResponse)request.GetResponse())
+                {
+                    int status = (int)response.StatusCode;
+                    if (status == 301 || status == 302 || status == 303 ||
+                        status == 307 || status == 308)
+                    {
+                        if (redirect >= MaximumDownloadRedirects)
+                            throw new InvalidDataException(
+                                "Слишком много перенаправлений при загрузке обновления.");
+                        string location = response.Headers["Location"];
+                        Uri next;
+                        if (string.IsNullOrWhiteSpace(location) ||
+                            !Uri.TryCreate(
+                                current, location, out next))
+                        {
+                            throw new InvalidDataException(
+                                "GitHub вернул некорректное перенаправление.");
+                        }
+                        current = next;
+                        continue;
+                    }
+                    if (status != 200)
+                    {
+                        throw new WebException(
+                            "GitHub вернул HTTP " + status + ".");
+                    }
+                    if (response.ContentLength > MaximumInstallerBytes)
+                    {
+                        throw new InvalidDataException(
+                            "Установщик обновления превышает допустимый размер.");
+                    }
+
+                    using (Stream input = response.GetResponseStream())
+                    using (var output = new FileStream(
+                        destinationPath,
+                        FileMode.CreateNew,
+                        FileAccess.Write,
+                        FileShare.None,
+                        81920,
+                        FileOptions.WriteThrough))
+                    {
+                        if (input == null)
+                            throw new InvalidDataException(
+                                "GitHub не вернул данные установщика.");
+                        byte[] buffer = new byte[81920];
+                        long total = 0;
+                        while (true)
+                        {
+                            int read = input.Read(buffer, 0, buffer.Length);
+                            if (read <= 0)
+                                break;
+                            total += read;
+                            if (total > MaximumInstallerBytes)
+                            {
+                                throw new InvalidDataException(
+                                    "Установщик обновления превышает допустимый размер.");
+                            }
+                            output.Write(buffer, 0, read);
+                        }
+                        output.Flush(true);
+                    }
+                    return;
+                }
+            }
+            throw new InvalidDataException(
+                "Не удалось завершить загрузку после перенаправлений.");
+        }
+
+        private static void ValidateDownloadHop(Uri uri, bool initial)
+        {
+            if (uri == null || !string.Equals(
+                    uri.Scheme, Uri.UriSchemeHttps,
+                    StringComparison.OrdinalIgnoreCase) ||
+                !uri.IsDefaultPort || uri.UserInfo.Length != 0 ||
+                uri.Fragment.Length != 0)
+            {
+                throw new InvalidDataException(
+                    "Каждый адрес загрузки обновления должен использовать HTTPS.");
+            }
+            string host = uri.Host;
+            bool allowed = string.Equals(
+                    host, "github.com",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    host, "release-assets.githubusercontent.com",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    host, "objects.githubusercontent.com",
+                    StringComparison.OrdinalIgnoreCase) ||
+                host.EndsWith(
+                    ".githubusercontent.com",
+                    StringComparison.OrdinalIgnoreCase) ||
+                (host.StartsWith(
+                        "github-production-release-asset-",
+                        StringComparison.OrdinalIgnoreCase) &&
+                    host.EndsWith(
+                        ".s3.amazonaws.com",
+                        StringComparison.OrdinalIgnoreCase));
+            if (!allowed || (initial && !string.Equals(
+                    host, "github.com",
+                    StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new InvalidDataException(
+                    "Перенаправление загрузки ведёт за пределы GitHub CDN.");
+            }
+        }
+
+        internal static bool IsSha256(string value)
+        {
+            return !string.IsNullOrWhiteSpace(value) && Regex.IsMatch(
+                value.Trim(), @"^[0-9A-Fa-f]{64}$",
+                RegexOptions.CultureInvariant);
         }
 
         private static WebClient CreateClient()
@@ -165,26 +395,12 @@ namespace AirPlayReceiverMvp
                 string value = raw.Trim();
                 if (value.Length == 0 || value.StartsWith("#"))
                     continue;
-                string[] parts = value.Split('/');
-                if (parts.Length == 2 &&
-                    IsSafeRepositoryPart(parts[0]) &&
-                    IsSafeRepositoryPart(parts[1]))
-                    return parts[0] + "/" + parts[1];
+                if (string.Equals(
+                        value, ExpectedRepository,
+                        StringComparison.Ordinal))
+                    return ExpectedRepository;
             }
             return "";
-        }
-
-        private static bool IsSafeRepositoryPart(string value)
-        {
-            if (string.IsNullOrWhiteSpace(value) || value.Length > 100)
-                return false;
-            foreach (char c in value)
-            {
-                if (!char.IsLetterOrDigit(c) &&
-                    c != '-' && c != '_' && c != '.')
-                    return false;
-            }
-            return true;
         }
 
         private static string GetString(
@@ -200,7 +416,7 @@ namespace AirPlayReceiverMvp
             string value = (text ?? "").Trim();
             Match match = Regex.Match(
                 value,
-                @"^v?(\d+)\.(\d+)\.(\d+)$",
+                @"^v(\d+)\.(\d+)\.(\d+)$",
                 RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
             if (!match.Success)
             {

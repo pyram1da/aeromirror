@@ -166,10 +166,12 @@ Assert-True ($httpText -match '(?s)while\s*\(\s*readstart\s*<\s*8\s*\).*?' +
 Assert-True ($httpText -match '(?s)while\s*\(\s*written\s*<\s*datalen\s*\).*?' +
     'worker_lifecycle_should_run\s*\(') `
     "HTTP response send checks lifecycle state"
-Assert-True ($httpText -match '(?s)on socket %d:\\n%\.\*s\\n"\s*,' +
-    '\s*connection->socket_fd\s*,\s*recv_datalen\s*,' +
-    '\s*\(const char \*\)\s*buffer') `
-    "reverse HTTP debug logging is length-bounded by received data"
+Assert-True ($httpText -match '(?s)received reversed HTTP response from client' +
+    '.*?on socket %d \(%d bytes\).*?' +
+    'connection->socket_fd\s*,\s*recv_datalen') `
+    "reverse HTTP diagnostics retain content-free byte counts"
+Assert-True ($httpText -notmatch '%\.\*s[\s\S]*?\(const char \*\)\s*buffer') `
+    "reverse HTTP diagnostics never write client response bytes"
 
 $netutilsText = Get-Content -LiteralPath $netutilsSource -Raw
 $netutilsHeaderText = Get-Content -LiteralPath $netutilsHeader -Raw

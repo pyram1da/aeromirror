@@ -29,34 +29,68 @@ second installed application. A same-version Setup performs a reinstall. The
 current setup:
 
 1. detects the installed version and selects a clean install, unattended
-   update/reinstall, or explicit downgrade-confirmation path;
+   update/reinstall, or a refusal to replace a newer installed version;
 2. stops the existing shell and receiver processes;
 3. moves the previous application directory to a temporary backup;
 4. installs and registers the new files;
 5. removes the backup only after success;
 6. restores the previous directory if installation fails.
 
-The **Download and install** click is the application's one confirmation. After
-the exact asset name and SHA-256 digest are verified, AeroMirror launches Setup
-with `/update` directly instead of asking a second Yes/No. Setup reads the
-existing Start menu and desktop shortcuts before replacing files and runs
-without an option form. Opening a newer Setup over an installed copy or
-reinstalling the same version uses the same unattended path. Only the shortcuts
-that existed are recreated, legacy names are migrated to the current
-AeroMirror name, and the installed shell is launched after success. A clean
-first install retains the interactive options. An older Setup never silently
-downgrades a newer install.
+For a manual update, **Download and install** is the application's one
+confirmation. After the exact asset name and SHA-256 digest are verified,
+AeroMirror launches Setup with `/update` directly instead of asking a second
+Yes/No. Setup reads the existing Start menu and desktop shortcuts before
+replacing files and runs without an option form. Opening a newer Setup over an
+installed copy or reinstalling the same version uses the same unattended path.
+Only the shortcuts that existed are recreated, legacy names are migrated to the
+current AeroMirror name, and the installed shell is launched after success. A
+clean first install retains the interactive options. An older Setup never
+silently downgrades a newer install.
+
+Setup 0.12.22 and later serialize install, update, and uninstall mutation for
+the same Windows user. The transaction lock is acquired only when work begins,
+the installed primary executable version is re-read under that lock, and
+failure recovery keeps the lock through the bounded shell-launch confirmation.
+Do not deliberately run an immutable pre-0.12.22 Setup concurrently with a
+current Setup: historical binaries cannot know or join the new mutex. The
+normal updater starts one exact Setup and does not create this unsupported
+cross-version concurrency.
+
+Automatic updates are opt-in and disabled by default. When enabled, AeroMirror
+may check, download, and safely stage a verified newer Setup in the background,
+including while mirroring is active, but that work must not stop or restart the
+receiver.
+The per-user staged manifest is protected with Windows DPAPI. A later safe
+application start, before receiver/UI startup, revalidates the exact version,
+name, path, age, regular-file status, and SHA-256 before launching the same
+unattended `/update` transaction. Invalid staging fails open to normal receiver
+startup; launch attempts and retry delay are bounded. Disabling automatic
+updates removes known staged files.
 
 User settings, logs, the persistent receiver key, and trusted-iPhone register
 are stored separately under `%LOCALAPPDATA%\AirPlayReceiverMvp` and survive
 updates and normal uninstall.
 
+After the per-user transaction commits, Setup may request Windows administrator
+approval for a separate best-effort Apple Bonjour service/firewall
+configuration. Decline, timeout, or failure cannot roll back the application.
+Because Bonjour is shared system software, the exact service-recovery policy
+and narrow firewall rule intentionally remain after AeroMirror uninstall.
+
 ## GitHub update channel
 
 Suggested repository description:
 
-> Native-style AirPlay receiver for Windows 10/11, powered by UxPlay. Tray
-> mode, PIN trust, quality presets, audio and safe updates.
+> Open-source AirPlay receiver for Windows 10/11. Mirror an iPhone screen and
+> audio over Wi-Fi with tray mode, one-time PIN trust, a movable viewer, and
+> verified updates.
+
+Suggested topics:
+
+```text
+airplay airplay-receiver screen-mirroring iphone-mirroring iphone ios windows
+windows-10 windows-11 uxplay bonjour mdns
+```
 
 The public repository slug is stored in `update-repository.txt`:
 
@@ -77,10 +111,20 @@ For a working automatic update, every GitHub Release must include:
 - GitHub's SHA-256 asset digest;
 - a short user-facing release body.
 
-The updater accepts only an exact three-part numeric tag with an optional
-leading `v`, for example `0.12.7` or `v0.12.7`. It rejects two-part,
-four-part, suffixed, or otherwise malformed values. Do not rely on a tag such
+The updater accepts only an exact `v`-prefixed three-part numeric tag, for
+example `v0.12.7`. It rejects an unprefixed, two-part, four-part, suffixed, or
+otherwise malformed value. Do not rely on a tag such
 as `v0.12.7-beta` being normalized into the public update channel.
+
+For a candidate version `X.Y.Z`, the accepted initial download URL is exactly
+`https://github.com/Nadejny/aeromirror/releases/download/vX.Y.Z/AeroMirror-Setup-X.Y.Z.exe`.
+The updater rejects user information, query/fragment text, a non-default port,
+HTTP, another repository, or a differently named executable. Redirects are
+followed manually with a bounded count and must remain HTTPS on the reviewed
+GitHub release-asset host set. The response body is size-limited, written to a
+new per-user staging file, flushed, and SHA-256 verified before it can become a
+pending update. Manual and automatic modes share this exact downloader and do
+not fall back to the first `.exe` asset.
 
 The current application checks GitHub's `releases/latest` endpoint. A release
 that should be found by installed AeroMirror clients must therefore be
@@ -100,7 +144,13 @@ corresponding-source validation before publication, and publication still
 requires explicit user authorization. A normal Release may be labelled as a
 review candidate so installed clients can participate in physical testing,
 but it must not be described as accepted until its versioned physical plan
-passes. The 0.12.20 native-viewer/setup review build is the immutable normal
+passes. The local 0.12.22 candidate is authorized for publication only after
+its exact clean-tag, native corresponding-source, package, Setup, and public-
+asset gates pass. It has not yet been tagged or published; physical Windows/
+iPhone rows remain pending and must be stated as such in the Release. The
+0.12.21 candidate was never published and is superseded; never create a
+`v0.12.21` tag or reconstructed asset set. Until 0.12.22 publication completes,
+the 0.12.20 native-viewer/setup review build is the immutable normal
 latest Release. Annotated tag `v0.12.20`, GitHub Release `376224221`, the exact
 four-asset set, checksums, API digests, canonical/legacy latest routes, and
 fresh public re-download equality pass; exact evidence is in
@@ -142,17 +192,20 @@ reproducibility, staged runtime, managed, discovery-pipe, exact package, and
 Setup evidence under
 [`releases/0.12.15/TEST_PLAN.md`](releases/0.12.15/TEST_PLAN.md), but is not
 relabelled or published after the 0.12.16 correction. The untagged
-0.12.10–0.12.15 candidates remain local history. Public `v0.12.19` is the
-immutable normal latest review Release; `v0.12.18`, `v0.12.17`, `v0.12.16`,
-`v0.12.9`, and `v0.12.7` remain immutable historical evidence. Historical
+0.12.10–0.12.15 candidates remain local history. Public `v0.12.20` is the
+immutable normal latest review Release until the pending 0.12.22 publication;
+`v0.12.19`, `v0.12.18`, `v0.12.17`, `v0.12.16`, `v0.12.9`, and `v0.12.7`
+remain immutable historical evidence. Historical
 0.11 plans remain part of the evidence required before labelling the project
 1.0.
 
-The application downloads only after explicit confirmation, verifies the
-asset against GitHub's SHA-256 digest, launches the setup, and then closes.
-It does not accept a similarly named executable or fall back to the first
-`.exe` asset: the filename must exactly match the three-part version parsed
-from the Release tag.
+Manual mode downloads only after explicit confirmation, verifies the asset
+against GitHub's SHA-256 digest, launches Setup, and then closes. Opt-in
+automatic mode may download and stage the same verified asset in the background
+but may launch it only at a later safe application start. Neither mode accepts
+a similarly named executable or falls back to the first `.exe` asset: the
+filename and initial release URL must exactly match the three-part version
+parsed from the Release tag.
 
 Recommended assets:
 
