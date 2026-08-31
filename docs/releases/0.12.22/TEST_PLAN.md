@@ -7,10 +7,10 @@ Bonjour recovery, per-device first-connection trust, native fullscreen,
 optional staged updates, installer behavior, and public presentation. It keeps
 automated evidence separate from physical Windows/iPhone evidence.
 
-Public `v0.12.20` remains immutable and updater-visible latest until every
-pre-publication gate below passes and the authorized `v0.12.22` Release is
-verified. The unpublished 0.12.21 candidate is superseded and must not be
-tagged, published, or used as an asset source.
+Public `v0.12.22` is the verified normal updater-visible latest Release. Public
+`v0.12.20` remains immutable as the previous review release. The unpublished
+0.12.21 candidate is superseded and must not be tagged, published, or used as
+an asset source.
 
 | Gate | Current status | Acceptance evidence |
 |---|---|---|
@@ -19,7 +19,7 @@ tagged, published, or used as an asset source.
 | Pairing/fullscreen/native contracts | PASS | Complete managed/native transcripts plus loader and isolated runtime self-tests |
 | Clean native reproducibility and corresponding source | PASS | Two clean builds plus extracted no-Git source rebuild reproduce `E4601B1BDAE661AF63A3F92C9FDA01CA66E54B6E2C5A36EDF802BAF0338CE6F6` |
 | Exact review package and Setup | PASS | Exact entry set, embedded equality, x64 version, and all four non-installing Setup self-checks from the frozen core |
-| Exact tag and four public assets | PENDING | Tag commit, Release/API state, names, sizes, digests, fresh re-download equality |
+| Exact tag and four public assets | PASS | `BUILD_REPORT.md`: tag commit, normal Release/API state, exact names/sizes/digests, both latest routes, fresh unauthenticated re-download equality |
 | Physical Windows 10/11 and iPhone matrix | PENDING | Screenshots/video plus redacted logs and before/after machine state |
 
 ## Test environments
@@ -259,9 +259,10 @@ Bonjour policy during normal uninstall.
    `AeroMirror-native-source-0.12.22.zip`, and `SHA256SUMS.txt`. Do not publish
    the portable/offline runtime.
 4. Verify Release/API state, asset names/count/sizes/digests, canonical and
-   legacy latest routes, updater discovery from an installed client, and fresh
-   public re-download byte equality. Apply the reviewed repository description
-   and topics. Do not add a fabricated screenshot.
+   legacy latest routes, and fresh public re-download byte equality. Apply the
+   reviewed repository description and topics. These publication checks pass;
+   installed-client update discovery remains part of the physical update row.
+   Do not add a fabricated screenshot.
 5. Add `BUILD_REPORT.md` with tag/commit, commands, public URL, asset hashes,
    re-download evidence, completed physical rows, pending rows, limitations,
    and immutable-asset statement; update `docs/PROJECT_STATE.md` after

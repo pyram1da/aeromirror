@@ -4,11 +4,11 @@
 
 Only the latest published AeroMirror release receives security fixes.
 
-Public `v0.12.20` is currently the latest published normal-channel review
+Public `v0.12.22` is currently the latest published normal-channel review
 release. Its immutable annotated tag, exact four assets, API digests, and
-public re-download verification pass. Physical gallery/fullscreen, UAC
-firewall, and iPhone discovery rows are reported separately and are not
-implied by publication.
+public re-download verification pass. Physical pairing, gallery/fullscreen,
+Bonjour/UAC recovery, installed-update, and iPhone discovery rows are reported
+separately and are not implied by publication.
 
 ## Reporting a vulnerability
 
@@ -20,7 +20,7 @@ and follow `docs/TROUBLESHOOTING.md`.
 
 For a vulnerability that could expose another user's device, pairing material,
 or local files, first try GitHub's private
-[Report a vulnerability](https://github.com/Nadejny/aeromirror/security/advisories/new)
+[Report a vulnerability](https://github.com/pyram1da/aeromirror/security/advisories/new)
 route. Availability of that form depends on the repository's GitHub security
 settings. If GitHub reports that private vulnerability reporting is
 unavailable, do not put sensitive details in a public issue; contact the

@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.12.22 — automatic discovery recovery, first-device trust, and safer updates (review candidate)
+## 0.12.22 — automatic discovery recovery, first-device trust, and safer updates (review release)
 
 ### Changes
 
@@ -68,19 +68,24 @@
   all 44 requested GStreamer features to 27 plug-ins, and passes isolated
   self-tests from ASCII and Cyrillic paths. The 149-entry corresponding-source
   archive rebuild, exact review payload, x64 Setup, embedded-input equality,
-  and all four non-installing Setup self-checks pass. Exact-tag publication and
-  public-asset re-download checks remain pre-publication gates. Source packaging
-  tolerates only canonical LF/CRLF patch-index metadata differences while still
-  pinning every reviewed patch and packaged modified/protected source by hash.
+  and all four non-installing Setup self-checks pass. Exact-tag packaging,
+  GitHub API digests, both updater latest routes, and fresh unauthenticated
+  public-asset re-download checks also pass. Source packaging tolerates only
+  canonical LF/CRLF patch-index metadata differences while still pinning every
+  reviewed patch and packaged modified/protected source by hash.
 - Installed Windows 10/11 behavior, first/second-device pairing, iPhone
   visibility after idle/service recovery, fullscreen keys, and automatic-update
   handoff remain physical-test items until recorded in the 0.12.22 test plan.
 - Concurrent current Setup invocations are guarded, but immutable pre-0.12.22
   Setup binaries cannot join that mutex and must not be deliberately run at the
   same time as a current transaction.
-- Public `v0.12.20` and its four assets remain immutable and updater-visible
-  latest until 0.12.22 is published. No public 0.12.21 tag or Release exists;
-  that candidate was superseded by 0.12.22 and must not be reconstructed.
+- Annotated `v0.12.22` resolves to
+  `a23f774098ab6b31954de6ad653cfc4d61289e3e`. Normal GitHub Release
+  `379732527` is the updater-visible latest with exactly four verified assets;
+  exact evidence is in
+  [the build report](docs/releases/0.12.22/BUILD_REPORT.md). Public `v0.12.20`
+  remains immutable as the previous review release. No public 0.12.21 tag or
+  Release exists; that candidate was superseded and must not be reconstructed.
 
 ## 0.12.21 — stopped Bonjour recovery (unpublished, superseded candidate)
 

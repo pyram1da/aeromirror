@@ -6,7 +6,7 @@ This is the single current-state handoff for AeroMirror. Keep it concise and
 update it whenever release status, accepted tests, blockers, or the immediate
 next step changes.
 
-## Current local review candidate — 0.12.22
+## Latest public review release — 0.12.22
 
 - Scope: simplify AeroMirror into a background receiver with no main/tray
   Bonjour or discovery-repair button; add installer-owned Bonjour resilience,
@@ -69,9 +69,10 @@ next step changes.
 - Public discoverability: the README now leads with the product value and
   download link and includes a concise FAQ for network placement, Bonjour,
   pairing, privacy, Windows support, fullscreen, updates, remote control, and
-  AirDrop. The repository description/topics still need to be applied through
-  GitHub during publication. No genuine product screenshot is available in the
-  repository, so the roadmap retains that item rather than fabricating one.
+  AirDrop. The reviewed repository description, twelve topics, and canonical
+  latest-release homepage are applied on GitHub. No genuine product screenshot
+  is available in the repository, so the roadmap retains that item rather than
+  fabricating one.
 - Automated status: the managed x64 build and complete resilience, Bonjour,
   automatic-update, pairing/fullscreen, and native contract suites pass. Two
   clean native builds and the extracted no-Git corresponding-source rebuild
@@ -81,23 +82,27 @@ next step changes.
   44 requested features to 27 GStreamer plug-ins, and passes isolated ASCII and
   Cyrillic-path self-tests. The 149-entry no-Git source archive rebuilds 57/57
   to the same core. Exact review payload, x64 Setup, embedded-input equality,
-  and all four non-installing Setup self-checks pass. Exact-tag packaging and
-  public re-download verification remain PENDING.
+  all four non-installing Setup self-checks, clean exact-tag packaging, GitHub
+  API digests, both latest routes, and fresh unauthenticated public re-download
+  equality pass.
 - Physical status: fresh and previously trusted iPhone pairing, second-device
   trust, installed Bonjour UAC decline/approval, stopped-service recovery,
   one-hour/long-idle visibility, Windows 10/11, fullscreen/Escape/Alt+Enter,
   Photos containment, update staging/handoff, and uninstall persistence are
   PENDING in `docs/releases/0.12.22/TEST_PLAN.md`.
 - Version history/publication: 0.12.21 was never tagged or published and is
-  superseded by this candidate; it must not be reconstructed. No 0.12.22 tag or
-  GitHub Release exists yet. Public 0.12.20 remains immutable and
-  updater-visible latest until the authorized 0.12.22 publication completes.
-- Immediate next step: freeze and commit the candidate, rerun the exact package
-  from that documentation freeze, publish the clean annotated tag and four
-  allowed assets, verify public hashes, and record the remaining physical
-  matrix as pending rather than claiming device acceptance.
+  superseded; it must not be reconstructed. Annotated tag `v0.12.22` resolves
+  to commit `a23f774098ab6b31954de6ad653cfc4d61289e3e`. Normal GitHub Release
+  `379732527` is `draft=false`, `prerelease=false`, updater-visible latest, and
+  contains exactly the four reviewed assets. Both latest routes, API digests,
+  checksums, and fresh public downloads pass; exact evidence is in
+  `docs/releases/0.12.22/BUILD_REPORT.md`.
+- Immediate next step: keep the published tag and assets immutable and run the
+  controlled installed-update plus physical Windows/iPhone matrix against the
+  exact public Setup. Record each result without inferring device acceptance
+  from the completed automated and publication gates.
 
-## Latest public review release — 0.12.20
+## Previous public review release — 0.12.20
 
 - Trigger: physical testing of public 0.12.19 confirmed that its separate
   shell-owned fullscreen control visibly lagged during window movement,

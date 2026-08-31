@@ -8,7 +8,7 @@ body:
     attributes:
       value: |
         Thank you for testing AeroMirror. Before submitting, read the
-        [troubleshooting and log-sharing guide](https://github.com/Nadejny/aeromirror/blob/main/docs/TROUBLESHOOTING.md).
+        [troubleshooting and log-sharing guide](https://github.com/pyram1da/aeromirror/blob/main/docs/TROUBLESHOOTING.md).
 
         Review builds keep diagnostics locally. Please attach the relevant
         `receiver.log` after masking PINs, passwords, user names, network names,

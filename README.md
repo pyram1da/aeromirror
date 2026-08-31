@@ -6,11 +6,18 @@ with Windows, waits quietly in the tray, and opens the stream in a movable,
 resizable Windows window—without an iPhone app, account, subscription, ads, or
 telemetry.
 
-**[Download the latest AeroMirror installer for Windows](https://github.com/Nadejny/aeromirror/releases/latest)**
+**[Download the latest AeroMirror installer for Windows](https://github.com/pyram1da/aeromirror/releases/latest)**
 
 Public builds are review releases: automated build and package checks pass,
 while the remaining physical Windows/iPhone acceptance is documented with each
 release.
+
+## Install in three steps
+
+1. Download and run `AeroMirror-Setup-0.12.22.exe`.
+2. Leave AeroMirror running quietly in the Windows tray.
+3. On the iPhone, open **Control Center → Screen Mirroring**, choose the PC,
+   and enter the large four-digit code shown on the PC the first time.
 
 This is an independent project. It is not affiliated with or endorsed by
 Apple. AirPlay, iPhone, and Apple are trademarks of Apple Inc.
@@ -253,9 +260,9 @@ officially supports Windows 10 1809 x64 and newer. Windows 10 is outside Microso
 but remains an explicit application target. ARM64 and 32-bit packages are not
 included.
 
-## Current local 0.12.22 review candidate
+## Latest public 0.12.22 review release
 
-The local candidate turns the stopped-Bonjour diagnosis into a setup-and-forget
+The public release turns the stopped-Bonjour diagnosis into a setup-and-forget
 flow. There is no Bonjour or discovery repair button on the main screen or in
 the tray. After the application files commit, Setup uses a separate bounded
 administrator step to configure only an exact, safely installed Apple Bonjour
@@ -287,14 +294,16 @@ shorter or absent URI prefixes safely, and rejects incomplete decoded fields
 without terminating the receiver process.
 
 Automated build, native, installer, update, and security gates are recorded in
-the [0.12.22 test plan](docs/releases/0.12.22/TEST_PLAN.md). Installed Windows
-10/11 behavior, physical iPhone pairing/visibility, fullscreen keys, and the
-complete update handoff remain pending until their evidence is recorded. No
-0.12.22 tag or Release exists yet; public 0.12.20 remains updater-visible
-latest. The unpublished 0.12.21 candidate was superseded and will not be tagged
-or reconstructed.
+the [0.12.22 test plan](docs/releases/0.12.22/TEST_PLAN.md). Annotated tag
+`v0.12.22` and normal GitHub Release `379732527` are updater-visible latest with
+exactly four verified public assets; exact identities and fresh-download
+evidence are in the [build report](docs/releases/0.12.22/BUILD_REPORT.md).
+Installed Windows 10/11 behavior, physical iPhone pairing/visibility,
+fullscreen keys, and the complete update handoff remain pending until their
+evidence is recorded. The unpublished 0.12.21 candidate was superseded and will
+not be tagged or reconstructed.
 
-## Latest public 0.12.20 review release
+## Previous public 0.12.20 review release
 
 The public release replaces the 0.12.19 floating fullscreen overlay
 with one native framed viewer and embedded video surface. The normal Windows
@@ -501,14 +510,14 @@ all earlier public assets remain immutable history.
 ## Installer: recommended
 
 For normal use, open the
-[latest AeroMirror release](https://github.com/Nadejny/aeromirror/releases/latest)
+[latest AeroMirror release](https://github.com/pyram1da/aeromirror/releases/latest)
 and download:
 
 ```text
 AeroMirror-Setup-0.12.22.exe
 ```
 
-`v0.12.22` is the normal updater-visible review Release after publication. It
+`v0.12.22` is the normal updater-visible review Release. It
 removes manual discovery repair, gives every unknown iPhone a one-time large
 four-digit pairing code, keeps fullscreen inside the native viewer, adds
 installer-owned Bonjour recovery, and offers verified automatic updates as an
@@ -519,8 +528,8 @@ replaced.
 Scope and pending physical acceptance are in the
 [0.12.22 release notes](docs/releases/0.12.22/RELEASE_NOTES.md) and
 [test plan](docs/releases/0.12.22/TEST_PLAN.md). Exact tag, public assets,
-digests, and re-download evidence are recorded in the versioned build report
-after publication. The historical
+digests, and re-download evidence are recorded in the
+[versioned build report](docs/releases/0.12.22/BUILD_REPORT.md). The historical
 [0.12.8 release notes](docs/releases/0.12.8/RELEASE_NOTES.md) and
 [test plan](docs/releases/0.12.8/TEST_PLAN.md) remain available; 0.12.8 was
 never tagged or published. Published 0.12.7 remains immutable history.
@@ -821,6 +830,7 @@ docs/
     0.12.22/
       RELEASE_NOTES.md       automatic recovery and first-device trust summary
       TEST_PLAN.md           automated evidence and pending physical matrix
+      BUILD_REPORT.md        published tag, assets, hashes, and test status
     0.12.19/
       RELEASE_NOTES.md       non-cropping gallery/fullscreen release summary
       TEST_PLAN.md           gallery, fullscreen, and discovery gates

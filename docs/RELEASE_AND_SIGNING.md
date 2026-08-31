@@ -79,13 +79,13 @@ and narrow firewall rule intentionally remain after AeroMirror uninstall.
 
 ## GitHub update channel
 
-Suggested repository description:
+Configured repository description:
 
 > Open-source AirPlay receiver for Windows 10/11. Mirror an iPhone screen and
 > audio over Wi-Fi with tray mode, one-time PIN trust, a movable viewer, and
 > verified updates.
 
-Suggested topics:
+Configured topics:
 
 ```text
 airplay airplay-receiver screen-mirroring iphone-mirroring iphone ios windows
@@ -144,21 +144,19 @@ corresponding-source validation before publication, and publication still
 requires explicit user authorization. A normal Release may be labelled as a
 review candidate so installed clients can participate in physical testing,
 but it must not be described as accepted until its versioned physical plan
-passes. The local 0.12.22 candidate is authorized for publication only after
-its exact clean-tag, native corresponding-source, package, Setup, and public-
-asset gates pass. It has not yet been tagged or published; physical Windows/
-iPhone rows remain pending and must be stated as such in the Release. The
-0.12.21 candidate was never published and is superseded; never create a
-`v0.12.21` tag or reconstructed asset set. Until 0.12.22 publication completes,
-the 0.12.20 native-viewer/setup review build is the immutable normal
-latest Release. Annotated tag `v0.12.20`, GitHub Release `376224221`, the exact
-four-asset set, checksums, API digests, canonical/legacy latest routes, and
-fresh public re-download equality pass; exact evidence is in
-[`releases/0.12.20/BUILD_REPORT.md`](releases/0.12.20/BUILD_REPORT.md). Installed
-update and the physical matrix remain governed by
-[`releases/0.12.20/TEST_PLAN.md`](releases/0.12.20/TEST_PLAN.md). Publication
-does not claim physical acceptance, and no tag or public asset may be moved or
-replaced. Public `v0.12.19` remains immutable as the previous review release.
+passes. Public `v0.12.22` is the current normal updater-visible review Release.
+Its annotated tag resolves to commit
+`a23f774098ab6b31954de6ad653cfc4d61289e3e`; GitHub Release `379732527`, the
+exact four-asset set, checksums, API digests, canonical/configured-legacy latest
+routes, and fresh unauthenticated re-download equality pass. Exact evidence is
+in [`releases/0.12.22/BUILD_REPORT.md`](releases/0.12.22/BUILD_REPORT.md).
+Physical Windows/iPhone rows remain pending under
+[`releases/0.12.22/TEST_PLAN.md`](releases/0.12.22/TEST_PLAN.md), and publication
+does not claim their acceptance. The 0.12.21 candidate was never published and
+is superseded; never create a `v0.12.21` tag or reconstructed asset set. Public
+`v0.12.20` remains immutable as the previous review release, with its evidence
+in [`releases/0.12.20/BUILD_REPORT.md`](releases/0.12.20/BUILD_REPORT.md). No tag
+or public asset may be moved or replaced.
 The published 0.12.17 Photos-presentation Release is superseded and remains a
 review build until its physical matrix passes; its status is tracked in
 [`releases/0.12.17/TEST_PLAN.md`](releases/0.12.17/TEST_PLAN.md). It must not
@@ -192,10 +190,10 @@ reproducibility, staged runtime, managed, discovery-pipe, exact package, and
 Setup evidence under
 [`releases/0.12.15/TEST_PLAN.md`](releases/0.12.15/TEST_PLAN.md), but is not
 relabelled or published after the 0.12.16 correction. The untagged
-0.12.10–0.12.15 candidates remain local history. Public `v0.12.20` is the
-immutable normal latest review Release until the pending 0.12.22 publication;
-`v0.12.19`, `v0.12.18`, `v0.12.17`, `v0.12.16`, `v0.12.9`, and `v0.12.7`
-remain immutable historical evidence. Historical
+0.12.10–0.12.15 candidates remain local history. Public `v0.12.22` is the
+immutable normal latest review Release; `v0.12.20`, `v0.12.19`, `v0.12.18`,
+`v0.12.17`, `v0.12.16`, `v0.12.9`, and `v0.12.7` remain immutable historical
+evidence. Historical
 0.11 plans remain part of the evidence required before labelling the project
 1.0.
 

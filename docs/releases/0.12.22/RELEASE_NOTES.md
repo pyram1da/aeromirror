@@ -7,10 +7,12 @@ pairing code for each new iPhone, keeps fullscreen inside the native viewer,
 and adds optional verified updates that apply only at a later safe start.
 
 This is a public review release. Clean native reproducibility, the extracted
-no-Git source rebuild, runtime, exact package, and Setup gates are complete;
-exact-tag and public-asset verification remain publication steps. The installed
-Windows/iPhone matrix remains pending until its results are recorded
-in the [test plan](https://github.com/Nadejny/aeromirror/blob/v0.12.22/docs/releases/0.12.22/TEST_PLAN.md).
+no-Git source rebuild, runtime, exact-tag package, Setup, GitHub API, and fresh
+public-download gates are complete. The installed Windows/iPhone matrix remains
+pending until its results are recorded in the
+[test plan](https://github.com/pyram1da/aeromirror/blob/v0.12.22/docs/releases/0.12.22/TEST_PLAN.md).
+Exact publication identities are in the
+[build report](https://github.com/pyram1da/aeromirror/blob/main/docs/releases/0.12.22/BUILD_REPORT.md).
 
 ## Should I update?
 
@@ -114,4 +116,4 @@ in the [test plan](https://github.com/Nadejny/aeromirror/blob/v0.12.22/docs/rele
 ## Durable decisions
 
 The design boundaries are recorded in
-[D-002, D-003, and D-011 through D-017](https://github.com/Nadejny/aeromirror/blob/v0.12.22/docs/DECISIONS.md).
+[D-002, D-003, and D-011 through D-017](https://github.com/pyram1da/aeromirror/blob/v0.12.22/docs/DECISIONS.md).

@@ -72,7 +72,7 @@ rollback behavior.
   `docs/DOCUMENTATION_POLICY.md`.
 - [ ] Move historical build reports and test plans into
   `docs/releases/<version>/` with link-preserving documentation updates.
-- [ ] Keep curated release notes in the repository and use them as the GitHub
+- [x] Keep curated release notes in the repository and use them as the GitHub
   Release body instead of relying on an ignored local artifact.
 
 Acceptance target: a patch cannot reach the release step with inconsistent
@@ -147,10 +147,10 @@ scales.
   next safe application/Windows start while preserving shortcuts, settings,
   receiver identity, trust state, and rollback behavior.
 - [x] Replace the history-heavy README opening with a concise value proposition,
-  download path, and FAQ covering Wi-Fi, Bonjour, PIN trust, privacy, supported
-  Windows versions, fullscreen, updates, and the absence of remote-control and
-  AirDrop claims. Prepare the repository description and topic set for the
-  publication pass.
+  download path, three-step install path, and FAQ covering Wi-Fi, Bonjour, PIN
+  trust, privacy, supported Windows versions, fullscreen, updates, and the
+  absence of remote-control and AirDrop claims. Apply the reviewed repository
+  description, topic set, and canonical latest-release homepage.
 - [ ] Capture and add genuine product screenshots after physical 0.12.22
   acceptance. Do not fabricate a stream image or reuse a screenshot that shows
   private phone, network, path, or account data.
