@@ -17,7 +17,9 @@
   Should I update? For the viewer/update corrections and Close/reconnect review
   testing; physical iPhone acceptance remains pending. Older updaters affected
   by the repository rename may require a manual Setup download. Keep a working
-  installer for rollback. Normal-channel publication was authorized on September 6.
+  installer for rollback. Published on September 6 as normal latest after
+  explicit authorization; all four public downloads, digests and latest routes
+  pass. Exact publication evidence is in docs/releases/0.12.30/BUILD_REPORT.md.
 
 ## 0.12.29 — bounded update checks (local audit candidate)
 

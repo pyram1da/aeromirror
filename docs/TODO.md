@@ -965,7 +965,7 @@ reconnect guidance.
   and verify a live metadata GET through the .29 packaged shell. Do not infer
   an installer download/install or a GitHub publication from this read-only check.
 - [ ] Reconcile caption close with the requested stop-AirPlay-session behavior.
-  Local .30 adds immutable stream IDs, exact HTTP-owner close, correlated
+  The .30 review release adds immutable stream IDs, exact HTTP-owner close, correlated
   results, late-SHOW suppression and session-scoped shell dismissal. Fifty
   loopback close/reconnect cycles, same-socket replacement, peer retention and
   stop cancellation pass. Do not mark this row accepted until a real iPhone
@@ -973,8 +973,9 @@ reconnect guidance.
   after lock-then-close. Both viewer Close and continuity-warning Close are
   wired through the same native handler; stale PID/generation/stream tests pass.
   Explicit completion also clears managed activity/loss recovery without a
-  legacy stop line. The .30 Setup and final packaged checks are ready locally.
-  See releases/0.12.30/TEST_PLAN.md.
+  legacy stop line. The .30 normal-channel review Release is published with
+  exact-tag, packaged-shell and public download gates passing; this row stays
+  open for physical acceptance. See releases/0.12.30/TEST_PLAN.md and BUILD_REPORT.md.
 - [ ] Keep the 0.12.26 stopped-Bonjour physical row PENDING until the user tests
   the contextual action after a later real service stop; do not infer success
   from the local service-state or automated checks.

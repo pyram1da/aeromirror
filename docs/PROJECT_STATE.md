@@ -1,14 +1,18 @@
 # Project state
 
-## Publication in progress — 0.12.30 session-only Close
+## Published review — 0.12.30 session-only Close
 
 - On September 6 the user explicitly authorized GitHub publication after the
-  local candidate handoff. Publish one normal updater-visible review release
-  with exactly Setup, shell source, native corresponding source and checksums.
-  Physical acceptance stays pending; no local installation is authorized.
-- GitHub preflight confirmed public repository ID 1324108899,
-  `pyram1da/aeromirror`, default branch `main`, remote HEAD `01f4d60`, and no
-  existing .30 tag or Release. Public .22 is unchanged until publication.
+  local candidate handoff. Release `383636375`, `v0.12.30`, was published at
+  `2026-09-06T15:50:53Z` as the normal latest review release in
+  `pyram1da/aeromirror` (repository ID 1324108899). Physical acceptance remains
+  pending; publication did not authorize or perform a local installation.
+- Source commit `de0545edacd4ad0515e4835f870c7bd73e3e42f5` and annotated tag
+  object `21b4b948da487fed35e0ec51c9d7bd38b13e85fa` are pushed. The exact four
+  public files are Setup, shell source, native corresponding source and checksums.
+  Anonymous re-download sizes/hashes, API digests, canonical/historical latest
+  routes and the packaged .30 updater's live metadata check pass. Public .22
+  and all previous tags/assets remain immutable history.
 
 - Implemented D-018 with immutable native stream IDs and an HTTP-owner close
   mailbox, separate from type-based cleanup. Prepared source is isolated at
@@ -20,18 +24,22 @@
 - The continuity warning captures its process/managed/native identity and uses
   the same Qt Close handler. A matching completion ends managed activity and
   cancels that session's loss watchdog, even without the old stop log line.
-- Local Setup/payload/corresponding source are ready. Fifty loopback lifecycle
+- Public clean exact-tag Setup/payload/corresponding-source packaging passes.
+  Fifty loopback lifecycle
   cycles, stale/replacement/stop races, exact packaged-shell regression gates,
   native worker/core/Qt checks and all four non-installing Setup gates pass.
-  Two native builds and the extracted no-Git source rebuild produce the same
-  core. Runtime dependency and isolated self-test checks pass.
-- Hashes and evidence limits: releases/0.12.30/LOCAL_BUILD_REPORT.md. Installed
-  .28 and frozen .28/.29 artifacts were verified unchanged. No installation,
-  source push, tag, Release, settings reset or live Bonjour change was performed.
-- Next: clean exact-tag packaging, public four-asset verification and a
-  post-release build report, then physical iPhone Close/reconnect on both
-  windows, including lock-then-close. The codec/Z-order/Bonjour matrix remains pending. Do not
-  claim iOS disconnection from native results or loopback tests alone.
+  Two native builds and both local/public extracted no-Git source rebuilds
+  produce the same core. Runtime dependency and isolated self-test checks pass.
+- Public identities and evidence limits: releases/0.12.30/BUILD_REPORT.md.
+  LOCAL_BUILD_REPORT.md retains the frozen pre-publication artifact hashes;
+  the exact-tag rebuild is separate. Installed .28 and frozen .28/.29 artifacts
+  remain untouched. No settings/key reset or live Bonjour change was performed.
+- Older updaters affected by the owner rename may need a manual Setup download;
+  current latest-route visibility is not proof that those old binaries accept it.
+- Next: physical iPhone Close/reconnect on both windows, including lock-then-close.
+  The codec/Z-order/Bonjour matrix remains pending. Do not claim iOS disconnection
+  from native results or loopback tests alone. Do not replace .30 assets or move
+  its tag; any product correction needs a new patch version.
 
 Last updated: 2026-09-06
 

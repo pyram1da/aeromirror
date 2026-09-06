@@ -5,9 +5,12 @@
 The session-only Close candidate passed local packaging and test gates. On
 September 6 the user explicitly authorized its normal-channel review publication
 before the remaining physical matrix. Local pre-release hashes are retained in
-`releases/0.12.30/LOCAL_BUILD_REPORT.md`; public exact-tag evidence belongs in
-`releases/0.12.30/BUILD_REPORT.md`. Publication does not imply physical acceptance
-or authorize changing the installed receiver.
+`releases/0.12.30/LOCAL_BUILD_REPORT.md`; public exact-tag evidence is in
+[`releases/0.12.30/BUILD_REPORT.md`](releases/0.12.30/BUILD_REPORT.md).
+Release `383636375` was published at `2026-09-06T15:50:53Z` as normal latest;
+four anonymous re-downloads, API digests, latest routes and the packaged .30
+updater's live metadata parse pass. Publication does not imply physical
+acceptance or authorize changing the installed receiver.
 
 Prepared native-source packaging also supports pinned linked Git worktrees:
 resolve Git's actual object store while retaining the isolated temporary index,
@@ -118,13 +121,13 @@ GitHub account or access token for a public repository. It displays the
 release name and curated release body before the user decides whether to
 update.
 
-Local .29 also bounds this metadata response to 1 MiB and one 30-second
+Version .30 includes .29's bounds on metadata: 1 MiB and one 30-second
 whole-transfer deadline, with no automatic redirects. These are transport
 budgets, not an alternative to the exact tag, asset URL and SHA-256 gates below.
 Owner cancellation discards unfinished metadata/download work without changing
 the normal Release channel or launching Setup.
 
-The .29 metadata endpoint is exactly
+The .30 metadata endpoint, introduced in local .29, is exactly
 `https://api.github.com/repositories/1324108899/releases/latest`. This ID was
 confirmed through GitHub's public API for `pyram1da/aeromirror`; the historical
 slug above redirects there. Keep the local compatibility marker unchanged, but
@@ -143,7 +146,7 @@ example `v0.12.7`. It rejects an unprefixed, two-part, four-part, suffixed, or
 otherwise malformed value. Do not rely on a tag such
 as `v0.12.7-beta` being normalized into the public update channel.
 
-For a candidate version `X.Y.Z`, local .29 accepts exactly these two confirmed
+For a candidate version `X.Y.Z`, .30 accepts exactly these two confirmed
 repository names in the initial download URL:
 `https://github.com/pyram1da/aeromirror/releases/download/vX.Y.Z/AeroMirror-Setup-X.Y.Z.exe`
 or the historical
@@ -155,6 +158,11 @@ GitHub release-asset host set. The response body is size-limited, written to a
 new per-user staging file, flushed, and SHA-256 verified before it can become a
 pending update. Manual and automatic modes share this exact downloader and do
 not fall back to the first `.exe` asset.
+
+Older installed updaters whose asset allowlist predates the repository rename
+may reject canonical-owner Setup URLs even when they can read the Release.
+They may require a manual Setup download; normal latest-channel publication
+cannot retroactively change their compiled allowlist.
 
 The current application checks GitHub's `releases/latest` endpoint. A release
 that should be found by installed AeroMirror clients must therefore be
@@ -174,15 +182,19 @@ corresponding-source validation before publication, and publication still
 requires explicit user authorization. A normal Release may be labelled as a
 review candidate so installed clients can participate in physical testing,
 but it must not be described as accepted until its versioned physical plan
-passes. Public `v0.12.22` is the current normal updater-visible review Release.
+passes. Public `v0.12.30` is the current normal updater-visible review Release.
 Its annotated tag resolves to commit
-`a23f774098ab6b31954de6ad653cfc4d61289e3e`; GitHub Release `379732527`, the
+`de0545edacd4ad0515e4835f870c7bd73e3e42f5`; GitHub Release `383636375`, the
 exact four-asset set, checksums, API digests, canonical/configured-legacy latest
-routes, and fresh unauthenticated re-download equality pass. Exact evidence is
-in [`releases/0.12.22/BUILD_REPORT.md`](releases/0.12.22/BUILD_REPORT.md).
+routes, permanent-repository-ID metadata, the packaged updater parse and fresh
+unauthenticated re-download equality pass. Exact evidence is
+in [`releases/0.12.30/BUILD_REPORT.md`](releases/0.12.30/BUILD_REPORT.md).
 Physical Windows/iPhone rows remain pending under
-[`releases/0.12.22/TEST_PLAN.md`](releases/0.12.22/TEST_PLAN.md), and publication
-does not claim their acceptance. The 0.12.21 candidate was never published and
+[`releases/0.12.30/TEST_PLAN.md`](releases/0.12.30/TEST_PLAN.md), and publication
+does not claim their acceptance. Public `v0.12.22`, Release `379732527`, remains
+immutable historical evidence in
+[`releases/0.12.22/BUILD_REPORT.md`](releases/0.12.22/BUILD_REPORT.md).
+The 0.12.21 candidate was never published and
 is superseded; never create a `v0.12.21` tag or reconstructed asset set. Public
 `v0.12.20` remains immutable as the previous review release, with its evidence
 in [`releases/0.12.20/BUILD_REPORT.md`](releases/0.12.20/BUILD_REPORT.md). No tag
@@ -220,8 +232,8 @@ reproducibility, staged runtime, managed, discovery-pipe, exact package, and
 Setup evidence under
 [`releases/0.12.15/TEST_PLAN.md`](releases/0.12.15/TEST_PLAN.md), but is not
 relabelled or published after the 0.12.16 correction. The untagged
-0.12.10–0.12.15 candidates remain local history. Public `v0.12.22` is the
-immutable normal latest review Release; `v0.12.20`, `v0.12.19`, `v0.12.18`,
+0.12.10–0.12.15 candidates remain local history. Public `v0.12.30` is the
+immutable normal latest review Release; `v0.12.22`, `v0.12.20`, `v0.12.19`, `v0.12.18`,
 `v0.12.17`, `v0.12.16`, `v0.12.9`, and `v0.12.7` remain immutable historical
 evidence. Historical
 0.11 plans remain part of the evidence required before labelling the project

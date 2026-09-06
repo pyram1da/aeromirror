@@ -44,6 +44,19 @@ exact hashes, test scope and deployment warnings.
 No physical .30 test has been recorded. Automated listener/worker checks do
 not transmit iPhone media and do not establish the iOS Screen Mirroring state.
 
+## Public release verification — 2026-09-06
+
+PASS: clean exact-tag packaging from `de0545e`, all four non-installing Setup
+gates, five regression suites against the rebuilt public packaged shell, and
+the public native-source ZIP's no-Git rebuild with the pinned core hash.
+All four freshly downloaded public assets match local sizes/hashes and GitHub
+API digests. SHA256SUMS, canonical/historical API and HTML latest routes,
+permanent-repository-ID metadata and the historical Setup download pass.
+The production packaged .30 updater parses public version `0.12.30`; its 15
+isolated checks plus the live metadata GET pass without installing anything.
+See [BUILD_REPORT.md](BUILD_REPORT.md) for immutable public identities and
+the distinction from the earlier local build.
+
 ## Physical acceptance
 
 1. Start mirroring without resizing or fullscreen. Verify visible pixels.
@@ -62,5 +75,5 @@ black normal viewer or iPhone still mirroring after a reported successful Close
 blocks acceptance as a fix. On September 6 the user explicitly authorized a
 normal-channel review publication with these physical rows pending. This is
 not acceptance of those rows and does not authorize a local installation.
-Public artifact and route evidence must be added to BUILD_REPORT.md after
-clean exact-tag packaging and publication.
+Public artifact and route evidence is recorded in BUILD_REPORT.md after
+clean exact-tag packaging and publication. Physical rows remain pending.

@@ -122,8 +122,8 @@ settings form is disposed and retains failed window-policy changes for retry.
 An executable regression reproduces the old displacement and passes with the
 correction. The user reports .28 works on the test PC; the full codec/window
 and Bonjour matrix remains unrecorded. Local .29 continues the update-work
-audit without changing the .28 native/video baseline. Neither is a published
-update.
+audit without changing the .28 native/video baseline. Neither was published as
+a standalone release; their corrections are included in public .30.
 
 ### What changes in 0.12.30?
 
@@ -355,12 +355,26 @@ compatibility across other iPhone, iOS, GPU, or preset combinations.
 The rejected 0.12.23 candidate tried to compensate by widening the normal
 viewer to 4:5. That code has been removed, and any old 0.12.23 local artifact is
 superseded and must not be installed or published. There is no public
-`v0.12.23`, `v0.12.24`, `v0.12.25`, or `v0.12.26` Release; the download link
-above still points to immutable public 0.12.22.
+`v0.12.23`, `v0.12.24`, `v0.12.25`, or `v0.12.26` Release. The accepted
+portrait negotiation and later viewer corrections are included in public .30.
 
-## Latest public 0.12.22 review release
+## Latest public 0.12.30 review release
 
-The public release turns the stopped-Bonjour diagnosis into a setup-and-forget
+Normal latest Release `383636375` contains the viewer/gallery/update fixes and
+session-only Close work developed since .22. Its annotated tag `v0.12.30`
+resolves to `de0545edacd4ad0515e4835f870c7bd73e3e42f5`. All four public files,
+anonymous re-downloads, API digests and latest routes pass; the packaged .30
+updater reads this version. See the [build report](docs/releases/0.12.30/BUILD_REPORT.md)
+and [release notes](docs/releases/0.12.30/RELEASE_NOTES.md).
+
+This remains a review release: actual iPhone Close/reconnect, lock-then-close,
+codec/window, Bonjour and installed-update checks remain pending. If an older
+updater cannot use the renamed repository, download Setup manually from the
+release page. No previous public tag or asset was replaced.
+
+## Previous public 0.12.22 review release
+
+That release turned the stopped-Bonjour diagnosis into a setup-and-forget
 flow. There is no Bonjour or discovery repair button on the main screen or in
 the tray. After the application files commit, Setup uses a separate bounded
 administrator step to configure only an exact, safely installed Apple Bonjour
@@ -393,7 +407,7 @@ without terminating the receiver process.
 
 Automated build, native, installer, update, and security gates are recorded in
 the [0.12.22 test plan](docs/releases/0.12.22/TEST_PLAN.md). Annotated tag
-`v0.12.22` and normal GitHub Release `379732527` are updater-visible latest with
+`v0.12.22` and normal GitHub Release `379732527` were updater-visible latest with
 exactly four verified public assets; exact identities and fresh-download
 evidence are in the [build report](docs/releases/0.12.22/BUILD_REPORT.md).
 Installed Windows 10/11 behavior, physical iPhone pairing/visibility,
@@ -434,7 +448,7 @@ upstream runtime before it commits an installation.
 Managed, native, corresponding-source, package, and non-installing Setup gates
 pass. Annotated tag `v0.12.20` resolves to commit
 `288b8976d413861ab77bf1721e20f047e0480952`; normal GitHub Release
-`376224221` is the updater-visible latest release with exactly four verified
+`376224221` was the updater-visible latest release with exactly four verified
 assets. The physical Windows/iPhone matrix remains pending in the
 [0.12.20 test plan](docs/releases/0.12.20/TEST_PLAN.md) and
 [release notes](docs/releases/0.12.20/RELEASE_NOTES.md); exact public identities
