@@ -1,5 +1,45 @@
 # Architecture
 
+## Window placement and background-result ownership
+
+The managed shell owns desktop placement only for a top-level renderer HWND.
+`EVENT_OBJECT_SHOW` also reports child windows; a matching process and renderer
+title do not establish a top-level window. Validate the root ancestor and the
+absence of `WS_CHILD` before restoring saved desktop coordinates. The lookup,
+saved-placement and aspect-fit mutation boundaries enforce the same rule.
+Qt owns the external video surface and GStreamer owns its internal child;
+neither child receives shell window-placement coordinates. Owned top-level
+windows remain top-level and are not rejected merely for having an owner.
+Window policy is acknowledged only after its style/frame and Z-order calls
+succeed; failure remains eligible for supervision retry.
+
+Manual-update results pass through `ControlWorkQueue`, which belongs to the
+settings form lifetime. A queued callback owns its result until the UI claims
+it; handle destruction or disposal atomically cancels pending callbacks and
+runs their cleanup once. A verified downloaded Setup belongs either to this
+pending handoff, the UI launch routine, or the launched installer, never to a
+shared worker/UI path field. Actual UI actions execute on the owner thread.
+
+`ReleaseMetadataClient` owns the metadata HTTP transport: no automatic
+redirect/decompression, at most 1 MiB, and one 30-second deadline across headers
+and all body reads. The deadline aborts the exact request, including a
+progressing slow body. `UpdateService` retains fixed-repository and strict
+release/asset parsing. Metadata uses confirmed repository ID `1324108899`
+directly; exact initial Setup paths allow only `pyram1da/aeromirror` and the
+historical `Nadejny/aeromirror` name. The legacy configuration marker remains
+unchanged. Installer transfer retains its separate HTTPS-hop,
+64 MiB, per-I/O timeout and SHA-256 policy.
+
+`UpdateWorkScope` owns cancellation for manual and automatic workers separately.
+An operation's source survives owner cancellation until that worker finishes;
+Cancel and source disposal are serialized. Token callbacks only abort I/O and
+must not invoke UI or re-enter the scope. Actual form close/disposal and process
+quit also close the result queue; hiding to tray does neither. Automatic opt-out
+cancels pending operations without closing the scope, so later opt-in can start
+fresh work. Existing epoch checks still guard stage publication. Cancellation
+never launches Setup or restarts the receiver; installer ownership transfers
+only through the existing verified handoff.
+
 ```text
 iPhone
   │ AirPlay + local network discovery
@@ -315,9 +355,12 @@ changes user input. The native DNS-SD layer independently enforces the same
 or advanced argument overrides. AirPlay, RAOP, and `/info` use that one stored
 canonical name; blank input falls back to `AeroMirror`.
 
-There is no user-facing discovery-restart or Bonjour-repair control on the
-main page or tray. A physical IPv4 change still uses an internal full restart
-because the separate BLE helper does not yet support in-process
+There is no permanent discovery-restart or Bonjour-repair control on the main
+page or tray. When the exact validated Apple service is actually `Stopped`,
+the existing network-error card may expose one contextual **Start Bonjour**
+action. It is absent while the prerequisite is healthy and never runs from a
+startup path or timer. A physical IPv4 change still uses an internal full
+restart because the separate BLE helper does not yet support in-process
 reconfiguration. The wrapper buffers
 the helper's arbitrary output chunks into complete lines, forwards them to
 stderr with an `AEROMIRROR_BLE` prefix, and the managed shell observes those
@@ -339,14 +382,38 @@ process alive. Managed renewal does not consume its renewal count or use a
 process-restart fallback while the service is stopped.
 
 Ordinary application startup and monitoring remain read-only and unelevated.
-While discovery is degraded, the shell assesses the exact service state on a
-short background interval. `Stopped`, `StopPending`, and `Unknown` do not
-restore ready or spend a DNS-SD refresh. When the validated service returns to
-`Running`, one atomic recovery latch submits a same-process refresh; only a
-failed writer may schedule one final submission, so at most two requests occur
-for the recovery event. A correlated `AEROMIRROR_DNSSD_READY` result is required
-before ready returns. The UI may report the problem, but it provides no button
-that starts the service, edits its configuration, or changes the firewall.
+While discovery is degraded, a bounded periodic monitor assesses the exact
+service state without requesting elevation. Every non-`Running` state,
+including `StartPending`, `ContinuePending`, `StopPending`, `PausePending`,
+`Paused`, `Stopped`, and `Unknown`, leaves discovery degraded and spends no
+DNS-SD refresh. When the validated service returns to `Running`, one atomic
+recovery latch submits a same-process refresh; only a failed writer may schedule
+one final submission, so at most two requests occur for the recovery event. A
+correlated `AEROMIRROR_DNSSD_READY` result is required before ready returns.
+
+Version 0.12.26 adds one explicit escape hatch for the observed case where
+Windows has exhausted Bonjour's configured 5/30/120-second restart actions.
+Only a click on the contextual error-card action may invoke the protected
+`%SystemRoot%\System32\sc.exe` with `runas` and the exact allowlisted service
+name `Bonjour Service` or `mDNSResponder`. The runtime validates the canonical
+Apple identity, its service-object owner/configuration DACL, and the protected
+executable path chain before prompting. It separately validates every component
+from the canonical Windows `sc.exe` through the Windows directory, requires the
+exact `Stopped` state, and accepts only one concurrent request. `Running`,
+`StartPending`, `ContinuePending`, `StopPending`, `PausePending`, `Paused`,
+unknown, missing, or unsafe states cannot expose or reach the start command.
+The runtime then independently validates the identity again and waits for the
+actual `Running` state. One click can request at most one UAC prompt;
+cancellation, timeout, a nonzero command result, or an unsafe identity never
+causes an automatic retry or another prompt. If the bounded result is reached
+while the elevated `sc.exe` is still live, AeroMirror reports the result but
+retains the one-flight latch and process handle until exit is confirmed. This
+latch is an in-process concurrency boundary, not persistent cross-launch state.
+If Windows recovery won the race and the command itself reports an error, the
+fresh validated `Running` state is authoritative. Success only accelerates the
+existing same-process DNS-SD monitor; it does not reset its two-request budget,
+change service configuration, edit the firewall, restart the core, or change
+the AirPlay ports.
 
 Machine configuration belongs to Setup after the per-user install commit. The
 elevated branch accepts only the exact Apple Bonjour service identities and a
@@ -476,21 +543,23 @@ remains non-persistable.
 
 Later sizes whose normalized aspect matches within `0.03` are authoritative
 rotation events, while other ratios retain the learned device orientation.
-The exact correlated Photos signature is the sole narrow exception: it may
-temporarily reshape the outer window after a device frame without replacing
-that frame as the trusted baseline. A later `998x2160` frame therefore returns
-the window to portrait, and physical `1080x1920`/`1920x1080` devices remain
-eligible. A session exposing only the exact canvas receives a provisional
-landscape outer fit, but its physical device orientation is still unresolved
+The exact correlated Photos signature is the sole narrow exception: it can
+select a provisional media target after a device frame without replacing that
+frame as the trusted baseline. With a trusted portrait frame, the presentation
+target keeps that phone shape. A later `998x2160` frame therefore remains
+portrait, and physical `1080x1920`/`1920x1080` devices remain eligible. A
+session exposing only the exact canvas receives a conservative provisional
+portrait target, but its physical device orientation is still unresolved
 because stdout provides no independent orientation metadata.
 
-Version 0.12.18 supersedes that presentation target without changing the
-trusted-baseline rule. The exact ambiguous canvas resolves to the last trusted
-device-frame shape; when no phone-shaped marker exists yet, the shell uses a
-conservative `900x1950` portrait presentation target but does not store it as
-device orientation. A trusted landscape target remains landscape. This keeps
-direct-in-Photos portrait usable while preserving the distinction between a
-presentation fallback and protocol evidence.
+Version 0.12.18 superseded the earlier provisional landscape target without
+changing the trusted-baseline rule. The exact ambiguous canvas resolves to the
+last trusted device-frame shape; when no phone-shaped marker exists yet, the
+shell uses a conservative `900x1950` portrait presentation target without
+storing it as device orientation. A trusted landscape target remains
+landscape. The local 0.12.23 experiment that widened this target to 4:5 was
+rejected and removed; 0.12.24 preserves the accepted outer-window policy while
+testing the upstream display negotiation separately.
 
 The shell installs an out-of-context WinEvent hook scoped to the active native
 core process and watches both the renderer's early show event and interactive
@@ -530,6 +599,32 @@ follow the trusted phone shape, but the complete transport frame is contained;
 letterboxing is accepted until the native boundary exposes a trustworthy
 content rectangle. No pixel classification or generic crop inference is used.
 
+Version 0.12.24 introduces one isolated negotiation probe rather than another
+presentation workaround. For the `4k60` preset, the shell still requests H.265
+and 60 fps but advertises a portrait `998x2160@60` display to the iPhone instead
+of `3840x2160@60`. Model, feature bits, rotation policy, renderer selection,
+sink scale, and outer-window behavior stay unchanged. This device-specific
+value is diagnostic, not a new release default: only a physical A/B can show
+whether Photos stops switching to the separate `3840x2160` presentation canvas.
+
+The same candidate adds observational records at independent native
+boundaries. The `/info` response logs one `AEROMIRROR_DISPLAY_INFO` marker
+containing only the receiver-configured model, feature masks, logical/pixel
+geometry, physical-size placeholder advertised to the sender, rotation policy,
+refresh period, maximum fps, and overscan flag. Sender header geometry retains
+its existing sender-side generation and is authoritative only for that parser
+timeline. A separate non-mutating sink-pad probe logs every actual
+`AEROMIRROR_VIDEO_SINK_CAPS` event with sink-local `caps_seq`, negotiated width,
+height, and pixel-aspect ratio. If the first buffer arrives before an observed
+CAPS event, one current-caps snapshot is logged as a fallback. The probe reads
+`GstVideoCropMeta` on the first buffer after CAPS, whenever its presence or
+rectangle changes, and every 120 buffers; those records carry sink-local
+`caps_seq`, `buffer_seq`, reason, and PTS validity. No one-to-one mapping between
+sender generations and sink sequences is asserted, and absence of a CAPS event
+is itself evidence. The probe does not insert a capsfilter, videoscale,
+videocrop, render rectangle, or pixel mapper. It records no plist body, client
+identifier, frame payload, or sampled image data.
+
 Presentation commands share the redirected standard-input control channel with
 discovery commands. The shell serializes writes and revalidates current process
 identity. Version 0.12.20 accepts only exact
@@ -540,20 +635,144 @@ The native wrapper owns one framed viewer and one child video-surface HWND.
 The selected GStreamer sink binds through `GstVideoOverlay`, explicitly keeps
 `force-aspect-ratio` enabled when supported, and never sets a crop/render
 rectangle. The normal viewer remains movable, resizable, and minimizable with
-standard Windows chrome. Caption Close is deliberately a minimize-equivalent:
+standard Windows chrome. Through 0.12.29, Caption Close is a minimize-equivalent:
 it first leaves fullscreen and acknowledges normal state, then minimizes
 without hiding the HWND or clearing the active renderer generation. This keeps
 the current stream alive and prevents a repeated codec-selection callback from
 stealing focus by reopening a window the user dismissed.
 
+The 0.12.30 candidate implements D-018 separately from discovery recovery.
+Every successful mirror SETUP binds an immutable, non-reused ID to its HTTP
+connection. The mirror worker carries that ID to the renderer; SHOW includes
+both host generation and stream ID. Qt admits one bounded session-close
+request before hiding and suppresses later SHOW for that dismissed stream.
+Only the HTTP owner selects the ID, destroys that connection's media workers,
+and reports the correlated closed/stale/stopping result. It does not select by
+connection type, recycled socket or pointer. The listener and DNS-SD/BLE are
+not restarted by Close. The short RAOP command borrow is withdrawn before
+destruction; pipeline reset transactions are serialized without holding their
+mutex across HTTP/RTP joins. Shell dismissal also requires the current native
+stream ID. A native result does not prove iPhone UI disconnection.
+
+The managed continuity warning captures its process ID, managed generation and
+native stream ID before snapshot preparation and revalidates them before use.
+User dismissal latches only that matching generation. Outside the lifecycle
+lock it writes `AEROMIRROR_COMMAND close-session session=<id>`; the pipe writer
+rechecks the expected process under its own lock. The native stdin reader posts
+the immutable ID through the private in-process HWND bridge, not a captured Qt
+object. The GUI runs the same exact-session handler as Caption Close and owns
+the correlated request sequence. Both closed-marker sources are accepted only
+for the current PID and native ID. Programmatic warning closure sends no stop.
+The exact matching `result=closed` completion ends managed session maintenance
+and cancels that session's loss watchdog even when socket wake/EOF cleanup did
+not emit the legacy mirroring-stop line. A stale/unavailable result or an old
+process/session cannot change the successor's activity or recovery state.
+
+Version 0.12.25 attempted an explicit surface-exposure rendezvous without moving
+presentation ownership. In that candidate, the native lifecycle, not Qt, owned
+and advanced the SHOW generation. Renderer code still posts SHOW asynchronously
+to the Qt GUI
+owner; it never blocks a GStreamer/RAOP thread through Win32 `SendMessage`.
+After Qt processes SHOW, a GUI-owner callback validates the registered child
+HWND's inherited visibility and nonzero client area and acknowledges READY for
+that exact generation through one narrow libuxplay API. Readiness retry is
+bounded and coalesced rather than periodic.
+
+Separately, the first Present from the selected D3D11 sink records frame/swap-
+chain readiness with atomics and posts the native generation back to Qt. The
+Present callback never invokes expose or synchronously waits for the GUI. Its
+host proof remains installed when the separate failure-recovery sink-pad probe
+is attached; the diagnostic/recovery probe must not displace the presentation
+proof. A later Qt event-loop turn revalidates the generation and child HWND.
+Under `renderer_lock`, libuxplay then takes a strong reference only to the
+selected host sink and copies its static codec label; after releasing the lock
+it invokes `gst_video_overlay_expose()` and releases the reference.
+
+In the 0.12.25 path, Show and WindowStateChange events could request a coalesced
+re-expose only after that surface acknowledged READY; they did not create a
+polling repaint loop. Its `WinIdChange` path retried the handle read for a
+bounded interval, temporarily suppressed SHOW, rebound every current
+`GstVideoOverlay` sink, cleared the old rendezvous, and started a fresh native
+generation only after rebind finished. HIDE likewise invalidated queued READY,
+Present, and expose work.
+GUI-callable host-surface APIs do not write through the receiver logger because
+those calls may race the logger's destruction during shutdown.
+
+Physical testing showed that the 0.12.25 post-Present redraw was insufficient:
+a fresh normal viewer could still stay black until a fullscreen transition.
+Version 0.12.26 therefore moves the decisive ordering boundary earlier. Fresh
+mirror pipelines start in `READY`, not `PAUSED`; the mirroring callback claims
+an immutable renderer-session generation, selects the required H.264/H.265
+sink, requests SHOW, and waits only for the bounded GUI-owned READY
+acknowledgement of the real child HWND. While that same generation, HWND, and
+selected renderer remain current, libuxplay binds the selected
+`GstVideoOverlay` sink, commits that exact-generation binding, and only then
+moves the selected pipeline to `PLAYING`. Unselected codec pipelines are
+quiesced after the selection becomes ready.
+
+A real child-HWND replacement is a separate serialized transition. After Qt
+supplies and registers the new real child HWND, libuxplay takes the selected
+pipeline to `NULL` before applying that handle to the sink, returns the pipeline
+to `READY`, and requests a fresh SHOW/READY acknowledgement. It then rebinds
+the selected sink and commits the binding only if the generation and HWND are
+still current, and only afterward
+restores `PLAYING`. Old-handle and old-generation work cannot publish or resume
+the pipeline. No fullscreen or synthetic resize is used to create the surface.
+
+Start, stop, and destroy serialize through one renderer-state owner and advance
+the generation before old pipelines can publish or accept frames. Each media
+callback carries its claimed generation in thread-local state; each bus watch
+carries an immutable generation context. Stale callbacks may retain references
+long enough to finish, but cannot select a renderer, change a new pipeline's
+state, or push into a later session. Stop flushes the selected bus and clears
+published renderer state before setting the old pipeline to `NULL`; destroy
+waits for bounded bus/operation references before freeing renderer structures.
+The nonblocking appsrc push remains inside the state boundary so a stop/start
+cannot cross it. The 0.12.25 first-Present/expose path remains a guarded redraw
+aid after correct binding, not the mechanism that makes the first surface
+exist. An expose request is executable only when the current lifecycle, READY,
+bound, and Present generations are identical; a handle or generation change
+makes the queued request inert.
+
+This is GStreamer's standard redraw path for an application-owned drawable; it
+does not set a render rectangle, resize or fullscreen the window, crop or scale
+media, reset the pipeline, or prove that the requested redraw reached the
+physical display. The SHOW/EXPOSE markers are therefore ordering evidence only.
+
+The native video child is a dedicated `RendererVideoSurface`, not a raster
+QWidget. It returns a null paint engine, retains `WA_PaintOnScreen`, disables
+system background painting and auto-fill, and leaves its HWND pixels to
+GstVideoOverlay. On Windows the paint-engine override is essential: the base
+QWidget ignores PaintOnScreen. Qt still owns sizing, focus, events and lifetime;
+this does not change negotiated media dimensions or introduce a redraw loop.
+
+The same SHOW boundary applies a one-time foreground policy. Qt samples the
+foreground HWND before making the viewer visible. An external visible window
+whose client bounds cover the complete monitor is treated as fullscreen: the
+viewer uses show-without-activation and is inserted behind it. Otherwise the
+viewer is raised once within the ordinary non-topmost window band, also without
+activation, so the user's keyboard focus does not move. The result is verified
+against visible ordinary windows. If Windows reports success but leaves one
+above the viewer, a repeated fullscreen-foreground guard precedes one immediate
+`HWND_TOPMOST` / `HWND_NOTOPMOST` transaction. The demotion is unconditional;
+no topmost state survives the operation. If demotion cannot be confirmed the
+viewer is hidden and placement is reported failed, never accepted as raised.
+There is no focus request or timer-based raise. If external fullscreen content is
+present, an initial automatic AeroMirror fullscreen request is deferred; a
+later explicit user fullscreen command remains authoritative.
+
 A minimized top-level HWND remains `WS_VISIBLE`. The shell therefore still
 finds it when `ShowStreamInTaskbar=false` changes only its extended style to
 `WS_EX_TOOLWINDOW`; the explicit **Show stream window** tray action restores it
 with `ShowWindow(SW_RESTORE)` and activates it. Tray fullscreen remains a
-separate state-set path. Renderer stop/destroy, not Caption Close, owns the
+separate state-set path. Renderer stop/destroy owns the
 `visible=1 -> 0` compare-and-swap and final HIDE. The next renderer session then
 owns the next SHOW. The maximize caption action means fullscreen. Escape and
 Alt+Enter are handled by that same native viewer.
+
+In .30, Caption Close may hide the GUI after admission, but native stop/destroy
+still owns that final HIDE and renderer-generation invalidation. It does not
+reuse the old type-based removal mailbox for a user dismissal.
 
 Every caption, Escape, Alt+Enter, or shell request reaches one idempotent native
 setter. The core reports exact requested/actual state, result, generation, and

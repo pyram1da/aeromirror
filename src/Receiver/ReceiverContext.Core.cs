@@ -28,6 +28,11 @@ namespace AirPlayReceiverMvp
         private const int IdleDiscoveryLegacyRestartLimit = 2;
         private const int MissingBonjourExitCode = 20;
         private const int BonjourServiceNotRunningError = -65563;
+        // 0.12.24 diagnostic: ask the sender for the iPhone's native portrait
+        // canvas so we can verify whether Photos' 3840x2160 switch is caused
+        // during AirPlay display negotiation. This must not reshape the window.
+        private const string PortraitDisplayNegotiationProbe =
+            "998x2160@60";
 
         private enum LostConnectionRecoveryAction
         {
@@ -684,7 +689,7 @@ namespace AirPlayReceiverMvp
         }
 
         private bool TryWriteNativeVideoCommand(
-            string command, string description)
+            string command, string description, int expectedProcessId = 0)
         {
             if (string.IsNullOrWhiteSpace(command) ||
                 command.IndexOfAny(new[] { '\r', '\n' }) >= 0)
@@ -699,7 +704,8 @@ namespace AirPlayReceiverMvp
                 int processId;
                 try { processId = process.Id; }
                 catch { return false; }
-                if (!object.ReferenceEquals(coreProcess, process) ||
+                if ((expectedProcessId != 0 && processId != expectedProcessId) ||
+                    !object.ReferenceEquals(coreProcess, process) ||
                     !IsCoreRunning || restartPending ||
                     Interlocked.CompareExchange(
                         ref restartStopInProgress, 0, 0) == 1 ||
@@ -889,6 +895,7 @@ namespace AirPlayReceiverMvp
             ObserveClientFeedbackHealth(processId, line);
             ObserveRecoveredVideoPresentation(processId, line);
             ObserveNativeFullscreenState(line);
+            ObserveNativeSessionClose(processId, line);
             if (IsExactNativeOutputLine(
                     line,
                     "AEROMIRROR_VIDEO_WINDOW state=minimized " +
@@ -1232,6 +1239,7 @@ namespace AirPlayReceiverMvp
                 ResetFeedbackVideoRecoveryWaitLocked();
                 int sessionGeneration = Interlocked.Increment(
                     ref mirrorSessionGeneration);
+                Interlocked.Exchange(ref nativeMirrorSessionId, 0);
                 Interlocked.Exchange(
                     ref lostConnectionPlaceholderDismissedSessionGeneration,
                     -1);
@@ -2316,6 +2324,7 @@ namespace AirPlayReceiverMvp
                 lastSuppressedVideoSize = Size.Empty;
             }
             Interlocked.Exchange(ref mirrorSessionGeneration, 0);
+            Interlocked.Exchange(ref nativeMirrorSessionId, 0);
             videoSizeWindow = IntPtr.Zero;
             initialFitPendingWindow = IntPtr.Zero;
             exactVideoSizeFitSequence = -1;
@@ -2988,7 +2997,7 @@ namespace AirPlayReceiverMvp
             else if (settings.QualityPreset == "4k60")
             {
                 parts.Add("-h265");
-                parts.Add("-s 3840x2160@60");
+                parts.Add("-s " + PortraitDisplayNegotiationProbe);
                 parts.Add("-fps 60");
             }
             else
@@ -3299,9 +3308,9 @@ namespace AirPlayReceiverMvp
             text.AppendLine("Для обнаружения iPhone и компьютер должны быть в одной локальной сети.");
             text.AppendLine("При первом запуске разрешите сетевой доступ в Windows Firewall.");
             text.AppendLine(
-                "Если Bonjour остановлен, AeroMirror ждёт его возврата. " +
-                "Если служба не вернулась, снова запустите текущий Setup и " +
-                "подтвердите администраторский шаг либо откройте диагностику.");
+                "Если Bonjour остановлен, откройте AeroMirror и нажмите " +
+                "«Запустить Bonjour». Windows один раз запросит права " +
+                "администратора, после чего приёмник опубликуется заново.");
             return text.ToString();
         }
 
@@ -3443,7 +3452,6 @@ namespace AirPlayReceiverMvp
 
         internal void ResumeDiscoveryAfterBonjourRecovery()
         {
-            Interlocked.Exchange(ref coreBonjourRecoveryAttempted, 0);
             Interlocked.Exchange(ref coreBonjourServiceCheckDueTicks, 0);
             HandleBonjourServiceRecoveryMonitor();
         }
@@ -3646,6 +3654,7 @@ namespace AirPlayReceiverMvp
             HandleCoreDiscoveryRecovery();
             HandleSessionUnlockDiscoveryRefresh();
             HandleAutomaticDiscoveryMaintenance();
+            HandleBonjourExplicitRecoveryResult();
             HandleBonjourFirewallAssessment();
             ApplyTopMost();
             ApplyLostConnectionPlaceholderPolicy();

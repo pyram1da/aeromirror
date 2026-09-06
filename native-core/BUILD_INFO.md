@@ -1,7 +1,7 @@
 # AeroMirror native build information
 
-This file records the native executable prepared for the AeroMirror 0.12.22
-release candidate. It keeps the pinned upstream/runtime inputs and the reviewed
+This file records the native executable prepared for the local AeroMirror
+0.12.30 review candidate. It keeps the pinned upstream/runtime inputs and the reviewed
 stream-geometry, feedback, discovery, selected-pipeline, worker-lifecycle,
 parser, setup/pairing, RTP/NTP, crypto, buffering, and renderer hardening from
 the 0.11.1–0.12.15 line. Version 0.12.13 added bounded request-correlated
@@ -34,7 +34,88 @@ late cancel or packet from an older connection cannot affect a newer request.
 The Qt viewer also removes caption/control styles while fullscreen and restores
 the exact saved styles and geometry on Escape or lifecycle exit.
 
+The locally prepared 0.12.24 diagnostic extension is observational only. Each
+AirPlay `/info` response reports the configured display tuple, global feature
+mask, refresh limits, and overscan flag without logging a client identifier or
+plist body. Sender header geometry keeps its independent sender-side generation.
+A separate sink-pad probe reports every actual CAPS event with local `caps_seq`,
+uses one first-buffer current-caps snapshot only when no event was observed, and
+reads `GstVideoCropMeta` on the first buffer after CAPS, on metadata changes,
+and every 120 buffers. Absence of CAPS is evidence, but no one-to-one mapping to
+a sender generation is claimed. The probe neither maps frame pixels nor adds a
+caps filter, crop, scale, render-rectangle, or window-geometry operation. Two
+independent clean builds reproduce the 0.12.24 diagnostic executable SHA-256
+`82B579693B60E9A1865E15BE314592838A0D3918DD1AFDF02565873213CE9397`.
+
+The local 0.12.25 surface-lifecycle extension retains the same negotiated
+portrait geometry and media pipeline. The native lifecycle owns each SHOW
+generation. Qt validates the visible child HWND and nonzero client area before
+acknowledging READY; the first Present from the selected D3D11 sink atomically
+posts that generation back to Qt without calling expose under the device lock.
+A later GUI turn retains the selected host sink under the renderer lock,
+releases the lock, requests `gst_video_overlay_expose()`, and releases the
+reference. Show and WindowStateChange coalesce re-expose only for an already
+acknowledged surface. WinIdChange uses bounded retry, defers SHOW while all
+current overlay sinks are rebound, and then starts a fresh native generation.
+HIDE invalidates older work.
+
+The host Present proof remains installed when the independent failure-recovery
+pad probe is attached. GUI-callable surface APIs do not write through the
+receiver logger because shutdown may already have destroyed it. Connection
+SHOW raises once over ordinary windows without taking focus, but stays behind
+external fullscreen content and defers an initial automatic fullscreen request;
+no topmost style is set. The path adds no synchronous GUI wait, recovery resize
+or fullscreen transition, render rectangle, crop, scale, pixel inspection, or
+pipeline reset. Two independent clean builds and the extracted no-Git
+corresponding-source rebuild reproduce executable SHA-256
+`F4824A375AFCD5593D1AA2E58547703E38F211380ACF71095CB8A08929ADB0E9`.
+Runtime static verification passes from an ASCII path, while execution and
+isolated self-test pass from a Unicode path. Managed/native regression,
+review-payload, and Setup gates pass; physical visibility, restore, and
+foreground behavior remain separate acceptance gates.
+
+The 0.12.25 post-Present redraw remained black on the physical test computer
+until a fullscreen transition, so 0.12.26 moves the decisive ordering boundary
+before playback. Fresh mirror pipelines start in `READY`. The media callback
+claims an immutable session generation, selects the required codec, waits for
+Qt to validate the shown real child HWND, binds and commits only the selected
+`GstVideoOverlay` sink for that exact generation, and then moves that pipeline
+to `PLAYING`. Unselected pipelines are quiesced after selection.
+
+A real child-HWND replacement supplied by Qt takes the selected pipeline to
+`NULL` before the sink accepts the new handle, returns it to `READY`, completes
+a fresh SHOW/READY acknowledgement, rebinds and commits the selected sink, and
+only then resumes
+`PLAYING`. The existing first-Present/expose path remains a redraw aid and can
+execute only when the lifecycle, READY, bound, and Present generations all
+match. No resize, fullscreen, crop, scale, render rectangle, or pixel analysis
+is used.
+
+Start, stop, and destroy serialize generation invalidation with pipeline state.
+Media callbacks retain their claimed generation in thread-local state, bus
+watches carry immutable generation contexts, and renderer objects remain alive
+until bus and operation references drain. A stale old-session callback cannot
+select or mutate a new pipeline or push across the stop/start boundary. Two
+independent clean builds and the extracted no-Git corresponding-source rebuild
+reproduce executable SHA-256
+`FAA8A1575EAC7C26BA41DF09A81EB08E03DE05A621FA3C504289EA8E98DAB84A`.
+The staged 200-binary bundle passes isolated dependency/self-test validation;
+physical untouched first-frame acceptance remains pending.
+
 ## Exact inputs
+
+The 0.12.26 physical normal-viewer and mixed-window Z-order rows failed.
+0.12.27 adds a dedicated Qt external video widget: null paint engine,
+PaintOnScreen, NoSystemBackground, OpaquePaintEvent, no auto-fill. The exact
+production header passes a hidden Windows/Qt 6.10.1 executable test, including
+the base-QWidget counterexample. This verifies the Qt contract, not pixels.
+Connection SHOW also verifies actual ordinary-window order and permits one
+immediate promotion/demotion only behind a repeated fullscreen safety check.
+Gallery geometry, media pipeline and dependency inputs are unchanged.
+
+- Previous 0.12.27–0.12.29 core SHA-256:
+  `B3EC9500B3E5D8D69A4AD5A7FFA385891446FC1B573F97A1B04BC327806AF36F`
+  (clean rebuild reproduction and packaging are recorded in the 0.12.27 test plan).
 
 - `leapbtw/uxplay-windows`:
   `8cf3424b438424bc99a89155bd29a789f48a43c0`
@@ -84,14 +165,28 @@ the exact saved styles and geometry on Escape or lifecycle exit.
   independent clean
   builds:
   `E4601B1BDAE661AF63A3F92C9FDA01CA66E54B6E2C5A36EDF802BAF0338CE6F6`
+- AeroMirror 0.12.24 diagnostic executable SHA-256 reproduced by two
+  independent clean builds:
+  `82B579693B60E9A1865E15BE314592838A0D3918DD1AFDF02565873213CE9397`
+- AeroMirror 0.12.25 surface-lifecycle executable SHA-256 reproduced by two
+  independent clean builds:
+  `F4824A375AFCD5593D1AA2E58547703E38F211380ACF71095CB8A08929ADB0E9`
+- AeroMirror 0.12.26 selected-sink-before-playback executable SHA-256
+  reproduced by two independent clean builds and one extracted no-Git rebuild:
+  `FAA8A1575EAC7C26BA41DF09A81EB08E03DE05A621FA3C504289EA8E98DAB84A`
 - Materialized wrapper patch SHA-256:
-  `EBC949F1943F1CF9AF9F299CCEE29A817647F3547788BAC0F525E4A76729FF81`
+  `A19BF66C99CA76BD85BED5B83F2774A78945D183C66CCF1E39810F81B8533D06`
 - Materialized libuxplay patch SHA-256:
-  `B127564D17E8A752D1C16B7D52B13B89BAB88992D358C0A9935C0544F75B997E`
-- Provenance pins 44 libuxplay sources and 49 patched sources in total. The
-  0.12.22 corresponding-source archive contains 149 entries (145 files) and retains the
-  complete prepared source and build inputs. Its extracted no-Git tree passes
-  every pinned hash and completes a clean 57/57 rebuild to the reviewed core.
+  `B78F75123B7C3E9A90E07A3A8DD102D33AF9A436C53108C195308498715DC652`
+- Provenance pins 45 libuxplay sources and 50 patched sources in total. The
+  0.12.26 corresponding-source archive contains 149 entries (145 files) and
+  retains the complete prepared source and build inputs. Its extracted no-Git
+  tree passes every pinned hash and completes a clean 57/57 rebuild to the
+  reviewed core.
+- `build-native-source.ps1` materializes patches with an isolated temporary Git
+  index and object directory. The checkout's real object store is supplied only
+  through `GIT_ALTERNATE_OBJECT_DIRECTORIES`, so source packaging can read
+  existing objects without writing build-only objects into that store.
 - Reproducible PE timestamp (`SOURCE_DATE_EPOCH`): `1786008050`
 - Local checkout paths are remapped to `/src/uxplay-windows`, and debug
   sections are stripped from the released executable.
@@ -103,7 +198,10 @@ script, packaging scripts, and verification scripts.
 The AeroMirror patches add the headless launcher integration,
 `--loader-test`, stable video-size and codec-header geometry markers, a
 feedback-health capability and one-shot recovery markers, a one-shot selected
-GStreamer decoder/videosink marker, and stable DNS-SD readiness markers.
+GStreamer decoder/videosink marker, stable DNS-SD readiness markers, the
+passive display-negotiation/sink-caps diagnostics, the post-Present
+surface-rendezvous/foreground markers, and the selected-sink-before-playback
+generation boundary described above.
 
 The 0.12.22 pairing protocol emits only request identifiers and state names in
 stdout diagnostics. PIN digits are never placed in process arguments or native
@@ -146,13 +244,26 @@ and degraded result, cancels automatic native retry, and leaves the TCP
 listener and process intact. The explicit refresh command is the only native
 operation that clears this generation latch.
 
-Caption Close first leaves fullscreen and then calls `showMinimized()` while
+Through .29, Caption Close first leaves fullscreen and calls `showMinimized()` while
 ignoring destruction. It deliberately retains the active generation's
 requested-visibility state. A minimized HWND remains `WS_VISIBLE`, including
 under the shell's `WS_EX_TOOLWINDOW` taskbar policy, so managed tray recovery
 can still identify it. `video_renderer_stop()`/`destroy()` exclusively perform
 the 1-to-0 visibility compare-and-swap and HIDE; the next session can therefore
 perform exactly one fresh SHOW.
+
+Local .30 supersedes the minimize action with an exact-ID HTTP-owner close
+request. Stream IDs survive neither reuse nor replacement: each successful
+SETUP receives a new ID, while a failed/busy SETUP retains the current binding.
+Qt hides only after admission, and rejects late SHOW for the dismissed ID.
+Both caption Close and the managed continuity warning use that GUI handler.
+The latter passes an immutable stream ID from stdin through a private HWND
+message; the GUI owns request sequencing and rejects a stale displayed ID.
+The result follows connection destruction and serialized media reset; listeners,
+DNS-SD and BLE are not cycled. The new core is 1,237,739 bytes, SHA-256
+`AA33FB22E5466910ECC29303DE6559BD47A02D1783D004C3169D45C7F6C436C0`.
+The initial compile and a subsequent clean rebuild agree. Prepared-source
+rebuild and physical iPhone acceptance are recorded separately in the .30 plan.
 
 The native HTTP listener reports initial/reset readiness with its actual port,
 checks same-port reset binding, exits for full shell recovery when a reset

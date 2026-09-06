@@ -14,7 +14,7 @@ release.
 
 ## Install in three steps
 
-1. Download and run `AeroMirror-Setup-0.12.22.exe`.
+1. Download and run `AeroMirror-Setup-0.12.30.exe`.
 2. Leave AeroMirror running quietly in the Windows tray.
 3. On the iPhone, open **Control Center → Screen Mirroring**, choose the PC,
    and enter the large four-digit code shown on the PC the first time.
@@ -41,7 +41,10 @@ require opening the app or pressing a restart button. Setup asks for Windows
 administrator approval only for a best-effort, exact Apple Bonjour service and
 Private-network firewall configuration. The running application only observes
 that system state. A missing, replaced, or damaged Bonjour installation is
-reported instead of being started through a button in AeroMirror.
+reported instead of being started through a button in AeroMirror. For a safely
+validated but stopped Apple Bonjour service, a contextual **Запустить Bonjour**
+action is available. Only your click may request one administrator confirmation;
+the app never raises that prompt automatically.
 
 ### What happens on the first connection?
 
@@ -87,6 +90,15 @@ exact versioned installer from the fixed project repository, verifies its
 SHA-256 digest, installs in place, and preserves the receiver identity, trusted
 devices, settings, and existing shortcut choices.
 
+Local 0.12.29 uses the confirmed permanent repository ID for metadata and
+accepts exact Setup assets from the canonical repository or its historical
+alias, always with SHA-256 verification. It bounds metadata to 30 seconds and
+1 MiB. A slow
+server produces a retryable update error without stopping mirroring. Actually
+closing settings or exiting cancels that owner's update requests; hiding
+settings to tray does not. Disabling automatic updates also cancels their
+background check/download, while manual updates remain independently available.
+
 Setup 0.12.22 and later prevents two current AeroMirror installers from
 changing the same installation at once. Let any older Setup window finish or
 close it before starting a current Setup; historical installers cannot use the
@@ -98,6 +110,39 @@ Use the normal maximize button on the stream window or Alt+Enter to enter the
 clean borderless view. Press Escape to return to the previous movable window.
 Fullscreen is owned by the renderer itself, so there is no separate floating
 button that can lag behind the window.
+
+### What is being tested in local 0.12.28?
+
+The audit found why the preceding candidate could still open black: saved
+desktop coordinates were mistakenly applied to an inner video window. The
+shell now restores only the outer window, leaving the video surface in its
+parent's coordinate system. Gallery proportions and native decoding stay
+unchanged. The same audit makes late manual-update results safe when the
+settings form is disposed and retains failed window-policy changes for retry.
+An executable regression reproduces the old displacement and passes with the
+correction. The user reports .28 works on the test PC; the full codec/window
+and Bonjour matrix remains unrecorded. Local .29 continues the update-work
+audit without changing the .28 native/video baseline. Neither is a published
+update.
+
+### What changes in 0.12.30?
+
+The review release changes the viewer's Close button from minimize to a
+session-only disconnect request. A delayed Close is tied to the displayed
+phone stream, not whichever connection happens to be current later. The
+receiver listener and discovery stay running. Loopback lifecycle checks pass;
+the iPhone leaving Screen Mirroring and immediate reconnect still need a
+physical test. It also includes the portrait Photos, black-viewer and update
+corrections developed in the earlier local candidates.
+
+Closing the lost-connection warning requests the same session-only disconnect.
+That warning retains its original process and stream identity: closing an old
+warning cannot stop a newer connection. A warning whose process has already
+ended can still be dismissed, without restarting the receiver.
+
+If an older build cannot find or download an update after the GitHub repository
+rename, download the current Setup from the release page and run it manually.
+The in-place update preserves settings and device trust.
 
 ## What works
 
@@ -158,12 +203,13 @@ button that can lag behind the window.
   while a scaled marker with the same class/aspect is consumed without another
   move; the window also adapts on real portrait/landscape changes, and
   automatic fitting restores the learned proportions after a manual resize
-  unless the user turns it off; for the exact correlated Photos/media
-  signature, the 0.12.20 source keeps the trusted phone shape (or a
-  conservative portrait fallback when Photos arrives first) but contains the
-  complete frame at normal scale instead of using the unverified 0.12.18 cover
-  transform; the native viewer explicitly retains aspect ratio and receives no
-  crop rectangle, so a portrait outer window can show letterboxing; the former
+  unless the user turns it off; the rejected 0.12.23 4:5 viewer experiment has
+  been removed, so the current local source does not reshape the normal window
+  to compensate for Photos; the complete frame stays at normal scale instead
+  of using the unverified 0.12.18 cover transform, and the temporary media
+  target cannot become trusted orientation or saved placement; the native
+  viewer explicitly retains aspect ratio and receives no crop rectangle, so
+  some letterboxing remains; the former
   schema-12 Photos A/B key and the 0.12.17 incremental zoom controls are
   retired; property-backed fullscreen suspends every shell resize/save path,
   while the native viewer's caption action, Escape, Alt+Enter, and tray request
@@ -260,6 +306,58 @@ officially supports Windows 10 1809 x64 and newer. Windows 10 is outside Microso
 but remains an explicit application target. ARM64 and 32-bit packages are not
 included.
 
+## Current local 0.12.26 review candidate
+
+Physical testing rejected the 0.12.25 post-Present redraw as the complete fix
+for a fresh normal viewer that stayed black until fullscreen. Version 0.12.26
+therefore fixes the earlier child-HWND/D3D11 ordering boundary. Mirror codec
+pipelines stop in `READY`; after the actual H.264 or H.265 codec is selected,
+AeroMirror shows and validates the child surface, binds only that selected
+`GstVideoOverlay` sink, and only then lets its pipeline enter `PLAYING`. No
+fullscreen or synthetic resize is used to create the first surface.
+
+The native renderer now gives every start/stop generation an explicit owner.
+Media and bus callbacks retain the generation they were created for, while
+stop/destroy invalidate it before an old pipeline can publish state or feed a
+new decoder. The earlier first-Present/expose handshake remains as a guarded
+redraw aid after correct binding. Automated contracts, two clean builds, and a
+rebuild from the prepared no-Git source archive reproduce native SHA-256
+`FAA8A1575EAC7C26BA41DF09A81EB08E03DE05A621FA3C504289EA8E98DAB84A`.
+Those checks prove the shipped ordering and provenance, not visible pixels;
+repeated untouched iPhone starts remain required under the
+[0.12.26 test plan](docs/releases/0.12.26/TEST_PLAN.md).
+
+The same candidate handles the observed case where Apple Bonjour crashed until
+Windows exhausted its configured recovery actions. There is still no permanent
+Bonjour or discovery button. Only while the exact trusted Apple service is
+stopped, the network error card shows **Start Bonjour**. A click requests one
+Windows administrator confirmation, starts only the allowlisted service through
+the protected system service controller, then waits for a validated `Running`
+state and resumes DNS-SD in the same core. The service object's owner and
+configuration ACL, the Apple executable chain, and every component of the
+Windows `sc.exe` chain must all pass fail-closed checks first. Startup, timers,
+cancellation, and failure never trigger another UAC prompt automatically; a
+timed-out command cannot overlap a second click in the same AeroMirror run while
+its process is still live.
+
+On connection, the viewer is raised once over an ordinary foreground window
+without taking keyboard focus. If an external foreground window covers its
+complete monitor, AeroMirror stays behind it and defers an initial automatic
+fullscreen request so a fullscreen game or video is not covered. This is an
+initial placement decision, not an always-on-top mode; an explicit user
+fullscreen command remains available afterward.
+
+The accepted one-device 0.12.24 gallery result is retained unchanged. For the
+`4k60` preset AeroMirror still requests `998x2160@60`, and the reported iPhone
+showed the portrait gallery photo correctly. That result does not claim
+compatibility across other iPhone, iOS, GPU, or preset combinations.
+
+The rejected 0.12.23 candidate tried to compensate by widening the normal
+viewer to 4:5. That code has been removed, and any old 0.12.23 local artifact is
+superseded and must not be installed or published. There is no public
+`v0.12.23`, `v0.12.24`, `v0.12.25`, or `v0.12.26` Release; the download link
+above still points to immutable public 0.12.22.
+
 ## Latest public 0.12.22 review release
 
 The public release turns the stopped-Bonjour diagnosis into a setup-and-forget
@@ -313,7 +411,8 @@ aspect-ratio containment and no crop rectangle; retaining the portrait outer
 window can therefore show letterboxing until a trustworthy inner-photo
 rectangle exists.
 
-Caption Close keeps the active stream alive by minimizing its viewer. The
+In published 0.12.22 and local builds through .29, Caption Close keeps the
+active stream alive by minimizing its viewer. The
 taskbar restores it normally; if the optional taskbar entry is disabled, use
 **Show stream window** in the AeroMirror tray menu.
 
@@ -534,10 +633,11 @@ digests, and re-download evidence are recorded in the
 [test plan](docs/releases/0.12.8/TEST_PLAN.md) remain available; 0.12.8 was
 never tagged or published. Published 0.12.7 remains immutable history.
 
-The canonical repository is `pyram1da/aeromirror`. For compatibility with
-already-installed versions, the updater remains pinned to the historical
-`Nadejny/aeromirror` slug; GitHub redirects that slug to the canonical
-repository.
+The canonical repository is `pyram1da/aeromirror`. The historical
+`Nadejny/aeromirror` marker remains in `update-repository.txt` for compatibility.
+Local .29 fetches metadata directly from confirmed repository ID `1324108899`
+so it does not depend on that slug's redirect. Exact versioned Setup paths
+from these two confirmed names are accepted; other repository names are not.
 
 The installer:
 
@@ -679,51 +779,52 @@ The result is:
 artifacts\Release\AeroMirror.exe
 ```
 
-Create the current thin review candidate payload and build the per-user network
-installer from that exact ZIP with:
+After the diagnostic gates pass, create the local thin candidate payload and
+build the per-user network installer from that exact ZIP with:
 
 ```powershell
 .\package-review.ps1 `
-  -Version 0.12.22 `
+  -Version 0.12.26 `
   -HeadlessRuntimePath .\artifacts\headless-runtime
 
 .\build-installer.ps1 `
-  -Version 0.12.22 `
-  -PortableZip .\artifacts\AeroMirror-review-payload-x64-0.12.22.zip
+  -Version 0.12.26 `
+  -PortableZip .\artifacts\AeroMirror-review-payload-x64-0.12.26.zip
 ```
 
 The result is:
 
 ```text
-artifacts\installer\AeroMirror-Setup-0.12.22.exe
+artifacts\installer\AeroMirror-Setup-0.12.26.exe
 ```
 
-Public release names use three-part semantic versions such as `0.12.22`.
-Windows executable metadata internally requires four numeric fields and may
-show `0.12.22.0` in a file-property dialog; the AeroMirror UI and GitHub
-Release intentionally show only `0.12.22`.
+Public release names use three-part semantic versions such as the current
+public `0.12.22`. Windows executable metadata internally requires four numeric
+fields. The local review candidate therefore shows `0.12.26.0` in a file-
+property dialog and `0.12.26` in the AeroMirror UI, but it has no matching
+GitHub Release.
 
 For local offline engineering tests, create the full portable package with
 both explicit inputs:
 
 ```powershell
 .\package.ps1 `
-  -Version 0.12.22 `
+  -Version 0.12.26 `
   -UxPlayPortablePath .\artifacts\headless-runtime `
   -HeadlessCorePath .\artifacts\headless-runtime\uxplay-windows.exe
 ```
 
 `package.ps1` now rejects a runtime without the reviewed headless build
 manifest, requires the patched executable explicitly, verifies its hash after
-staging, and writes a versioned local ZIP. Do not attach that offline ZIP to
-the current review Release. The network installer instead downloads the
-unchanged pinned upstream asset at install time and verifies the locked
-SHA-256.
+staging, and writes a versioned local ZIP. Do not attach the 0.12.26 review
+ZIP to a GitHub Release. The network installer instead downloads the unchanged
+pinned upstream asset at install time and verifies the locked SHA-256.
 
 ### Rebuild the reviewed native core
 
-`AeroMirror-native-source-0.12.22.zip` is a prepared corresponding-source
-archive: the `uxplay-windows` and `libuxplay` patches are already applied, so
+`artifacts\release\0.12.26\AeroMirror-native-source-0.12.26.zip` is the
+prepared corresponding-source archive for the local review candidate. The
+`uxplay-windows` and `libuxplay` patches are already applied, so
 do not apply them a second time. After providing the pinned Qt 6.10.1 and
 MSYS2 toolchains listed in
 `AeroMirror-build-inputs\BUILD_INFO.md`, run from the extracted archive:
@@ -731,7 +832,7 @@ MSYS2 toolchains listed in
 ```powershell
 # Use a short extraction path: the MinGW/CMake object tree can exceed the
 # Windows filename limit under a deeply nested Downloads/workspace folder.
-$source = Resolve-Path .\AeroMirror-native-source-0.12.22\uxplay-windows
+$source = Resolve-Path .\AeroMirror-native-source-0.12.26\uxplay-windows
 & "$source\AeroMirror-build-inputs\build-compatible-core.ps1" `
   -UpstreamRoot $source `
   -Qt610Prefix C:\path\to\Qt-6.10.1 `
@@ -783,8 +884,10 @@ src/
       WheelSafeComboBox.cs
   Updates/
     AutomaticUpdateService.cs protected staging and next-start handoff
+    ReleaseMetadataClient.cs bounded, cancellable release-metadata transport
     UpdateInfo.cs
     UpdateService.cs         strict release parsing, download, and verification
+    UpdateWorkScope.cs       owner cancellation and worker completion lifetime
   Network/
     BonjourServiceRecoveryService.cs read-only runtime service assessment
     NetworkProfileInfo.cs
@@ -827,6 +930,19 @@ docs/
   TROUBLESHOOTING.md         log collection and first-run reproduction
   TODO.md                    product and protocol roadmap
   releases/
+    0.12.26/
+      RELEASE_NOTES.md       first-surface ordering and Bonjour recovery summary
+      TEST_PLAN.md           untouched-start and stopped-service matrix
+    0.12.25/
+      RELEASE_NOTES.md       native video-surface lifecycle summary
+      TEST_PLAN.md           fresh-start, restore, and window-stack matrix
+      BUILD_REPORT.md        local artifacts, hashes, and test status
+    0.12.24/
+      RELEASE_NOTES.md       portrait negotiation diagnostic summary
+      TEST_PLAN.md           automated and physical causal-test matrix
+    0.12.23/
+      RELEASE_NOTES.md       rejected outer-window experiment record
+      TEST_PLAN.md           archived rejection and invalid-artifact boundary
     0.12.22/
       RELEASE_NOTES.md       automatic recovery and first-device trust summary
       TEST_PLAN.md           automated evidence and pending physical matrix
@@ -1038,9 +1154,9 @@ pass; deeper UI extraction should be reviewed separately from receiver fixes.
   browsing or that an AirPlay session is active.
 - The executables are not yet code-signed, so Windows SmartScreen may warn
   about an unknown publisher.
-- Update checking is pinned to `Nadejny/aeromirror` and accepts only the exact
-  versioned GitHub Release URL/Setup name plus a verified SHA-256. It does not
-  follow a repository rename or select an arbitrary executable asset.
+- Local .29 pins metadata to repository ID `1324108899` and accepts only an
+  exact versioned Setup URL in the canonical/historical repository allowlist,
+  plus a verified SHA-256. An arbitrary new owner or executable is not trusted.
 - Bonjour/mDNS and Windows Firewall remain external system dependencies. The
   0.12.22 Setup can best-effort configure only the exact validated Apple
   service and Private/UDP 5353/LocalSubnet rule after Windows administrator

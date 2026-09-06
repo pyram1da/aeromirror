@@ -61,6 +61,17 @@ namespace AirPlayReceiverMvp
         private const int FirewallActionAllow = 1;
         private const int FirewallProtocolUdp = 17;
         private const int FirewallProfilePrivate = 2;
+        private const uint ScManagerConnect = 0x0001;
+        private const uint ReadControl = 0x00020000;
+        private const uint OwnerSecurityInformation = 0x00000001;
+        private const uint DaclSecurityInformation = 0x00000004;
+        private const int MaximumServiceSecurityDescriptorBytes = 8192;
+        private const int ServiceChangeConfig = 0x00000002;
+        private const int DeleteAccess = 0x00010000;
+        private const int WriteDac = 0x00040000;
+        private const int WriteOwner = 0x00080000;
+        private const int GenericAll = 0x10000000;
+        private const int GenericWrite = 0x40000000;
         private static readonly string[] BonjourServiceNames =
         {
             "Bonjour Service",
@@ -197,9 +208,12 @@ namespace AirPlayReceiverMvp
                         }
                         if (!IsTrustedInstalledBonjourExecutable(parsed))
                         {
-                            error = "Bonjour service executable is outside the exact protected Program Files\\Bonjour path or is writable by the current user.";
+                            error = "Bonjour service executable is outside the exact protected Program Files\\Bonjour path or has an untrusted owner or write ACL.";
                             return false;
                         }
+                        if (!TryValidateBonjourServiceObjectSecurity(
+                                serviceName, out error))
+                            return false;
 
                         if (resolvedIdentity != null)
                         {
@@ -226,6 +240,11 @@ namespace AirPlayReceiverMvp
                     return false;
                 }
                 catch (IOException exception)
+                {
+                    error = exception.Message;
+                    return false;
+                }
+                catch (SystemException exception)
                 {
                     error = exception.Message;
                     return false;
@@ -328,41 +347,45 @@ namespace AirPlayReceiverMvp
                     normalized, out trustedRoot))
                 return false;
 
+            return IsTrustedMachinePath(normalized, trustedRoot);
+        }
+
+        internal static bool IsTrustedMachinePath(
+            string path, string trustedRoot)
+        {
             try
             {
-                using (WindowsIdentity identity = WindowsIdentity.GetCurrent())
+                string normalized = Path.GetFullPath(path);
+                string normalizedRoot = Path.GetFullPath(
+                    trustedRoot).TrimEnd(
+                        Path.DirectorySeparatorChar,
+                        Path.AltDirectorySeparatorChar);
+                string rootPrefix = normalizedRoot +
+                    Path.DirectorySeparatorChar;
+                if (!string.Equals(
+                        normalized, normalizedRoot,
+                        StringComparison.OrdinalIgnoreCase) &&
+                    !normalized.StartsWith(
+                        rootPrefix, StringComparison.OrdinalIgnoreCase))
+                    return false;
+
+                string current = normalized;
+                while (true)
                 {
-                    if (identity == null || identity.User == null)
+                    FileAttributes attributes = File.GetAttributes(current);
+                    if ((attributes & FileAttributes.ReparsePoint) != 0)
                         return false;
-                    var principal = new WindowsPrincipal(identity);
-                    string current = normalized;
-                    while (true)
-                    {
-                        FileAttributes attributes =
-                            File.GetAttributes(current);
-                        if ((attributes & FileAttributes.ReparsePoint) != 0)
-                            return false;
 
-                        FileSystemSecurity security =
-                            Directory.Exists(current)
-                                ? (FileSystemSecurity)Directory.GetAccessControl(
-                                    current, AccessControlSections.Access |
-                                    AccessControlSections.Owner)
-                                : File.GetAccessControl(
-                                    current, AccessControlSections.Access |
-                                    AccessControlSections.Owner);
-                        if (IsWritableByCurrentToken(
-                                security, identity, principal))
-                            return false;
+                    if (HasUntrustedWriteAccess(current))
+                        return false;
 
-                        if (string.Equals(
-                                current, trustedRoot,
-                                StringComparison.OrdinalIgnoreCase))
-                            return true;
-                        current = Path.GetDirectoryName(current);
-                        if (string.IsNullOrWhiteSpace(current))
-                            return false;
-                    }
+                    if (string.Equals(
+                            current, normalizedRoot,
+                            StringComparison.OrdinalIgnoreCase))
+                        return true;
+                    current = Path.GetDirectoryName(current);
+                    if (string.IsNullOrWhiteSpace(current))
+                        return false;
                 }
             }
             catch (ArgumentException)
@@ -381,6 +404,121 @@ namespace AirPlayReceiverMvp
             {
                 return false;
             }
+        }
+
+        private static bool TryValidateBonjourServiceObjectSecurity(
+            string serviceName, out string error)
+        {
+            error = "";
+            if (string.IsNullOrWhiteSpace(serviceName))
+            {
+                error = "Bonjour service identity is empty.";
+                return false;
+            }
+
+            IntPtr manager = OpenSCManager(
+                null, null, ScManagerConnect);
+            if (manager == IntPtr.Zero)
+            {
+                error = "Bonjour service security manager is unavailable (" +
+                    Marshal.GetLastWin32Error() + ").";
+                return false;
+            }
+            try
+            {
+                IntPtr service = OpenService(
+                    manager, serviceName, ReadControl);
+                if (service == IntPtr.Zero)
+                {
+                    error = "Bonjour service security descriptor is unavailable (" +
+                        Marshal.GetLastWin32Error() + ").";
+                    return false;
+                }
+                try
+                {
+                    const uint requestedInformation =
+                        OwnerSecurityInformation |
+                        DaclSecurityInformation;
+                    byte[] descriptorBytes =
+                        new byte[MaximumServiceSecurityDescriptorBytes];
+                    uint returnedBytes;
+                    if (!QueryServiceObjectSecurity(
+                            service,
+                            requestedInformation,
+                            descriptorBytes,
+                            (uint)descriptorBytes.Length,
+                            out returnedBytes))
+                    {
+                        error = "Bonjour service security descriptor could not be read (" +
+                            Marshal.GetLastWin32Error() + ").";
+                        return false;
+                    }
+
+                    var descriptor = new RawSecurityDescriptor(
+                        descriptorBytes, 0);
+                    if (HasUntrustedServiceControlAccess(descriptor))
+                    {
+                        error = "Bonjour service has an untrusted owner or configuration ACL.";
+                        return false;
+                    }
+                    return true;
+                }
+                finally
+                {
+                    CloseServiceHandle(service);
+                }
+            }
+            catch (ArgumentException exception)
+            {
+                error = exception.Message;
+                return false;
+            }
+            catch (SystemException exception)
+            {
+                error = exception.Message;
+                return false;
+            }
+            finally
+            {
+                CloseServiceHandle(manager);
+            }
+        }
+
+        internal static bool HasUntrustedServiceControlAccess(
+            RawSecurityDescriptor descriptor)
+        {
+            if (descriptor == null ||
+                (descriptor.ControlFlags &
+                    ControlFlags.SelfRelative) == 0 ||
+                (descriptor.ControlFlags &
+                    ControlFlags.DiscretionaryAclPresent) == 0 ||
+                descriptor.Owner == null ||
+                !IsTrustedMachineWriter(descriptor.Owner) ||
+                descriptor.DiscretionaryAcl == null)
+                return true;
+
+            int dangerous = ServiceChangeConfig |
+                DeleteAccess |
+                WriteDac |
+                WriteOwner |
+                GenericAll |
+                GenericWrite;
+            for (int index = 0;
+                index < descriptor.DiscretionaryAcl.Count;
+                index++)
+            {
+                var rule = descriptor.DiscretionaryAcl[index]
+                    as QualifiedAce;
+                if (rule == null)
+                    return true;
+                if (rule.AceQualifier != AceQualifier.AccessAllowed ||
+                    (rule.AccessMask & dangerous) == 0)
+                    continue;
+                if (rule.SecurityIdentifier == null ||
+                    !IsTrustedMachineWriter(rule.SecurityIdentifier))
+                    return true;
+            }
+            return false;
         }
 
         private static bool IsExpectedBonjourExecutablePath(
@@ -457,55 +595,80 @@ namespace AirPlayReceiverMvp
             return false;
         }
 
-        private static bool IsWritableByCurrentToken(
-            FileSystemSecurity security,
-            WindowsIdentity identity,
-            WindowsPrincipal principal)
+        private static bool HasUntrustedWriteAccess(string path)
         {
-            if (security == null || identity == null ||
-                identity.User == null || principal == null)
-                return true;
-
-            SecurityIdentifier owner = security.GetOwner(
+            FileSystemSecurity security = Directory.Exists(path)
+                ? (FileSystemSecurity)Directory.GetAccessControl(
+                    path,
+                    AccessControlSections.Access |
+                    AccessControlSections.Owner)
+                : File.GetAccessControl(
+                    path,
+                    AccessControlSections.Access |
+                    AccessControlSections.Owner);
+            var raw = new RawSecurityDescriptor(
+                security.GetSecurityDescriptorBinaryForm(), 0);
+            var owner = security.GetOwner(
                 typeof(SecurityIdentifier)) as SecurityIdentifier;
-            if (owner != null && (owner.Equals(identity.User) ||
-                principal.IsInRole(owner)))
-                return true;
-
-            const FileSystemRights dangerous =
-                FileSystemRights.WriteData |
-                FileSystemRights.AppendData |
-                FileSystemRights.WriteExtendedAttributes |
-                FileSystemRights.WriteAttributes |
-                FileSystemRights.DeleteSubdirectoriesAndFiles |
-                FileSystemRights.Delete |
-                FileSystemRights.ChangePermissions |
-                FileSystemRights.TakeOwnership;
             AuthorizationRuleCollection rules = security.GetAccessRules(
                 true, true, typeof(SecurityIdentifier));
-            foreach (FileSystemAccessRule rule in rules)
+            return HasUntrustedWriteAccessRules(
+                owner, raw.DiscretionaryAcl != null, rules);
+        }
+
+        private static bool HasUntrustedWriteAccessRules(
+            SecurityIdentifier owner,
+            bool hasDiscretionaryAcl,
+            IEnumerable accessRules)
+        {
+            if (!hasDiscretionaryAcl ||
+                owner == null ||
+                !IsTrustedMachineWriter(owner) ||
+                accessRules == null)
+                return true;
+            foreach (object value in accessRules)
             {
-                if ((rule.PropagationFlags & PropagationFlags.InheritOnly) != 0)
+                var rule = value as FileSystemAccessRule;
+                if (rule == null)
+                    return true;
+                if (rule.AccessControlType != AccessControlType.Allow ||
+                    (rule.PropagationFlags &
+                        PropagationFlags.InheritOnly) != 0)
+                    continue;
+                int rights = unchecked((int)rule.FileSystemRights);
+                int writeRights = unchecked((int)(
+                    FileSystemRights.WriteData |
+                    FileSystemRights.AppendData |
+                    FileSystemRights.WriteExtendedAttributes |
+                    FileSystemRights.DeleteSubdirectoriesAndFiles |
+                    FileSystemRights.WriteAttributes |
+                    FileSystemRights.Delete |
+                    FileSystemRights.ChangePermissions |
+                    FileSystemRights.TakeOwnership));
+                int genericWriteOrAll = unchecked((int)0x50000000);
+                if ((rights & writeRights) == 0 &&
+                    (rights & genericWriteOrAll) == 0)
                     continue;
 
-                SecurityIdentifier sid =
-                    rule.IdentityReference as SecurityIdentifier;
-                if (sid == null || (!sid.Equals(identity.User) &&
-                    !principal.IsInRole(sid)))
-                    continue;
-
-                FileSystemRights rights =
-                    rule.FileSystemRights & dangerous;
-                // This is deliberately more conservative than trying to
-                // reproduce Windows AccessCheck semantics. Any applicable
-                // allow for a primitive mutation right makes this path
-                // unsuitable as a trusted elevated-service target, even if
-                // another ACE may deny the same right.
-                if (rule.AccessControlType == AccessControlType.Allow &&
-                    rights != 0)
+                var sid = rule.IdentityReference as SecurityIdentifier;
+                if (sid == null || !IsTrustedMachineWriter(sid))
                     return true;
             }
             return false;
+        }
+
+        internal static bool IsTrustedMachineWriter(SecurityIdentifier sid)
+        {
+            if (sid == null)
+                return false;
+            return sid.IsWellKnown(WellKnownSidType.LocalSystemSid) ||
+                sid.IsWellKnown(
+                    WellKnownSidType.BuiltinAdministratorsSid) ||
+                string.Equals(
+                    sid.Value,
+                    "S-1-5-80-956008885-3418522649-1831038044-" +
+                    "1853292631-2271478464",
+                    StringComparison.Ordinal);
         }
 
         private static bool HasExpectedPrivateMdnsRule(
@@ -666,6 +829,33 @@ namespace AirPlayReceiverMvp
             {
             }
         }
+
+        [DllImport("advapi32.dll", CharSet = CharSet.Unicode,
+            SetLastError = true)]
+        private static extern IntPtr OpenSCManager(
+            string machineName,
+            string databaseName,
+            uint desiredAccess);
+
+        [DllImport("advapi32.dll", CharSet = CharSet.Unicode,
+            SetLastError = true)]
+        private static extern IntPtr OpenService(
+            IntPtr serviceManager,
+            string serviceName,
+            uint desiredAccess);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool QueryServiceObjectSecurity(
+            IntPtr service,
+            uint securityInformation,
+            [Out] byte[] securityDescriptor,
+            uint bufferSize,
+            out uint bytesNeeded);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool CloseServiceHandle(IntPtr serviceHandle);
 
     }
 }

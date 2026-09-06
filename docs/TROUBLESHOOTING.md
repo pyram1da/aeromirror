@@ -133,19 +133,33 @@ pending-reboot indicators, sockets/readiness markers, and iPhone browse result.
 Do not report the reboot as a normal installation requirement until a clean VM
 reproduces the same lifecycle.
 
-### 0.12.22 automatic Bonjour recovery
+### 0.12.26 stopped-Bonjour recovery
 
-The current main window and tray contain no Bonjour, firewall, or discovery-
+The main window and tray contain no permanent Bonjour, firewall, or discovery-
 restart button. If the network card reports that Bonjour is stopped or the
 exact rule is missing, first retain the local time, application version,
 Bonjour status/start type/recovery policy, firewall assessment, current core
 PID and AirPlay ports, the `-65563`/prerequisite markers, and the iPhone browse
 result. Opening or moving the AeroMirror window is not a recovery step.
 
-If the exact service is stopped, wait for Windows service recovery and keep the
-receiver running. The log should show the runtime's read-only state transition.
-After Bonjour returns to `Running`, AeroMirror may send at most two
-same-process discovery requests for that recovery event and must receive
+When the exact validated Apple service is `Stopped`, version 0.12.26 shows
+**Start Bonjour** only inside that error card. Click it once; AeroMirror may
+request at most one Windows administrator confirmation to start the shared
+service. The action is absent for `Running`, `StartPending`, `ContinuePending`,
+`StopPending`, `PausePending`, `Paused`, unknown, missing, and unsafe states.
+The application never performs this action at startup, from a timer, or when
+the receiver is stopped and started; canceling or failing it causes no automatic
+prompt or retry. If Windows starts the service during the click race, the action
+waits for the real `Running` state instead of reporting an early success or
+requesting an unnecessary second prompt. AeroMirror also validates the service
+object's owner/configuration ACL and the complete protected paths to both
+`mDNSResponder.exe` and Windows `sc.exe`. If the bounded wait ends while that
+elevated command is still running, the button remains unavailable until the
+same process is confirmed exited, so two administrator operations cannot overlap
+within that AeroMirror run.
+
+After Bonjour reaches `Running`, AeroMirror may send at most two same-process
+discovery requests for that recovery event and must receive
 `AEROMIRROR_DNSSD_READY` before showing ready. The core PID and AirPlay ports
 should remain unchanged. Reopen the iPhone Screen Mirroring list and record the
 result before manually restarting the receiver.
@@ -161,12 +175,12 @@ Public, TCP, arbitrary-address/port, or broad application rule. Declining or a
 failed check must not uninstall or roll back the per-user application.
 
 If Bonjour is missing, replaced, or in an unsafe location, AeroMirror reports
-the prerequisite and Setup leaves it untouched; obtain Apple Bonjour from a
-trusted vendor source. Do not register AeroMirror's bundled responder as a
-system service. If Bonjour stops again, retain the Windows Application/WER
-event and time. Do not describe a virtual adapter, twenty-minute renewal, or
-the update itself as the crash cause unless a stack or controlled reproduction
-proves the link.
+the prerequisite, does not expose the start action, and Setup leaves it
+untouched; obtain Apple Bonjour from a trusted vendor source. Do not register
+AeroMirror's bundled responder as a system service. If Bonjour stops again,
+retain the Windows Application/WER event and time. Do not describe a virtual
+adapter, twenty-minute renewal, or the update itself as the crash cause unless
+a stack or controlled reproduction proves the link.
 
 The exact service-recovery policy and firewall rule intentionally remain after
 a normal AeroMirror uninstall because they belong to shared machine-wide Apple
@@ -191,6 +205,19 @@ pairing state. If it repeats for a trusted phone, record whether the
 contents. Test trust reset only after preserving the before/after behavior.
 
 ### Automatic-update reports
+
+In local .29, release metadata is limited to 1 MiB and a 30-second transfer
+budget. A timeout is retryable and must not stop mirroring. Actual settings-form
+close or application quit cancels manual requests; hiding to tray keeps them.
+Automatic opt-out cancels its separate check/download. Record which action
+occurred and whether a later check succeeds; never infer cancellation failure
+from a deliberately hidden settings form or restart Bonjour for an update error.
+
+The same candidate addresses the confirmed GitHub owner rename: metadata uses
+permanent repository ID `1324108899`, while exact Setup paths accept only the
+canonical and historical project names. A legacy updater can display release
+notes yet reject the canonical installer address; use the reviewed local .29
+Setup rather than weakening URL or checksum verification.
 
 Automatic updates are off by default. When enabled, finding a release may
 download and stage an exact digest-verified Setup, but it must not interrupt the
@@ -247,6 +274,43 @@ Depending on the review build, the log may include:
 - the raw AirPlay geometry header, including an auxiliary width/height pair
   that is diagnostic only and is not a validated crop, pixel-aspect-ratio, or
   rotation field;
+- for the local 0.12.24 negotiation probe, one
+  `AEROMIRROR_DISPLAY_INFO` capability tuple, sender-side geometry generations,
+  and an independent sink timeline. Every observed CAPS event produces an
+  `AEROMIRROR_VIDEO_SINK_CAPS` width/height/PAR record with local `caps_seq`; a
+  first-buffer current-caps snapshot is used only if no CAPS event was seen.
+  `AEROMIRROR_VIDEO_SINK_CROP` records read-only CropMeta on the first buffer
+  after CAPS, on changes, and every 120 buffers. A missing CAPS event is useful
+  evidence, but there is no one-to-one sender-generation-to-sink-sequence
+  contract. These markers contain no plist body, client identifier, or frame
+  pixels and do not prove the visible photo is correct without the matching
+  physical observation;
+- for local 0.12.25, one `AEROMIRROR_VIDEO_HOST_SHOW` record after Qt has
+  processed the native-owned SHOW generation and verified that the child HWND
+  is visible with a nonzero client area. The first selected-sink D3D11 Present
+  then posts the same generation, and a later Qt turn produces an
+  `AEROMIRROR_VIDEO_HOST_EXPOSE ... trigger=first-present` result. A Show or
+  WindowStateChange may produce a coalesced re-expose only after READY was
+  acknowledged. WinIdChange may produce bounded handle-rebind diagnostics and
+  a fresh generation after all current overlay sinks have been rebound. The
+  expose request redraws the last overlay frame without resizing,
+  fullscreening, cropping, scaling, or resetting the pipeline. A separate
+  `AEROMIRROR_VIDEO_HOST_FOREGROUND` marker says whether the viewer was raised
+  without focus over ordinary content or kept behind external fullscreen
+  content; it records no title or executable. These markers locate lifecycle
+  boundaries. Only an untouched physical fresh start proves that the black
+  viewer is fixed, and a physical restore proves restore behavior;
+- for local 0.12.26, a fresh selected mirror pipeline must remain in `READY`
+  until the same renderer generation has a visible nonzero real child HWND and
+  its selected H.264/H.265 sink is bound and committed; only then may it enter
+  `PLAYING`. A real-HWND replacement must instead follow NULL -> new HWND ->
+  READY -> fresh SHOW/READY -> selected-sink bind/commit -> PLAYING. Retain the
+  `AEROMIRROR_VIDEO_HOST_REBIND` and SHOW/READY records, `video host ready;
+  selected ... sink bound before playback`, the first push/sink/Present
+  timeline, and any EXPOSE result for that exact generation. Also retain the
+  visible result without moving, resizing, maximizing, or fullscreening the PC
+  window and whether rapid-reconnect old-generation work was ignored. These
+  records prove ordering, not visible pixels;
 - for 0.12.14, one `AEROMIRROR_VIDEO_HEALTH` record every two seconds while
   mirroring is active. Its session/geometry, interval deltas, ages, flow/state,
   PTS counters, pause/resume state, proof availability, and `class` locate a
@@ -282,6 +346,36 @@ the report which field was removed.
 
 ## Information that makes a report actionable
 
+For the local .30 session-Close candidate, retain the numeric
+`AEROMIRROR_MIRROR_SESSION`, `AEROMIRROR_VIDEO_WINDOW state=closed` and
+`AEROMIRROR_SESSION_CLOSE` markers with session/request IDs, result, PID and
+ports. `stale` means the selected stream was already gone or replaced; it must
+not terminate the replacement. `unavailable` leaves the viewer visible rather
+than silently hiding an unaccepted request. The window marker identifies
+`source=caption-close` or `source=continuity-close`; both use the same native
+handler. The managed warning may still be dismissed if its old process is gone;
+an `unavailable` log is not successful remote disconnection. Confirm the phone actually leaves
+Screen Mirroring; a local result alone is not evidence of the iOS UI state.
+
+The local 0.12.28 audit identified a concrete child-window placement defect.
+When an untouched viewer is black despite active sink/Present counters, compare
+the outer host, Qt surface and GSTD3D11 child geometry for that receiver PID.
+The video child should occupy its parent's client area, not repeat the saved
+outer desktop origin/size. `tests/RendererWindowSnapshot.ps1` reads only these
+window classes, rectangles, styles and visibility; it neither moves windows nor
+captures the phone. Do not treat counts or SHOW acknowledgement as proof of
+visible output. Record version and current PID before inspecting the hierarchy.
+
+For local 0.12.28, record the very first normal-window result before moving,
+resizing or entering fullscreen. Qt background painting has been removed from
+the external video child; healthy READY/Present/expose markers still do not
+prove visible output. Repeat the Explorer Installer + AeroMirror + browser
+arrangement and report whether keyboard focus stayed put and another ordinary
+window could cover the viewer afterward. `FOREGROUND result=raised` now follows
+an actual ordinary-window order check; `fallback=1` may include one immediate
+promotion/demotion, never retained topmost. Do not collect unrelated titles or
+personal pixels in diagnostics.
+
 Please include:
 
 - the exact failure time and time zone;
@@ -294,8 +388,9 @@ Please include:
   attempt, and whether the first tap reached Windows before any manual receiver
   stop/restart;
 - for a stopped Bonjour report, record the Windows service recovery settings,
-  every read-only state transition, the bounded same-PID DNS-SD submissions,
-  and the iPhone result before manually restarting the receiver;
+  every read-only state transition, whether the contextual start action was
+  shown/clicked/canceled, the bounded same-PID DNS-SD submissions, and the
+  iPhone result before manually restarting the receiver;
 - for the Windows 10 reboot symptom, whether the machine/VM had ever contained
   Bonjour, every installer/UAC/firewall prompt, pre/post-reboot Bonjour service
   and process state, and whether receiver Stop/Start changed the result;

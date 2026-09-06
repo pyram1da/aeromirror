@@ -38,6 +38,8 @@ namespace AirPlayReceiverMvp
         internal const uint SWP_NOACTIVATE = 0x0010;
         internal const uint SWP_FRAMECHANGED = 0x0020;
         internal const uint GW_HWNDPREV = 3;
+        private const uint GA_ROOT = 2;
+        private const long WS_CHILD = 0x40000000L;
         private const int SW_RESTORE = 9;
         private const int GWL_EXSTYLE = -20;
         private const long WS_EX_TOOLWINDOW = 0x00000080L;
@@ -252,21 +254,44 @@ namespace AirPlayReceiverMvp
         private static extern IntPtr SetWindowLongPtr64(
             IntPtr window, int index, IntPtr value);
 
-        internal static void SetToolWindowStyle(IntPtr window, bool hideFromTaskbar)
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetAncestor(IntPtr window, uint flags);
+
+        internal static bool IsTopLevelWindow(IntPtr window)
         {
+            if (window == IntPtr.Zero || !IsWindow(window) ||
+                GetAncestor(window, GA_ROOT) != window)
+                return false;
+            long style = IntPtr.Size == 8
+                ? GetWindowLongPtr64(window, -16).ToInt64()
+                : GetWindowLong32(window, -16);
+            return (style & WS_CHILD) == 0;
+        }
+
+        internal static bool SetToolWindowStyle(IntPtr window, bool hideFromTaskbar)
+        {
+            if (window == IntPtr.Zero || !IsWindow(window))
+                return false;
             long current = IntPtr.Size == 8
                 ? GetWindowLongPtr64(window, GWL_EXSTYLE).ToInt64()
                 : GetWindowLong32(window, GWL_EXSTYLE);
             long updated = hideFromTaskbar
                 ? (current | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW
                 : (current | WS_EX_APPWINDOW) & ~WS_EX_TOOLWINDOW;
-            if (updated == current)
-                return;
-            if (IntPtr.Size == 8)
-                SetWindowLongPtr64(window, GWL_EXSTYLE, new IntPtr(updated));
-            else
-                SetWindowLong32(window, GWL_EXSTYLE, (int)updated);
-            SetWindowPos(window, IntPtr.Zero, 0, 0, 0, 0,
+            if (updated != current)
+            {
+                if (IntPtr.Size == 8)
+                    SetWindowLongPtr64(window, GWL_EXSTYLE, new IntPtr(updated));
+                else
+                    SetWindowLong32(window, GWL_EXSTYLE, (int)updated);
+            }
+            long applied = IntPtr.Size == 8
+                ? GetWindowLongPtr64(window, GWL_EXSTYLE).ToInt64()
+                : GetWindowLong32(window, GWL_EXSTYLE);
+            if ((applied & (WS_EX_TOOLWINDOW | WS_EX_APPWINDOW)) !=
+                (updated & (WS_EX_TOOLWINDOW | WS_EX_APPWINDOW)))
+                return false;
+            return SetWindowPos(window, IntPtr.Zero, 0, 0, 0, 0,
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER |
                 SWP_NOACTIVATE | SWP_FRAMECHANGED);
         }

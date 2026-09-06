@@ -26,8 +26,8 @@ using ServiceStartMode = System.ServiceProcess.ServiceStartMode;
 [assembly: AssemblyTitle("AeroMirror Setup")]
 [assembly: AssemblyProduct("AeroMirror")]
 [assembly: AssemblyCompany("AeroMirror open-source project")]
-[assembly: AssemblyVersion("0.12.22.0")]
-[assembly: AssemblyFileVersion("0.12.22.0")]
+[assembly: AssemblyVersion("0.12.30.0")]
+[assembly: AssemblyFileVersion("0.12.30.0")]
 
 namespace AirPlayReceiverSetup
 {
@@ -796,7 +796,7 @@ namespace AirPlayReceiverSetup
 
     internal sealed class SetupForm : Form
     {
-        internal static readonly Version SetupVersion = new Version(0, 12, 22);
+        internal static readonly Version SetupVersion = new Version(0, 12, 30);
         private readonly CheckBox startMenu;
         private readonly CheckBox desktop;
         private readonly CheckBox launch;
@@ -1688,20 +1688,20 @@ namespace AirPlayReceiverSetup
                         65535),
                     SetupForm.SetupVersion),
                 true, "PE revision does not turn a reinstall into a downgrade");
+            Version nextPatchVersion = new Version(
+                SetupForm.SetupVersion.Major,
+                SetupForm.SetupVersion.Minor,
+                SetupForm.SetupVersion.Build + 1);
             AssertAutomaticInstall(
                 ShouldRunAutomaticInstall(
-                    true, new Version(
-                        SetupForm.SetupVersion.Major,
-                        SetupForm.SetupVersion.Minor,
-                        SetupForm.SetupVersion.Build + 1),
+                    true, nextPatchVersion,
                     SetupForm.SetupVersion),
                 false, "automatic downgrade prevention");
             if (!ShouldRunAutomaticInstall(
                     true, new Version(0, 12, 20),
                     SetupForm.SetupVersion) ||
                 !ShouldAbortInstallAfterLock(
-                    new Version(0, 12, 23),
-                    SetupForm.SetupVersion))
+                    nextPatchVersion, SetupForm.SetupVersion))
             {
                 throw new InvalidOperationException(
                     "An update that became a downgrade while waiting for the " +
@@ -1720,7 +1720,7 @@ namespace AirPlayReceiverSetup
                     "override the newer installed executable version.");
             }
             resolvedInstalledVersion = ResolveInstalledVersion(
-                new Version(0, 12, 23),
+                nextPatchVersion,
                 new Version(0, 12, 20));
             if (resolvedInstalledVersion == null ||
                 ComparePublicVersions(
@@ -1732,7 +1732,7 @@ namespace AirPlayReceiverSetup
                     "override the authoritative installed executable version.");
             }
             resolvedInstalledVersion = ResolveInstalledVersion(
-                new Version(0, 12, 23), null, true);
+                nextPatchVersion, null, true);
             if (resolvedInstalledVersion != null)
             {
                 throw new InvalidOperationException(

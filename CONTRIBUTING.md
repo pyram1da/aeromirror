@@ -1,5 +1,12 @@
 # Contributing to AeroMirror
 
+For a black initial viewer, keep it untouched while collecting target-process
+window metadata with `tests/RendererWindowSnapshot.ps1`. Record the exact shell
+version/core PID and compare outer, Qt-surface and GStreamer-child coordinates;
+do not collect phone pixels or unrelated application titles. The .28 executable
+regression is `tests/RendererShowBoundary.Tests.ps1`. Physical output remains a
+separate acceptance check after this harness passes.
+
 Thanks for testing AeroMirror. Review builds are expected to have rough edges;
 a precise report is more useful than a long description without reproduction
 details.
@@ -57,6 +64,46 @@ Open one GitHub issue per problem and include:
   for Photos also retain the ordered raw/encoded geometry, whether a phone-
   shaped frame preceded or followed the exact media signature, and measure the
   outer renderer separately from the visible inner photo/video;
+- for the local 0.12.24 Photos negotiation probe, do not move, resize, or
+  fullscreen the PC viewer during the decisive Home -> Photos -> Home run.
+  Retain the receiver-advertised `AEROMIRROR_DISPLAY_INFO`, the sender header
+  geometry generations, and the independent sink-local
+  `AEROMIRROR_VIDEO_SINK_CAPS`/`AEROMIRROR_VIDEO_SINK_CROP` timeline with
+  `caps_seq`, `buffer_seq`, reason, and PTS validity. A missing CAPS event is
+  evidence too. Do not pair a sender generation with a sink sequence as though
+  the protocol supplied a one-to-one identifier; separately describe what was
+  visible. These content-free records narrow boundaries but do not establish a
+  fix;
+- for a local 0.12.25 black-initial-viewer report, start mirroring into the
+  remembered normal window and do not move, resize, or fullscreen it. Retain
+  the first `AEROMIRROR_VIDEO_HOST_SHOW` and selected-codec
+  `AEROMIRROR_VIDEO_HOST_EXPOSE` records together with the normal sink/Present
+  timeline, and state whether the first visible frame appeared without any
+  window action. SHOW records the native generation and a READY check for the
+  visible nonzero child HWND; EXPOSE with `trigger=first-present` proves only
+  that the generation-safe post-Present redraw was requested. Neither marker
+  proves physically visible pixels. For restore or handle-recreation reports,
+  retain the same-generation re-expose or fresh-generation rebind sequence.
+  For a foreground report, also retain `AEROMIRROR_VIDEO_HOST_FOREGROUND` and
+  say only whether the prior app was ordinary or fullscreen, whether keyboard
+  focus moved, and whether initial automatic fullscreen was deferred; do not
+  include the other application's title;
+- for the local 0.12.26 first-surface test, begin in the remembered normal
+  window and do not move, resize, maximize, or fullscreen it. Retain the
+  renderer-session generation, selected-codec SHOW/READY/bind-before-PLAYING
+  sequence, first push/sink/Present evidence, and whether pixels appeared
+  without any PC window action. For rapid stop/start or reconnect, also retain
+  stale-generation rejection and bounded renderer-reference diagnostics. The
+  ordering markers and reproducible binary hash prove code paths, not visible
+  pixels;
+- for local 0.12.27, repeat the untouched normal-window test after the Qt
+  external-surface correction. For window order, include an arrangement with
+  several ordinary application windows and report whether the viewer starts
+  above all of them, preserves typing focus, can be covered afterward, and
+  stays behind fullscreen content. `FOREGROUND result=raised` now follows an
+  actual order check; `fallback=1` can denote one immediate promotion/demotion,
+  not an always-on-top mode. Keep application titles and personal pixels out
+  of shared diagnostics;
 - if a Windows 10 first install works only after reboot, retain `setup.log`,
   `receiver.log`, Bonjour service/process state, pending-reboot state, and
   iPhone visibility before and after reboot. AeroMirror does not normally

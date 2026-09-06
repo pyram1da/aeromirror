@@ -69,6 +69,11 @@ function Get-SourceSlice(
     [string]$End,
     [string]$Name
 ) {
+    # Compare source structure independently of the checkout's line endings.
+    # Provenance verification still hashes the original file bytes.
+    $Text = $Text.Replace("`r`n", "`n")
+    $Start = $Start.Replace("`r`n", "`n")
+    $End = $End.Replace("`r`n", "`n")
     $startIndex = $Text.IndexOf($Start, [StringComparison]::Ordinal)
     Assert-True ($startIndex -ge 0) "$Name start marker exists"
     $endIndex = $Text.IndexOf(
@@ -128,6 +133,7 @@ $audioRendererSource = Join-Path $libRoot "renderers\audio_renderer.c"
 $uxplaySource = Join-Path $libRoot "uxplay.cpp"
 $uxplayApiHeader = Join-Path $libRoot "uxplay_api.h"
 $logProtocolHeader = Join-Path $libRoot "aeromirror_log_protocol.h"
+$hostProtocolHeader = Join-Path $libRoot "aeromirror_host_protocol.h"
 $loggerSource = Join-Path $libRoot "lib\logger.c"
 $loggerHeader = Join-Path $libRoot "lib\logger.h"
 $wrapperRoot = Split-Path -Parent $libRoot
@@ -168,6 +174,7 @@ foreach ($path in @(
     $uxplaySource,
     $uxplayApiHeader,
     $logProtocolHeader,
+    $hostProtocolHeader,
     $loggerSource,
     $loggerHeader,
     $wrapperWindowSource,
@@ -209,6 +216,7 @@ $videoRendererText = Get-Content -LiteralPath $videoRendererSource -Raw
 $audioRendererText = Get-Content -LiteralPath $audioRendererSource -Raw
 $uxplayText = Get-Content -LiteralPath $uxplaySource -Raw
 $uxplayApiText = Get-Content -LiteralPath $uxplayApiHeader -Raw
+$hostProtocolText = Get-Content -LiteralPath $hostProtocolHeader -Raw
 $logProtocolText = Get-Content -LiteralPath $logProtocolHeader -Raw
 $loggerText = Get-Content -LiteralPath $loggerSource -Raw
 $loggerHeaderText = Get-Content -LiteralPath $loggerHeader -Raw
@@ -857,8 +865,598 @@ Assert-True ($rendererHostSlice.Contains('m_normalGeometry = normalCandidate') -
 Assert-True ($wrapperWindowHeaderText.Contains(
         'QRect m_normalGeometry;') -and
     $wrapperWindowHeaderText.Contains('intptr_t m_normalWindowStyle = 0;') -and
-    $wrapperWindowHeaderText.Contains('intptr_t m_normalWindowExStyle = 0;')) `
+    $wrapperWindowHeaderText.Contains('intptr_t m_normalWindowExStyle = 0;') -and
+    $wrapperWindowHeaderText.Contains('uint64_t m_showGeneration = 0;')) `
     "renderer host retains its normal geometry and native frame styles"
+
+# The initial black-viewer correction rendezvous is generation-bound on both
+# sides: Qt retries the drawable child, while D3D11 Present publishes an atomic
+# token without waiting on the GUI. A later Qt turn retains/exposes the sink.
+$rendererShowSlice = Get-SourceSlice $wrapperWindowText `
+    'void RendererHostWindow::showRenderer(uint64_t generation, uint64_t sessionId)' `
+    'void RendererHostWindow::queueRendererReady(' `
+    'renderer host show acknowledgement'
+Assert-InOrder $rendererShowSlice @(
+    'if (!generation || (sessionId && sessionId == m_dismissedSessionId))',
+    'm_showGeneration = generation;',
+    'setAttribute(Qt::WA_ShowWithoutActivating, true)',
+    'queueRendererReady(generation)'
+) "native SHOW token is accepted before GUI readiness validation"
+Assert-NoMatch $rendererShowSlice `
+    'SendMessage|SWP_FRAMECHANGED|setGeometry\(|resize\(' `
+    "normal host-show path neither blocks nor changes window bounds"
+$rendererReadyGui = Get-SourceSlice $wrapperWindowText `
+    'void RendererHostWindow::queueRendererReady(' `
+    'void RendererHostWindow::queueRendererExpose(' `
+    'renderer host ready retry'
+Assert-InOrder $rendererReadyGui @(
+    'generation != m_showGeneration',
+    'm_hostReadyAcknowledgedGeneration == generation',
+    'm_readyRetryPendingGeneration == generation',
+    'maximumAttempts = 60',
+    'm_readyRetryPendingGeneration = generation',
+    'QTimer::singleShot(delayMs, this, [this, generation, attempt]()',
+    'm_readyRetryPendingGeneration = 0',
+    '!IsIconic(host)',
+    'IsWindowVisible(surface)',
+    'GetClientRect(surface, &client)',
+    'queueRendererReady(generation, attempt + 1)',
+    'notify_video_host_shown(',
+    'm_hostReadyAcknowledgedGeneration = generation',
+    'AEROMIRROR_VIDEO_HOST_SHOW result=%s generation=%llu'
+) "visible child validation de-duplicates retries and acknowledges the current generation"
+Assert-True ($wrapperWindowHeaderText.Contains(
+        'uint64_t m_hostReadyAcknowledgedGeneration = 0;') -and
+    $wrapperWindowHeaderText.Contains(
+        'uint64_t m_readyRetryPendingGeneration = 0;') -and
+    $wrapperWindowHeaderText.Contains(
+        'uint64_t m_surfaceRefreshPendingGeneration = 0;') -and
+    $wrapperWindowHeaderText.Contains(
+        'void scheduleHandleRebind(unsigned int attempt = 0);') -and
+    $wrapperWindowHeaderText.Contains(
+        'bool m_handleRebindScheduled = false;') -and
+    $wrapperWindowHeaderText.Contains(
+        'bool m_rebindingHandles = false;')) `
+    "renderer host tracks READY and HWND rebind work per generation"
+
+$rendererLifecycleEvents = Get-SourceSlice $wrapperWindowText `
+    'bool RendererHostWindow::eventFilter(QObject *watched, QEvent *event)' `
+    'void RendererHostWindow::closeEvent(QCloseEvent *event)' `
+    'renderer host lifecycle events'
+Assert-Match $rendererLifecycleEvents (
+    'QEvent::WinIdChange[\s\S]*scheduleHandleRebind\(\)') `
+    "WinIdChange schedules safe HWND rebinding"
+Assert-InOrder $rendererLifecycleEvents @(
+    'QEvent::Show',
+    'QEvent::WindowStateChange',
+    'm_showGeneration && isVisible() && !isMinimized()',
+    'm_surfaceRefreshPendingGeneration != generation',
+    'm_hostReadyAcknowledgedGeneration == generation',
+    'm_surfaceRefreshPendingGeneration = generation',
+    'QTimer::singleShot(25, this, [this, generation, reexpose]()',
+    'm_surfaceRefreshPendingGeneration = 0',
+    'generation != m_showGeneration',
+    'queueRendererReady(generation)',
+    'if (reexpose)',
+    'request_video_host_surface_expose('
+) "show and restore events coalesce one delayed READY and re-request EXPOSE only after prior readiness"
+Assert-NoMatch $rendererLifecycleEvents (
+    'set_video_host_handles\(|SetWindowPos\(|HWND_TOP|HWND_BOTTOM|' +
+    'SetForegroundWindow\(|activateWindow\(') `
+    "Qt event delivery neither synchronously rebinds sinks nor repeats connection z-order changes"
+
+$rendererHandleRebind = Get-SourceSlice $wrapperWindowText `
+    'void RendererHostWindow::scheduleHandleRebind(unsigned int attempt)' `
+    'void RendererHostWindow::emitFullscreenMarker(' `
+    'renderer host HWND rebind'
+Assert-InOrder $rendererHandleRebind @(
+    'm_handleRebindScheduled = true',
+    'const int delayMs = attempt == 0 ? 0 : 25',
+    'QTimer::singleShot(delayMs, this, [this, attempt]()',
+    'm_rebindingHandles = true',
+    'const uintptr_t previousControl = m_controlHandle',
+    'const uintptr_t previousRender = m_renderHandle',
+    'static_cast<uintptr_t>(winId())',
+    'static_cast<uintptr_t>(m_videoSurface->winId())',
+    'IsWindow(reinterpret_cast<HWND>(currentControl))',
+    'IsWindow(reinterpret_cast<HWND>(currentRender))',
+    'm_controlHandle = currentControl',
+    'm_renderHandle = currentRender',
+    'm_showGeneration = 0',
+    'm_hostReadyAcknowledgedGeneration = 0',
+    'm_readyRetryPendingGeneration = 0',
+    'm_surfaceRefreshPendingGeneration = 0',
+    'set_video_host_handles(currentRender, currentControl)',
+    'AEROMIRROR_VIDEO_HOST_REBIND result=requested',
+    'm_rebindingHandles = false',
+    'if (!valid && attempt < 60)',
+    'scheduleHandleRebind(attempt + 1)'
+) "replacement HWNDs are validated and cached before native rebinding while transient invalid handles retry"
+
+$nativeHandleRebind = Get-SourceSlice $videoRendererText `
+    'void video_renderer_set_host_handles(' `
+    'bool video_renderer_notify_host_shown(' `
+    'native HWND rebind'
+Assert-InOrder $nativeHandleRebind @(
+    'g_mutex_lock(&renderer_state_lock)',
+    'g_mutex_lock(&aeromirror_host_lifecycle_lock)',
+    'const gboolean show_desired = g_atomic_int_get(',
+    '&aeromirror_host_show_desired) != 0',
+    'g_atomic_int_set(&aeromirror_host_rebind_in_progress, 1)',
+    '&aeromirror_host_show_deferred, show_desired ? 1 : 0',
+    'g_atomic_int_set(&aeromirror_host_visible_requested, 0)',
+    '&aeromirror_host_render_handle',
+    '&aeromirror_host_control_handle',
+    '&aeromirror_host_ready_generation, NULL',
+    '&aeromirror_host_bound_generation, NULL',
+    '&aeromirror_host_bound_render_handle, NULL',
+    '&aeromirror_host_present_generation, NULL',
+    '&aeromirror_host_expose_posted_generation, NULL',
+    '&aeromirror_host_exposed_generation, NULL',
+    'aeromirror_next_host_generation_locked()',
+    'g_cond_broadcast(&aeromirror_host_ready_cond)',
+    'g_mutex_unlock(&aeromirror_host_lifecycle_lock)',
+    'g_mutex_lock(&renderer_lock)',
+    'gst_object_ref(renderer->pipeline)',
+    'gst_object_ref(',
+    'renderer->aeromirror_host_sink',
+    'g_mutex_unlock(&renderer_lock)',
+    'gst_element_get_state(',
+    'pipeline, &current_state, &pending_state, 0)',
+    '&aeromirror_renderer_playback_ready, 0',
+    'pipeline, GST_STATE_NULL',
+    'aeromirror_bind_host_to_sink(sink, "replacement-host")',
+    'pipeline, GST_STATE_READY',
+    'g_mutex_lock(&aeromirror_host_lifecycle_lock)',
+    'const gboolean resume_after_rebind =',
+    '&aeromirror_host_show_desired) != 0',
+    'g_atomic_int_set(&aeromirror_host_rebind_in_progress, 0)',
+    'g_atomic_int_set(&aeromirror_host_show_deferred, 0)',
+    'if (resume_after_rebind)',
+    'gpointer generation = aeromirror_request_host_show_locked()',
+    'aeromirror_host_pending_rebind_generation = generation',
+    'aeromirror_host_pending_rebind_session_generation =',
+    'aeromirror_host_pending_rebind_renderer_id =',
+    'aeromirror_host_pending_rebind_target = resume_state',
+    'else if (!g_atomic_int_get(&aeromirror_host_show_desired)',
+    'AEROMIRROR_WM_RENDERER_HIDE',
+    '(uintptr_t) (guintptr) generation, 0',
+    'g_mutex_unlock(&aeromirror_host_lifecycle_lock)',
+    'g_mutex_unlock(&renderer_state_lock)',
+    'if (sink) gst_object_unref(sink)',
+    'if (pipeline) gst_object_unref(pipeline)'
+) "native rebind quiesces the selected pipeline, binds the replacement HWND while stopped, returns it to READY, and defers resume until the new SHOW generation is acknowledged"
+$nativeHandleInvalidate = Get-SourceSlice $nativeHandleRebind `
+    'g_mutex_lock(&aeromirror_host_lifecycle_lock)' `
+    'g_mutex_unlock(&aeromirror_host_lifecycle_lock)' `
+    'native HWND invalidation critical section'
+Assert-NoMatch $nativeHandleInvalidate `
+    'g_mutex_lock\(&renderer_lock\)|aeromirror_host_overlay_lock|gst_video_overlay_' `
+    "native HWND invalidation releases the lifecycle lock before sink work"
+$nativeSinkSnapshot = Get-SourceSlice $nativeHandleRebind `
+    'g_mutex_lock(&renderer_lock)' `
+    'g_mutex_unlock(&renderer_lock)' `
+    'native HWND sink snapshot'
+Assert-NoMatch $nativeSinkSnapshot (
+    'aeromirror_host_lifecycle_lock|aeromirror_host_overlay_lock|' +
+    'gst_video_overlay_|\bsinks\s*\[NCODECS\]') `
+    "native rebind retains only the selected pipeline and sink before GStreamer work"
+Assert-NoMatch $nativeHandleRebind `
+    'aeromirror_wait_for_(?:current_)?host_ready|g_cond_wait|Sleep|SendMessage' `
+    "GUI-thread HWND rebinding never waits synchronously for its own READY acknowledgement"
+Assert-Match $nativeHandleRebind (
+    'GST_STATE_NULL[\s\S]*' +
+    'aeromirror_bind_host_to_sink\(sink, "replacement-host"\)[\s\S]*' +
+    'GST_STATE_READY[\s\S]*' +
+    'aeromirror_request_host_show_locked\(\)') `
+    "a replacement D3D11 window is released at NULL and rebound before READY and SHOW"
+$nativeHandleReconcile = Get-SourceSlice $nativeHandleRebind `
+    'const gboolean resume_after_rebind =' `
+    'g_mutex_unlock(&aeromirror_host_lifecycle_lock)' `
+    'native HWND visibility reconciliation'
+Assert-NoMatch $nativeHandleReconcile `
+    'renderer_lock|aeromirror_host_overlay_lock|gst_video_overlay_' `
+    "replacement-HWND SHOW/HIDE reconciliation holds only the lifecycle lock"
+$rendererReadySlice = Get-SourceSlice $videoRendererText `
+    'bool video_renderer_notify_host_shown(' `
+    'bool video_renderer_expose_host_surface(' `
+    'visible host readiness acknowledgement'
+Assert-InOrder $rendererReadySlice @(
+    'g_mutex_lock(&aeromirror_host_lifecycle_lock)',
+    '&aeromirror_host_lifecycle_generation',
+    '&aeromirror_host_visible_requested',
+    '&aeromirror_host_ready_generation, generation_token',
+    '&aeromirror_host_bound_render_handle',
+    '&aeromirror_host_bound_generation, generation_token',
+    'g_cond_broadcast(&aeromirror_host_ready_cond)',
+    'g_mutex_unlock(&aeromirror_host_lifecycle_lock)',
+    'aeromirror_complete_pending_host_rebind(generation_token)',
+    'aeromirror_maybe_request_host_expose()'
+) "host readiness publishes only an HWND-proven generation before dispatching deferred resume"
+Assert-NoMatch $rendererReadySlice `
+    'gst_video_overlay_expose|g_mutex_lock\(&renderer_lock\)|logger_protocol' `
+    "host SHOW acknowledgement cannot race an uncreated D3D11 swap chain or log from the GUI-callable native path"
+$rendererExposeSlice = Get-SourceSlice $videoRendererText `
+    'bool video_renderer_expose_host_surface(' `
+    'bool video_renderer_abandon_host_surface_expose(uint64_t generation)' `
+    'selected sink expose implementation'
+Assert-InOrder $rendererExposeSlice @(
+    'configured_handle != (gpointer) (guintptr) render_handle',
+    '&aeromirror_host_visible_requested',
+    '&aeromirror_host_ready_generation',
+    '&aeromirror_host_bound_generation',
+    '&aeromirror_host_present_generation',
+    '&aeromirror_host_expose_posted_generation',
+    'generation_token, NULL',
+    '&aeromirror_host_exposed_generation, generation_token',
+    'g_mutex_unlock(&aeromirror_host_lifecycle_lock)',
+    'g_mutex_lock(&renderer_lock)',
+    'gst_object_ref(',
+    'g_mutex_unlock(&renderer_lock)',
+    'GST_IS_VIDEO_OVERLAY(sink)',
+    'g_mutex_lock(&aeromirror_host_overlay_lock)',
+    'g_private_set(',
+    '&aeromirror_explicit_expose_generation, generation_token',
+    'gst_video_overlay_expose(GST_VIDEO_OVERLAY(sink))',
+    '&aeromirror_explicit_expose_generation,',
+    'previous_expose_generation',
+    'g_mutex_unlock(&aeromirror_host_overlay_lock)',
+    'gst_object_unref(sink)'
+) "selected host sink is retained and exposed under the dedicated overlay lock"
+$rendererExposeClaim = Get-SourceSlice $rendererExposeSlice `
+    'g_mutex_lock(&aeromirror_host_lifecycle_lock)' `
+    'g_mutex_unlock(&aeromirror_host_lifecycle_lock)' `
+    'selected sink expose claim'
+Assert-NoMatch $rendererExposeClaim `
+    'renderer_lock|aeromirror_host_overlay_lock|gst_video_overlay_' `
+    "generation claim releases the lifecycle lock before sink or VideoOverlay work"
+Assert-NoMatch $rendererExposeSlice `
+    'SendMessage|gst_video_overlay_set_render_rectangle|render-rectangle|\bcrop\b|scale-[xy]|logger_protocol' `
+    "surface expose does not resize, crop, or scale mirrored content"
+$rendererExposeSnapshot = Get-SourceSlice $rendererExposeSlice `
+    'g_mutex_lock(&renderer_lock)' `
+    'g_mutex_unlock(&renderer_lock)' `
+    'selected sink expose snapshot'
+Assert-NoMatch $rendererExposeSnapshot `
+    'aeromirror_host_lifecycle_lock|aeromirror_host_overlay_lock|gst_video_overlay_' `
+    "selected sink snapshot takes a strong reference without nesting or calling VideoOverlay"
+$rendererExposeOverlay = Get-SourceSlice $rendererExposeSlice `
+    'g_mutex_lock(&aeromirror_host_overlay_lock)' `
+    'g_mutex_unlock(&aeromirror_host_overlay_lock)' `
+    'selected sink overlay expose'
+Assert-NoMatch $rendererExposeOverlay `
+    'aeromirror_host_lifecycle_lock|renderer_lock' `
+    "VideoOverlay expose runs only under its dedicated lock"
+Assert-InOrder $videoRendererText @(
+    'static void aeromirror_recovery_present(',
+    '&aeromirror_explicit_expose_generation',
+    ': g_atomic_pointer_get(&aeromirror_host_bound_generation)',
+    '&aeromirror_host_ready_generation',
+    '&aeromirror_host_bound_render_handle',
+    '&aeromirror_host_render_handle',
+    '&aeromirror_host_present_generation',
+    'aeromirror_maybe_request_host_expose()'
+) "selected D3D11 Present uses the exact explicit-expose or committed HWND generation before publishing readiness"
+Assert-NoMatch (Get-SourceSlice $videoRendererText `
+    'static void aeromirror_recovery_present(' `
+    'void video_renderer_poll_recovery_present()' `
+    'D3D11 Present callback') `
+    'g_mutex_lock\(|gst_video_overlay_expose\s*\(\s*GST_VIDEO_OVERLAY|SendMessage' `
+    "Present callback performs only wait-free atomic and PostMessage work"
+Assert-True ($uxplayApiText.Contains('notify_video_host_shown(') -and
+    $uxplayApiText.Contains('expose_video_host_surface(') -and
+    $uxplayApiText.Contains('abandon_video_host_surface_expose(') -and
+    $uxplayApiText.Contains('request_video_host_surface_expose(') -and
+    $uxplayText.Contains('video_renderer_notify_host_shown(') -and
+    $uxplayText.Contains('video_renderer_expose_host_surface(') -and
+    $uxplayText.Contains('video_renderer_abandon_host_surface_expose(') -and
+    $uxplayText.Contains('video_renderer_request_host_surface_expose(') -and
+    $videoRendererText.Contains(
+        'bool video_renderer_request_host_surface_expose(uint64_t generation)')) `
+    "Qt readiness, post-Present expose, timeout rearm, and restore request have separate libuxplay API paths"
+Assert-True ($hostProtocolText.Contains(
+        'AEROMIRROR_WM_RENDERER_EXPOSE') -and
+    $rendererHostSlice.Contains(
+        'static_cast<uint64_t>(nativeMessage->wParam)') -and
+    $rendererHostSlice.Contains(
+        'QTimer::singleShot(delayMs, this, [this, generation, attempt]()')) `
+    "the GUI rejects stale expose generations and runs after the Present callback"
+Assert-Match $rendererHostSlice (
+    'const int exposed = expose_video_host_surface\([\s\S]*' +
+    'AEROMIRROR_VIDEO_HOST_EXPOSE result=%s[\s\S]*' +
+    'trigger=present-ready[\s\S]*' +
+    'exposed \? "requested" : "rejected"') `
+    "the GUI owner records present-triggered requested versus rejected expose without native cross-thread logging"
+Assert-True ($rendererHostSlice.Contains(
+        'queueRendererExpose(generation, attempt + 1)') -and
+    $rendererHostSlice.Contains(
+        'abandon_video_host_surface_expose(') -and
+    $uxplayApiText.Contains(
+        'abandon_video_host_surface_expose(') -and
+    $uxplayText.Contains(
+        'video_renderer_abandon_host_surface_expose(')) `
+    "non-drawable GUI retries before generation-safe native rearm"
+
+$rendererExposeAbandon = Get-SourceSlice $videoRendererText `
+    'bool video_renderer_abandon_host_surface_expose(uint64_t generation)' `
+    'bool video_renderer_request_host_surface_expose(uint64_t generation)' `
+    'wait-free expose abandonment'
+Assert-InOrder $rendererExposeAbandon @(
+    'gpointer generation_token',
+    '&aeromirror_host_lifecycle_generation',
+    'generation_token',
+    'g_atomic_pointer_compare_and_exchange(',
+    '&aeromirror_host_expose_posted_generation',
+    'generation_token, NULL'
+) "timeout rearm changes only the exact active generation with atomic compare/exchange"
+Assert-NoMatch $rendererExposeAbandon `
+    'g_mutex_|gst_|SendMessage|PostMessage|aeromirror_maybe_request_host_expose' `
+    "timeout rearm is wait-free and does not touch the sink or GUI"
+
+$rendererExposeRequest = Get-SourceSlice $videoRendererText `
+    'bool video_renderer_request_host_surface_expose(uint64_t generation)' `
+    'static bool aeromirror_post_host_message(' `
+    'restore expose request'
+Assert-InOrder $rendererExposeRequest @(
+    'gpointer generation_token',
+    'g_mutex_lock(&aeromirror_host_lifecycle_lock)',
+    '&aeromirror_host_lifecycle_generation',
+    'generation_token',
+    '&aeromirror_host_visible_requested',
+    '&aeromirror_host_exposed_generation, NULL',
+    '&aeromirror_host_expose_posted_generation, NULL',
+    'g_mutex_unlock(&aeromirror_host_lifecycle_lock)',
+    'aeromirror_maybe_request_host_expose()'
+) "restore re-request resets only the current visible generation before asynchronously reposting"
+Assert-NoMatch $rendererExposeRequest `
+    'gst_video_overlay_expose|g_mutex_lock\(&renderer_lock\)|SendMessage' `
+    "restore re-request neither exposes synchronously nor acquires renderer_lock"
+
+Assert-True ($rendererHostSlice.Contains(
+        'isExternalFullscreenForeground(') -and
+    $rendererHostSlice.Contains(
+        'setAttribute(Qt::WA_ShowWithoutActivating, true)') -and
+    $rendererHostSlice.Contains(
+        'currentForeground = GetForegroundWindow()') -and
+    $rendererHostSlice.Contains('host, HWND_NOTOPMOST') -and
+    $rendererHostSlice.Contains('SWP_NOACTIVATE') -and
+    $rendererHostSlice.Contains('host, protectedForeground') -and
+    $rendererHostSlice.Contains('host, HWND_BOTTOM') -and
+    $rendererHostSlice.Contains('host, HWND_TOP') -and
+    $rendererHostSlice.Contains(
+        'AEROMIRROR_VIDEO_HOST_FOREGROUND result=%s') -and
+    $rendererHostSlice.Contains('hasOrdinaryWindowAbove(host)') -and
+    $rendererHostSlice.Contains('const BOOL promoted = SetWindowPos(') -and
+    $rendererHostSlice.Contains('const BOOL demoted = SetWindowPos(') -and
+    $rendererHostSlice.Contains('host, HWND_NOTOPMOST') -and
+    -not $rendererHostSlice.Contains('SetForegroundWindow(') -and
+    -not $rendererHostSlice.Contains('activateWindow(') -and
+    -not $rendererHostSlice.Contains('Qt::WindowStaysOnTopHint')) `
+    "connection raises without focus theft but defers to fullscreen foreground windows"
+Assert-Match $rendererShowSlice (
+    'else if \(!deferActivation && nonTopmost\)[\s\S]*' +
+    'SetWindowPos\(\s*host, HWND_TOP,') `
+    "ordinary connection raise stays in the normal z-order band and does not activate"
+Assert-Match $rendererShowSlice (
+    'if \(deferActivation && nonTopmost\)[\s\S]*' +
+    'host, HWND_BOTTOM') `
+    "fullscreen foreground content keeps the automatic viewer at the bottom"
+Assert-True ($wrapperWindowText.Contains(
+        'foreground == GetDesktopWindow()') -and
+    $wrapperWindowText.Contains('foreground == GetShellWindow()') -and
+    $wrapperWindowText.Contains('L"Progman"') -and
+    $wrapperWindowText.Contains('L"WorkerW"') -and
+    $wrapperWindowText.Contains(
+        'GetClientRect(foreground, &clientRect)') -and
+    $wrapperWindowText.Contains(
+        'ClientToScreen(foreground, &clientTopLeft)') -and
+    $wrapperWindowText.Contains(
+        'ClientToScreen(foreground, &clientBottomRight)')) `
+    "desktop shell and invisible frame bounds cannot be false fullscreen guards"
+Assert-Match $rendererHostSlice (
+    'desired && initialRequest[\s\S]*' +
+    'isExternalFullscreenForeground\(foreground, host\)[\s\S]*' +
+    'emitFullscreenMarker\(desired, before, "deferred", source\)') `
+    "initial fullscreen never bypasses a protected foreground application"
+
+$nativeHostShowLocked = Get-SourceSlice $videoRendererText `
+    'static gpointer aeromirror_request_host_show_locked() {' `
+    'static gpointer aeromirror_request_host_show() {' `
+    'native host locked SHOW lifecycle'
+Assert-InOrder $nativeHostShowLocked @(
+    '&aeromirror_host_show_desired, 1',
+    '&aeromirror_host_rebind_in_progress',
+    '&aeromirror_host_show_deferred, 1',
+    '&aeromirror_host_ready_generation, NULL',
+    '&aeromirror_host_present_generation, NULL',
+    '&aeromirror_host_expose_posted_generation, NULL',
+    'aeromirror_next_host_generation_locked()',
+    '&aeromirror_host_visible_requested, 1',
+    'AEROMIRROR_WM_RENDERER_SHOW',
+    '(uintptr_t) (guintptr) generation',
+    '&aeromirror_host_visible_requested, 0',
+    'g_cond_broadcast(&aeromirror_host_ready_cond)',
+    'return NULL',
+    'return generation'
+) "locked SHOW returns the exact generation, wakes cancellation waiters, and keeps desired-visible intent after a failed post"
+Assert-NoMatch $nativeHostShowLocked `
+    'aeromirror_host_show_desired, 0' `
+    "a failed SHOW post cannot discard the desired-visible state needed by rebind recovery"
+$nativeHostShow = Get-SourceSlice $videoRendererText `
+    'static gpointer aeromirror_request_host_show() {' `
+    'static void aeromirror_request_host_hide() {' `
+    'native host SHOW lock wrapper'
+Assert-InOrder $nativeHostShow @(
+    'g_mutex_lock(&aeromirror_host_lifecycle_lock)',
+    'gpointer generation = aeromirror_request_host_show_locked()',
+    'g_mutex_unlock(&aeromirror_host_lifecycle_lock)',
+    'return generation'
+) "SHOW serializes the lifecycle transition and returns its generation"
+$nativeHostReadyWait = Get-SourceSlice $videoRendererText `
+    'static bool aeromirror_wait_for_host_ready(' `
+    'static bool aeromirror_wait_for_current_host_ready(' `
+    'bounded native host readiness wait'
+Assert-InOrder $nativeHostReadyWait @(
+    'const gint64 deadline = g_get_monotonic_time() + timeout_us',
+    'g_mutex_lock(&aeromirror_host_lifecycle_lock)',
+    '&aeromirror_host_lifecycle_generation',
+    '&aeromirror_host_show_desired',
+    '&aeromirror_host_visible_requested',
+    '&aeromirror_host_ready_generation',
+    'g_cond_wait_until(',
+    '&aeromirror_host_ready_cond',
+    'g_mutex_unlock(&aeromirror_host_lifecycle_lock)',
+    'return ready'
+) "host startup waits only for the exact visible generation and has a finite deadline"
+Assert-NoMatch $nativeHostReadyWait `
+    'gst_|renderer_lock|renderer_state_lock|SendMessage|Sleep' `
+    "host readiness wait cannot hold renderer/GStreamer work or block on GUI calls"
+$nativeCurrentHostReadyWait = Get-SourceSlice $videoRendererText `
+    'static bool aeromirror_wait_for_current_host_ready(' `
+    'static void aeromirror_complete_pending_host_rebind(' `
+    'replacement-aware host readiness wait'
+Assert-InOrder $nativeCurrentHostReadyWait @(
+    'if (!generation || deadline_us <= 0) return false',
+    'g_mutex_lock(&aeromirror_host_lifecycle_lock)',
+    '&aeromirror_host_lifecycle_generation',
+    '*generation = current_generation',
+    '&aeromirror_host_ready_generation',
+    'g_cond_wait_until(',
+    'g_mutex_unlock(&aeromirror_host_lifecycle_lock)',
+    'return ready'
+) "startup follows a replacement SHOW generation without extending its finite deadline"
+Assert-NoMatch $nativeCurrentHostReadyWait '!\*generation' `
+    "a failed initial SHOW post can still follow a later current generation"
+Assert-NoMatch $nativeCurrentHostReadyWait `
+    'gst_|renderer_lock|renderer_state_lock|SendMessage|Sleep' `
+    "replacement-aware readiness waiting performs no renderer or GUI work"
+$nativeRebindDefinition =
+    "static void aeromirror_complete_pending_host_rebind(`n" +
+    '        gpointer generation) {'
+$nativeRebindResume = Get-SourceSlice $videoRendererText `
+    $nativeRebindDefinition `
+    'static void aeromirror_request_host_hide()' `
+    'deferred native HWND resume'
+Assert-InOrder $nativeRebindResume @(
+    'g_mutex_lock(&renderer_state_lock)',
+    'aeromirror_host_pending_rebind_generation != generation',
+    'g_mutex_lock(&renderer_lock)',
+    'gst_object_ref(renderer->pipeline)',
+    'gst_object_ref(',
+    'renderer->aeromirror_host_sink',
+    'g_mutex_unlock(&renderer_lock)',
+    'aeromirror_wait_for_host_ready(generation, 1)',
+    'aeromirror_bind_host_to_sink(sink, "replacement-host")',
+    'aeromirror_commit_host_binding(generation)',
+    'gst_element_set_state(pipeline, target_state)',
+    '&aeromirror_renderer_playback_ready, 1',
+    'aeromirror_host_pending_rebind_generation = NULL',
+    'g_mutex_unlock(&renderer_state_lock)'
+) "only the exact acknowledged session rebinds at READY and resumes playback"
+Assert-NoMatch $nativeRebindResume `
+    'gst_element_get_state\s*\(|g_cond_wait|Sleep|SendMessage' `
+    "GUI READY completion does not synchronously wait for GStreamer or the GUI"
+$nativeHostHide = Get-SourceSlice $videoRendererText `
+    'static void aeromirror_request_host_hide()' `
+    'static guint64 aeromirror_monotonic_us()' `
+    'native host HIDE lifecycle'
+Assert-InOrder $nativeHostHide @(
+    'g_mutex_lock(&aeromirror_host_lifecycle_lock)',
+    '&aeromirror_host_show_desired, 0',
+    '&aeromirror_host_rebind_in_progress',
+    '&aeromirror_host_show_deferred, 0',
+    '&aeromirror_host_visible_requested, 0',
+    'aeromirror_next_host_generation_locked()',
+    '&aeromirror_host_ready_generation, NULL',
+    'g_mutex_unlock(&aeromirror_host_lifecycle_lock)',
+    'return;',
+    '&aeromirror_host_visible_requested, 0',
+    'aeromirror_next_host_generation_locked()',
+    'AEROMIRROR_WM_RENDERER_HIDE',
+    '(uintptr_t) (guintptr) generation',
+    'g_mutex_unlock(&aeromirror_host_lifecycle_lock)'
+) "HIDE cancels desired visibility, invalidates in-flight work, and avoids posting to the old HWND during rebind"
+Assert-Match $nativeHandleRebind (
+    'resume_after_rebind =[\s\S]*' +
+    'aeromirror_host_show_desired[\s\S]*' +
+    'if \(resume_after_rebind\)[\s\S]*' +
+    'aeromirror_request_host_show_locked\(\)[\s\S]*' +
+    'else if \(!g_atomic_int_get\(&aeromirror_host_show_desired\)[\s\S]*' +
+    'AEROMIRROR_WM_RENDERER_HIDE') `
+    "replacement HWND reconciliation cannot lose a SHOW retry or a HIDE that arrived during rebind"
+
+$hostBindingDefinition =
+    "static bool aeromirror_bind_host_to_sink(`n" +
+    "        GstElement *sink,`n" +
+    '        const char *sink_name) {'
+$hostBinding = Get-SourceSlice $videoRendererText `
+    $hostBindingDefinition `
+    'static bool aeromirror_commit_host_binding(gpointer generation) {' `
+    'selected host overlay binding'
+Assert-InOrder $hostBinding @(
+    'bool bound = false',
+    'gpointer render_handle = g_atomic_pointer_get(',
+    '&aeromirror_host_bound_generation, NULL',
+    'g_mutex_lock(&aeromirror_host_overlay_lock)',
+    'gst_video_overlay_set_window_handle(',
+    'gst_video_overlay_handle_events(',
+    'bound = g_atomic_pointer_get(&aeromirror_host_render_handle)',
+    '&aeromirror_host_bound_render_handle, render_handle',
+    'g_mutex_unlock(&aeromirror_host_overlay_lock)',
+    'return bound'
+) "selected-sink HWND binding is serialized with rebind and expose"
+Assert-NoMatch $hostBinding `
+    'aeromirror_host_lifecycle_lock|renderer_lock|renderer_state_lock' `
+    "VideoOverlay binding cannot nest lifecycle or renderer locks"
+$hostBindingCommit = Get-SourceSlice $videoRendererText `
+    'static bool aeromirror_commit_host_binding(gpointer generation) {' `
+    'static gpointer aeromirror_request_host_show_locked() {' `
+    'selected host generation commit'
+Assert-InOrder $hostBindingCommit @(
+    'g_mutex_lock(&aeromirror_host_lifecycle_lock)',
+    '&aeromirror_host_lifecycle_generation',
+    '&aeromirror_host_ready_generation',
+    '&aeromirror_host_bound_render_handle',
+    '&aeromirror_host_show_desired',
+    '&aeromirror_host_visible_requested',
+    '&aeromirror_host_bound_generation, generation',
+    'g_mutex_unlock(&aeromirror_host_lifecycle_lock)'
+) "a sink binding is committed only to the exact ready visible HWND generation"
+Assert-NoMatch $hostBindingCommit `
+    'gst_|aeromirror_host_overlay_lock|renderer_lock' `
+    "generation commit holds only the lifecycle lock and performs no sink work"
+
+$rendererPublication = Get-SourceSlice $videoRendererText `
+    'g_assert (n_renderers <= NCODECS);' `
+    'void video_renderer_start() {' `
+    'renderer publication'
+Assert-Match $rendererPublication `
+    'g_mutex_lock\(&renderer_lock\);\s*renderer_type\[i\] = new_renderer;\s*g_mutex_unlock\(&renderer_lock\);' `
+    "new renderer pointers are published under renderer_lock"
+$hostSinkAssignments = [regex]::Matches(
+    $rendererPublication,
+    'renderer_type\[i\]->aeromirror_host_sink\s*=\s*retained_host_sink;').Count
+$hostSinkPublications = [regex]::Matches(
+    $rendererPublication,
+    'g_mutex_lock\(&renderer_lock\);\s*' +
+    'renderer_type\[i\]->aeromirror_host_sink\s*=\s*' +
+    'retained_host_sink;\s*g_mutex_unlock\(&renderer_lock\);').Count
+Assert-True ($hostSinkAssignments -eq 2 -and
+    $hostSinkPublications -eq $hostSinkAssignments) `
+    "every retained host sink is published under renderer_lock"
+Assert-Match $videoRendererText `
+    'if \(!sync && !aeromirror_host_is_configured\(\)\)' `
+    "low-latency host mode keeps the D3D11 Present callback"
+Assert-InOrder $videoRendererText @(
+    'GstElement *retained_host_sink = GST_ELEMENT(',
+    'gst_object_ref(playbin_videosink)',
+    'g_mutex_lock(&renderer_lock)',
+    'renderer_type[i]->aeromirror_host_sink =',
+    'retained_host_sink',
+    'g_mutex_unlock(&renderer_lock)',
+    'aeromirror_attach_d3d11_present_proof(',
+    'g_object_set(G_OBJECT (renderer_type[i]->pipeline), "video-sink"'
+) "explicit HLS D3D11 sink is retained and published before first-Present rendezvous"
 
 # A stopped machine-wide Bonjour service is a terminal prerequisite state for
 # the current registration attempt, not a reason to churn the native core.
@@ -1391,6 +1989,89 @@ Assert-NoMatch $rendererText `
     '\b(?:max-bytes|max-buffers|max-time|leaky-type|block)\s*=' `
     "renderer appsrc does not introduce unsafe drop or reader-block policy"
 
+# Display negotiation and final sink geometry are observable without reading
+# pixels or changing caps, crop, scale, render rectangles, or window shape.
+Assert-MatchCount $handlersText `
+    '"AEROMIRROR_DISPLAY_INFO model=%s "' `
+    1 "the full AirPlay info response exposes one content-free display marker"
+$displayInfoSlice = Get-SourceSlice $handlersText `
+    'plist_dict_set_item(res_node, "displays", displays_node);' `
+    ' finished:' "AirPlay display diagnostics"
+Assert-InOrder $displayInfoSlice @(
+    'plist_dict_set_item(res_node, "displays", displays_node);',
+    'logger_protocol(raop->logger',
+    'global_features=0x%016',
+    'logical=%dx%d pixels=%dx%d physical=0x0',
+    'rotation=0 refresh_period=1/%d max_fps=%d',
+    'overscanned=%d display_features=0xE'
+) "display diagnostics report only the receiver capability tuple before serialization"
+Assert-NoMatch $displayInfoSlice `
+    '(?:deviceID|macAddress|\bpk\b|uuid|plist_to_(?:bin|xml)|response_data)' `
+    "display diagnostics never serialize or log receiver or client identifiers"
+
+$geometryDiagnostic = Get-SourceSlice $videoRendererText `
+    'static void aeromirror_log_sink_caps(' `
+    'static void aeromirror_detach_geometry_diagnostic(' `
+    "sink geometry diagnostics"
+Assert-InOrder $geometryDiagnostic @(
+    'gst_structure_get_int(',
+    'structure, "width", &caps_width)',
+    'gst_structure_get_int(',
+    'structure, "height", &caps_height)',
+    'gst_structure_get_fraction(',
+    'context->caps_sequence++',
+    'AEROMIRROR_VIDEO_SINK_CAPS renderer=%d caps_seq=%u',
+    'GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM',
+    'GST_EVENT_TYPE(event) == GST_EVENT_CAPS',
+    'aeromirror_log_sink_caps(context, caps, "event")',
+    'GST_PAD_PROBE_TYPE_BUFFER',
+    'if (!context->caps_seen)',
+    'gst_pad_get_current_caps(pad)',
+    'aeromirror_log_sink_caps(context, current_caps, "snapshot")',
+    'context->buffer_sequence++',
+    'gst_buffer_get_video_crop_meta(buffer)',
+    'gboolean first_after_caps = context->buffers_since_caps == 1',
+    'AEROMIRROR_GEOMETRY_HEARTBEAT_BUFFERS',
+    'AEROMIRROR_VIDEO_SINK_CROP renderer=%d'
+) "sink diagnostics keep the serialized CAPS and buffer timeline independent from sender geometry"
+Assert-NoMatch $geometryDiagnostic `
+    '(?:gst_buffer_(?:map|extract)|capsfilter|videocrop|videoscale|scale-[xy]|set_render_rectangle|set_window_handle)' `
+    "sink diagnostics are observational and cannot inspect pixels or alter presentation"
+Assert-NoMatch $videoRendererText `
+    'aeromirror_geometry_(?:epoch|expected_width|expected_height)|AEROMIRROR_VIDEO_SINK_(?:CAPS|CROP) epoch=' `
+    "sink diagnostics do not invent a sender-to-decoder epoch correlation"
+Assert-MatchCount $videoRendererText `
+    'gst_pad_get_current_caps\(pad\)' 1 `
+    "sink caps use one first-buffer snapshot fallback rather than querying caps per frame"
+Assert-MatchCount $videoRendererText `
+    'AEROMIRROR_VIDEO_SINK_CAPS renderer=%d caps_seq=%u' 1 `
+    "sink caps have one fixed diagnostic emitter"
+Assert-MatchCount $videoRendererText `
+    'AEROMIRROR_VIDEO_SINK_CROP renderer=%d' 2 `
+    "sink crop diagnostics have one present and one absent fixed emitter"
+Assert-True ($videoRendererText.Contains(
+        '#define AEROMIRROR_GEOMETRY_HEARTBEAT_BUFFERS 120') -and
+    $videoRendererText.Contains(
+        'g_new0(aeromirror_geometry_probe_context_t, 1)') -and
+    $videoRendererText.Contains(
+        'GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM |') -and
+    $videoRendererText.Contains(
+        'context, g_free') -and
+    $videoRendererText.Contains(
+        'if (!jpeg_pipeline) {') -and
+    $videoRendererText.Contains(
+        'aeromirror_attach_geometry_diagnostic(')) `
+    "every non-JPEG mirror sink owns one bounded diagnostic context"
+$videoSizeDiagnostic = Get-SourceSlice $videoRendererText `
+    'void video_renderer_size(' `
+    'GstElement *make_video_sink(' "video sender geometry diagnostic"
+Assert-MatchCount $videoSizeDiagnostic `
+    'AEROMIRROR_VIDEO_SIZE source=%dx%d encoded=%dx%d' 1 `
+    "sender size remains an independent protocol-side observation"
+Assert-NoMatch $videoSizeDiagnostic `
+    '(?:gst_|geometry_epoch|expected_width|expected_height)' `
+    "sender size reporting cannot mutate or relabel the sink pipeline"
+
 $videoSnapshot = Get-SourceSlice $videoRendererText `
     "aeromirror_snapshot_selected_renderer(" `
     "aeromirror_acquire_renderer_for_bus(" "video renderer snapshot"
@@ -1409,8 +2090,9 @@ Assert-InOrder $videoBusAcquire @(
     "aeromirror_bus_callback_refs++",
     "gst_object_ref(selected->pipeline)",
     "gst_object_ref(selected->appsrc)",
+    "selected->aeromirror_session_generation",
     "g_mutex_unlock(&renderer_lock)"
-) "video bus callback retains the exact bus owner and its GStreamer objects"
+) "video bus callback retains the exact bus owner, generation, and GStreamer objects"
 $videoBusRelease = Get-SourceSlice $videoRendererText `
     "aeromirror_release_renderer_for_bus(" `
     "static void aeromirror_health_reset(" "video bus release"
@@ -1466,7 +2148,12 @@ $videoRender = Get-SourceSlice $videoRendererText `
     "video_renderer_render_buffer(" `
     "video_renderer_flush(" "video render"
 Assert-InOrder $videoRender @(
+    "aeromirror_media_session_get()",
+    "g_mutex_lock(&renderer_state_lock)",
+    "aeromirror_renderer_session_is_active(session_generation)",
+    "aeromirror_renderer_playback_ready",
     "g_mutex_lock(&renderer_lock)",
+    "renderer->aeromirror_session_generation == session_generation",
     "gst_object_ref(renderer->appsrc)",
     "gst_object_ref(renderer->pipeline)",
     "base_time = gst_video_pipeline_base_time",
@@ -1474,43 +2161,55 @@ Assert-InOrder $videoRender @(
     "if (!appsrc || !pipeline)",
     "GstClockTime pts",
     "gst_app_src_push_buffer",
+    "g_mutex_unlock(&renderer_state_lock)",
     "gst_object_unref(appsrc)",
     "gst_object_unref(pipeline)"
-) "video render retains selected objects before reading clock state and PTS"
+) "video render keeps the immutable media generation and state barrier through its nonblocking push"
 $videoResume = Get-SourceSlice $videoRendererText `
     "video_renderer_resume()" "video_renderer_start()" "video resume"
 Assert-NoMatch $videoResume 'gst_element_get_state\s*\(' `
     "implicit resume never waits synchronously for a GStreamer state change"
 Assert-InOrder $videoResume @(
+    "aeromirror_media_session_get()",
+    "g_mutex_lock(&renderer_state_lock)",
+    "aeromirror_renderer_session_is_active(session_generation)",
     "aeromirror_snapshot_selected_renderer",
     "gst_element_set_state",
+    "g_mutex_unlock(&renderer_state_lock)",
     "set_result == GST_STATE_CHANGE_FAILURE",
     "gst_object_unref(appsrc)",
     "gst_object_unref(pipeline)"
-) "video resume checks immediate failure and releases its strong references"
+) "video resume is generation-bound, serialized, and releases its strong references"
 $videoDestroyInstance = Get-SourceSlice $videoRendererText `
     "video_renderer_destroy_instance(" `
     "video_renderer_destroy()" "video renderer instance destroy"
 Assert-InOrder $videoDestroyInstance @(
     "g_mutex_lock(&renderer_lock)",
-    "while (renderer->aeromirror_bus_callback_refs > 0)",
+    "while (renderer->aeromirror_bus_callback_refs > 0 ||",
+    "renderer->aeromirror_operation_refs > 0)",
     "g_cond_wait(&renderer_callback_cond, &renderer_lock)",
     "g_mutex_unlock(&renderer_lock)",
     "gst_object_unref (renderer->appsrc)",
+    "aeromirror_detach_geometry_diagnostic(renderer)",
     "gst_object_unref(renderer->pipeline)",
     "free (renderer)"
-) "video destroy waits for mapped bus callbacks before releasing ownership"
+) "video destroy waits for mapped bus callbacks and lifecycle operations before releasing ownership"
 $videoDestroy = Get-SourceSlice $videoRendererText `
     "video_renderer_destroy()" `
     "static void get_stream_status_name(" "video renderer destroy"
 Assert-InOrder $videoDestroy @(
+    "g_mutex_lock(&renderer_state_lock)",
+    "aeromirror_renderer_session_active, 0",
+    "aeromirror_renderer_playback_ready, 0",
     "g_mutex_lock(&renderer_lock)",
     "renderer = NULL",
     "destroyed[i] = renderer_type[i]",
+    "destroyed[i]->aeromirror_session_generation = 0",
     "renderer_type[i] = NULL",
     "g_mutex_unlock(&renderer_lock)",
+    "g_mutex_unlock(&renderer_state_lock)",
     "video_renderer_destroy_instance(destroyed[i])"
-) "video destroy unpublishes renderer slots before releasing instances"
+) "video destroy invalidates and unpublishes renderer slots under the state barrier before releasing instances"
 $chooseCodec = Get-SourceSlice $videoRendererText `
     "video_renderer_choose_codec (" `
     "video_renderer_set_start(" "video renderer codec selection"
@@ -1521,9 +2220,85 @@ Assert-NoMatch $chooseCodec 'renderer_type\s*\[[^\]]+\]\s*=\s*NULL' `
 Assert-InOrder $chooseCodec @(
     "gst_object_ref(renderer_type[i]->pipeline)",
     "g_mutex_unlock(&renderer_lock)",
-    "gst_element_set_state(unused_pipelines[i], GST_STATE_NULL)",
+    "gst_element_set_state(",
+    "unused_pipelines[i], GST_STATE_NULL)",
     "gst_object_unref(unused_pipelines[i])"
 ) "codec selection stops unused pipelines through temporary strong references"
+
+$videoStart = Get-SourceSlice $videoRendererText `
+    "video_renderer_start()" "video_renderer_cycle()" `
+    "video renderer session start"
+Assert-InOrder $videoStart @(
+    "g_mutex_lock(&renderer_state_lock)",
+    "aeromirror_renderer_session_active, 0",
+    "aeromirror_renderer_playback_ready, 0",
+    "g_atomic_int_inc(&aeromirror_renderer_session_generation)",
+    "renderer = NULL",
+    "aeromirror_session_generation =",
+    "gst_element_set_state(pipelines[i], GST_STATE_READY)",
+    "aeromirror_renderer_session_active, 1",
+    "g_mutex_unlock(&renderer_state_lock)"
+) "mirror start publishes a complete READY-only generation while holding the state owner"
+Assert-NoMatch $videoStart `
+    'gst_element_set_state\(pipelines\[i\],\s*GST_STATE_PLAYING\)' `
+    "mirror start cannot preroll a candidate before host binding"
+
+Assert-InOrder $chooseCodec @(
+    "aeromirror_media_session_get()",
+    "g_mutex_lock(&renderer_state_lock)",
+    "caller_session_generation !=",
+    "renderer = renderer_used",
+    "aeromirror_session_generation =",
+    "aeromirror_request_host_show()",
+    "g_mutex_unlock(&renderer_state_lock)",
+    "aeromirror_wait_for_current_host_ready(",
+    "g_mutex_lock(&renderer_state_lock)",
+    "aeromirror_bind_host_to_sink(",
+    "gst_element_set_state(",
+    "selected_pipeline, GST_STATE_PLAYING",
+    "aeromirror_renderer_playback_ready, 1"
+) "codec selection waits for the visible host, binds only the selected sink, and then starts playback"
+$chooseHostSelection = Get-SourceSlice $chooseCodec `
+    'const bool hosted_playback = aeromirror_host_is_configured()' `
+    'if (selected_host_sink) {' `
+    'generation-retryable codec selection'
+Assert-InOrder $chooseHostSelection @(
+    'gint64 host_ready_deadline = 0',
+    'host_generation = aeromirror_request_host_show()',
+    'host_ready_deadline = g_get_monotonic_time() +',
+    '2000 * G_TIME_SPAN_MILLISECOND',
+    'g_mutex_unlock(&renderer_state_lock)',
+    'for (;;)',
+    'const gint64 remaining_us = host_ready_deadline -',
+    'aeromirror_wait_for_current_host_ready(',
+    '&host_generation, host_ready_deadline)',
+    'g_mutex_lock(&renderer_state_lock)',
+    'selection_owned = aeromirror_renderer_session_is_active(',
+    'g_mutex_lock(&renderer_lock)',
+    'renderer == renderer_used',
+    'g_mutex_unlock(&renderer_lock)',
+    'gpointer current_generation = g_atomic_pointer_get(',
+    '&aeromirror_host_lifecycle_generation',
+    'aeromirror_wait_for_host_ready(current_generation, 1)',
+    'host_generation = current_generation',
+    'aeromirror_bind_host_to_sink(',
+    'aeromirror_wait_for_host_ready(host_generation, 1)',
+    'aeromirror_commit_host_binding(host_generation)',
+    'if (host_bound) break',
+    'g_mutex_unlock(&renderer_state_lock)',
+    'state_lock_held = false',
+    'g_get_monotonic_time() >= host_ready_deadline',
+    'if (host_bound)',
+    'selected_pipeline, GST_STATE_PLAYING',
+    'if (state_lock_held)',
+    'g_mutex_unlock(&renderer_state_lock)'
+) "codec selection retries replacement generations against one absolute deadline and starts only while owning the state barrier"
+Assert-MatchCount $chooseHostSelection `
+    'host_ready_deadline\s*=\s*g_get_monotonic_time\(\)\s*\+' `
+    1 "codec selection creates exactly one absolute host-readiness deadline"
+Assert-NoMatch $chooseHostSelection `
+    'aeromirror_wait_for_current_host_ready\([\s\S]{0,160}(?:remaining_us|2000\s*\*)' `
+    "generation retries reuse the one absolute deadline instead of restarting the timeout"
 
 $audioStop = Get-SourceSlice $audioRendererText `
     "audio_renderer_stop()" "static void get_renderer_type(" "audio stop"

@@ -30,6 +30,7 @@ namespace AirPlayReceiverMvp
         private readonly Label networkTitle;
         private readonly NetworkHelpGlyph networkHelp;
         private readonly Label bonjourFirewallNotice;
+        private readonly Button bonjourRecovery;
         private readonly Button settingsButton;
         private readonly Button updatesButton;
         private readonly LinkLabel reportProblem;
@@ -67,7 +68,8 @@ namespace AirPlayReceiverMvp
         private readonly Button updatesBack;
         private readonly CheckBox automaticUpdates;
         private UpdateInfo availableUpdate;
-        private string pendingInstallerPath = "";
+        private readonly ControlWorkQueue updateWork;
+        private readonly UpdateWorkScope updateRequests = new UpdateWorkScope();
         private bool suppressDirty;
         private bool suppressAutomaticUpdateChange;
         private bool? appliedDarkTheme;
@@ -77,6 +79,8 @@ namespace AirPlayReceiverMvp
         public SettingsForm(ReceiverContext context)
         {
             this.context = context;
+            updateWork = new ControlWorkQueue(this);
+            Disposed += delegate { StopUpdateWork(); };
             Text = "AeroMirror";
             Icon = AppIcon.Current;
             StartPosition = FormStartPosition.CenterScreen;
@@ -170,6 +174,16 @@ namespace AirPlayReceiverMvp
                 "Segoe UI Semibold", 9.25F, FontStyle.Regular);
             bonjourFirewallNotice.Visible = false;
             networkCard.Controls.Add(bonjourFirewallNotice);
+
+            bonjourRecovery = MakeButton(
+                "Запустить Bonjour", 390, 47, 166, 32, true);
+            bonjourRecovery.Visible = false;
+            bonjourRecovery.Click += delegate
+            {
+                context.RequestBonjourServiceRecovery();
+                SyncStatus();
+            };
+            networkCard.Controls.Add(bonjourRecovery);
 
             startStop = MakeButton("", 24, 314, 280, 38, true);
             startStop.Click += delegate
@@ -603,7 +617,8 @@ namespace AirPlayReceiverMvp
             {
                 reportStatusTimer.Stop();
                 reportStatusTimer.Dispose();
-                DeletePendingInstaller();
+                StopUpdateWork();
+                toolTips.Dispose();
             };
         }
 
@@ -621,8 +636,18 @@ namespace AirPlayReceiverMvp
                 context.IsBonjourServiceRecoveryRequired;
             bool bonjourServiceStarting =
                 context.IsBonjourServiceStarting;
+            bool bonjourServiceStopping =
+                context.IsBonjourServiceStopping;
+            bool bonjourServicePausePending =
+                context.IsBonjourServicePausePending;
+            bool bonjourServicePaused =
+                context.IsBonjourServicePaused;
             bool bonjourServiceStatusUnknown =
                 context.IsBonjourServiceStatusUnknown;
+            bool bonjourRecoveryRunning =
+                context.IsBonjourServiceRecoveryRunning;
+            bool canRequestBonjourRecovery =
+                context.CanRequestBonjourServiceRecovery;
             bool receiverReady = context.IsCoreRunning &&
                 context.IsReceiverReady;
             if (receiverReady)
@@ -700,9 +725,23 @@ namespace AirPlayReceiverMvp
             bool showBonjourNotice =
                 bonjourFirewallMissing || bonjourUnavailable ||
                 bonjourServiceRecoveryRequired || bonjourServiceStarting ||
-                bonjourServiceStatusUnknown;
-            networkCard.Height = showBonjourNotice ? 94 : 46;
+                bonjourServiceStopping || bonjourServicePausePending ||
+                bonjourServicePaused || bonjourServiceStatusUnknown ||
+                bonjourRecoveryRunning;
+            bool showBonjourRecovery =
+                bonjourServiceRecoveryRequired || bonjourRecoveryRunning;
+            networkCard.Height = showBonjourRecovery
+                ? 104
+                : (showBonjourNotice ? 94 : 46);
             bonjourFirewallNotice.Visible = showBonjourNotice;
+            bonjourRecovery.Visible = showBonjourRecovery;
+            bonjourRecovery.Enabled = canRequestBonjourRecovery;
+            bonjourRecovery.Text = bonjourRecoveryRunning
+                ? "Запускаем…"
+                : "Запустить Bonjour";
+            bonjourFirewallNotice.Size = showBonjourRecovery
+                ? new Size(354, 52)
+                : new Size(536, 42);
             if (bonjourUnavailable)
             {
                 networkCard.BackColor = dark
@@ -713,7 +752,6 @@ namespace AirPlayReceiverMvp
                     : Color.FromArgb(150, 45, 45);
                 bonjourFirewallNotice.Text =
                     "Bonjour отсутствует или повреждён. Восстановите Apple Bonjour из доверенного источника.";
-                bonjourFirewallNotice.Size = new Size(536, 42);
                 bonjourFirewallNotice.ForeColor = networkTitle.ForeColor;
                 networkDetails +=
                     "\r\nSetup настраивает только уже установленную подлинную службу Apple Bonjour; отсутствующую или повреждённую установку нужно восстановить из доверенного источника.";
@@ -728,12 +766,13 @@ namespace AirPlayReceiverMvp
                     : Color.FromArgb(132, 88, 0);
                 bonjourFirewallNotice.Text =
                     "Не удалось проверить состояние Bonjour. AeroMirror повторит проверку автоматически.";
-                bonjourFirewallNotice.Size = new Size(536, 42);
                 bonjourFirewallNotice.ForeColor = networkTitle.ForeColor;
                 networkDetails +=
                     "\r\nСостояние Bonjour временно недоступно. Откройте диагностику или повторите проверку позже.";
             }
-            else if (bonjourServiceRecoveryRequired || bonjourServiceStarting)
+            else if (bonjourServiceRecoveryRequired || bonjourServiceStarting ||
+                bonjourServiceStopping || bonjourServicePausePending ||
+                bonjourServicePaused || bonjourRecoveryRunning)
             {
                 networkCard.BackColor = dark
                     ? Color.FromArgb(72, 36, 36)
@@ -741,14 +780,25 @@ namespace AirPlayReceiverMvp
                 networkTitle.ForeColor = dark
                     ? Color.FromArgb(255, 166, 166)
                     : Color.FromArgb(150, 45, 45);
-                bonjourFirewallNotice.Text = bonjourServiceStarting
-                    ? "Bonjour запускается. AeroMirror ждёт службу и затем повторит публикацию AirPlay."
-                    : "Bonjour остановлен. AeroMirror ждёт возврата службы; сейчас приёмник не виден в AirPlay.";
-                bonjourFirewallNotice.Size = new Size(536, 42);
+                bonjourFirewallNotice.Text = bonjourServiceStopping
+                    ? "Bonjour завершает остановку. AeroMirror повторит проверку."
+                    : bonjourServicePausePending
+                        ? "Bonjour приостанавливается. AeroMirror повторит проверку."
+                        : bonjourServicePaused
+                            ? "Bonjour приостановлен. Возобновите службу в службах Windows."
+                    : bonjourRecoveryRunning || bonjourServiceStarting
+                        ? "Bonjour запускается. После запуска AirPlay появится снова."
+                        : "Bonjour остановлен. Запустите его здесь, чтобы вернуть AirPlay.";
                 bonjourFirewallNotice.ForeColor = networkTitle.ForeColor;
-                networkDetails += bonjourServiceStarting
-                    ? "\r\nПриложение только наблюдает за службой. После её запуска AeroMirror один раз заново опубликует AirPlay без перезапуска приёмника."
-                    : "\r\nЕсли служба не вернулась, снова запустите Setup и подтвердите администраторский шаг либо откройте диагностику.";
+                networkDetails += bonjourServiceStopping
+                    ? "\r\nКнопка запуска появится только если служба полностью остановится."
+                    : bonjourServicePausePending
+                        ? "\r\nКнопка запуска недоступна, пока служба приостанавливается."
+                        : bonjourServicePaused
+                            ? "\r\nAeroMirror не запускает приостановленную службу: возобновите Bonjour в службах Windows."
+                    : bonjourRecoveryRunning || bonjourServiceStarting
+                        ? "\r\nПосле подтверждённого запуска AeroMirror заново опубликует AirPlay без перезапуска приёмника."
+                        : "\r\nWindows один раз попросит подтверждение администратора. AeroMirror не повторяет этот запрос автоматически.";
             }
             else if (bonjourFirewallMissing)
             {
@@ -760,7 +810,6 @@ namespace AirPlayReceiverMvp
                     : Color.FromArgb(133, 78, 0);
                 bonjourFirewallNotice.Text =
                     "Нет точного правила Bonjour. Снова запустите Setup для безопасной проверки.";
-                bonjourFirewallNotice.Size = new Size(536, 42);
                 bonjourFirewallNotice.ForeColor = networkTitle.ForeColor;
                 networkDetails +=
                     "\r\nНет точного правила для Bonjour: Private, UDP 5353, только локальная подсеть. Setup предложит отдельный администраторский шаг и изменит правило только после безопасной проверки Apple Bonjour.";
@@ -768,6 +817,7 @@ namespace AirPlayReceiverMvp
             else
             {
                 bonjourFirewallNotice.Text = "";
+                bonjourRecovery.Visible = false;
             }
             networkHelp.ForeColor = networkTitle.ForeColor;
             networkHelp.AccessibleDescription = networkDetails;
@@ -912,6 +962,9 @@ namespace AirPlayReceiverMvp
 
         private void CheckForUpdates()
         {
+            UpdateWorkScope.Operation operation = updateRequests.Begin();
+            if (operation == null)
+                return;
             checkUpdate.Enabled = false;
             installUpdate.Enabled = false;
             openRelease.Enabled = false;
@@ -922,10 +975,8 @@ namespace AirPlayReceiverMvp
             {
                 try
                 {
-                    UpdateInfo info = UpdateService.Check();
-                    if (IsDisposed)
-                        return;
-                    BeginInvoke((MethodInvoker)delegate
+                    UpdateInfo info = UpdateService.Check(operation.Token);
+                    updateWork.Post(delegate
                     {
                         availableUpdate = info;
                         checkUpdate.Enabled = true;
@@ -968,11 +1019,10 @@ namespace AirPlayReceiverMvp
                         }
                     });
                 }
+                catch (OperationCanceledException) { }
                 catch (Exception ex)
                 {
-                    if (IsDisposed)
-                        return;
-                    BeginInvoke((MethodInvoker)delegate
+                    updateWork.Post(delegate
                     {
                         checkUpdate.Enabled = true;
                         updateTitle.Text = "Не удалось проверить обновления";
@@ -982,6 +1032,7 @@ namespace AirPlayReceiverMvp
                         SetPrimaryButtonState(installUpdate, false);
                     });
                 }
+                finally { operation.Dispose(); }
             });
         }
 
@@ -990,6 +1041,10 @@ namespace AirPlayReceiverMvp
             if (availableUpdate == null || !availableUpdate.IsNewer)
                 return;
             if (!ConfirmAllUnsavedChanges())
+                return;
+            UpdateInfo selectedUpdate = availableUpdate;
+            UpdateWorkScope.Operation operation = updateRequests.Begin();
+            if (operation == null)
                 return;
             updatesBack.Enabled = false;
             SetPrimaryButtonState(installUpdate, false);
@@ -1002,26 +1057,20 @@ namespace AirPlayReceiverMvp
                 try
                 {
                     installerPath =
-                        UpdateService.DownloadAndVerify(availableUpdate);
-                    pendingInstallerPath = installerPath;
-                    if (IsDisposed)
-                    {
-                        DeleteFileQuietly(installerPath);
-                        pendingInstallerPath = "";
-                        return;
-                    }
-                    BeginInvoke((MethodInvoker)delegate
+                        UpdateService.DownloadAndVerify(selectedUpdate, operation.Token);
+                    updateWork.Post(delegate
                     {
                         LaunchVerifiedUpdateInstaller(installerPath);
-                    });
+                    }, delegate { DeleteFileQuietly(installerPath); });
+                }
+                catch (OperationCanceledException)
+                {
+                    DeleteFileQuietly(installerPath);
                 }
                 catch (Exception ex)
                 {
                     DeleteFileQuietly(installerPath);
-                    pendingInstallerPath = "";
-                    if (IsDisposed)
-                        return;
-                    BeginInvoke((MethodInvoker)delegate
+                    updateWork.Post(delegate
                     {
                         updatesBack.Enabled = true;
                         checkUpdate.Enabled = true;
@@ -1030,7 +1079,14 @@ namespace AirPlayReceiverMvp
                         SetPrimaryButtonState(installUpdate, true);
                     });
                 }
+                finally { operation.Dispose(); }
             });
+        }
+
+        internal void StopUpdateWork()
+        {
+            updateWork.Dispose();
+            updateRequests.Dispose();
         }
 
         private void LaunchVerifiedUpdateInstaller(string installerPath)
@@ -1059,12 +1115,6 @@ namespace AirPlayReceiverMvp
                 ReceiverContext.Log(
                     "Verified Setup launch failed: " + ex);
                 DeleteFileQuietly(installerPath);
-                if (string.Equals(
-                    pendingInstallerPath, installerPath,
-                    StringComparison.OrdinalIgnoreCase))
-                {
-                    pendingInstallerPath = "";
-                }
                 updatesBack.Enabled = true;
                 checkUpdate.Enabled = true;
                 updateState.Text =
@@ -1073,15 +1123,7 @@ namespace AirPlayReceiverMvp
                 return;
             }
 
-            pendingInstallerPath = "";
             context.QuitApplication();
-        }
-
-        private void DeletePendingInstaller()
-        {
-            string path = pendingInstallerPath;
-            pendingInstallerPath = "";
-            DeleteFileQuietly(path);
         }
 
         private static void DeleteFileQuietly(string path)

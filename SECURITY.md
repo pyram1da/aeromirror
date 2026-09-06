@@ -4,9 +4,10 @@
 
 Only the latest published AeroMirror release receives security fixes.
 
-Public `v0.12.22` is currently the latest published normal-channel review
-release. Its immutable annotated tag, exact four assets, API digests, and
-public re-download verification pass. Physical pairing, gallery/fullscreen,
+The 0.12.30 line is a normal-channel review release. Its annotated tag, exact
+four assets, API digests and public re-download verification are recorded in
+the [release evidence](https://github.com/pyram1da/aeromirror/blob/main/docs/releases/0.12.30/BUILD_REPORT.md).
+Physical pairing, gallery/fullscreen,
 Bonjour/UAC recovery, installed-update, and iPhone discovery rows are reported
 separately and are not implied by publication.
 
@@ -37,6 +38,13 @@ coordinate any executable reproducer with the maintainer and relevant upstream
 project before sharing it.
 
 ## Scope
+
+The .29 updater changes included in .30 bound release metadata to 1 MiB and a 30-second
+whole-transfer budget, disallows metadata redirects, and cancels abandoned
+requests. These resource/lifetime checks do not replace the fixed repository
+identity (ID `1324108899`, with only the confirmed canonical/historical Setup
+path names), exact versioned installer URL/name, HTTPS-hop, size and SHA-256
+validation or authorize automatic installation.
 
 AeroMirror is a local-network receiver built on UxPlay. Reports about UxPlay,
 GStreamer, Qt, Bonjour/mDNS, or bundled codec libraries may need coordinated

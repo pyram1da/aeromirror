@@ -1,5 +1,19 @@
 # Native receiver core and viewer host
 
+The .30 candidate adds session-only Caption Close. A successful mirror SETUP
+owns a unique 64-bit ID, carried unchanged by the mirror worker and native SHOW.
+Qt submits that ID to a bounded HTTP-owner mailbox; only its connection is
+removed. Completion is correlated to the request, after connection cleanup and
+serialized pipeline reset. No listener or DNS-SD/BLE restart is requested.
+The continuity warning sends an exact-ID stdin intent. The command reader posts
+that ID to the private host HWND, where the same GUI handler checks it against
+the displayed session and assigns the request ID. It does not capture a Qt
+object across the detached command thread's lifetime.
+Same-socket replacement and 50 loopback close/reconnect cycles pass; physical
+iPhone disconnection and reconnect remain pending. The prepared source builder
+resolves Git's real object store, including linked worktrees, while retaining
+its isolated packaging index/objects. See the .30 release test plan.
+
 The MVP patches `leapbtw/uxplay-windows` so its linked UxPlay engine can run
 with `--headless`. In this mode the upstream Qt tray icon is not created; the
 single visible tray belongs to `AeroMirror.exe`. "Headless" therefore means
@@ -106,10 +120,10 @@ result=<applied|noop|unavailable> generation=<uint64>
 source=<ipc|caption|escape|alt-enter|lifecycle|initial>`. The shell consumes
 that acknowledged state instead of inferring a toggle from delayed window
 geometry. The private `aeromirror_host_protocol.h` defines only the in-process
-viewer show, hide, and fullscreen-set messages shared by the renderer thread
+viewer show, hide, session-close and fullscreen-set messages shared by the renderer thread
 and Qt host.
 
-Caption Close is intentionally a minimize-equivalent, not the renderer HIDE
+Through .29, Caption Close is a minimize-equivalent, not the renderer HIDE
 transition. It exits fullscreen, acknowledges normal state, and keeps the
 active generation's requested-visibility flag set, so a repeated codec callback
 cannot reopen the window against the user's action. Win32 keeps the minimized
@@ -142,6 +156,82 @@ or placed in process arguments, and transient native buffers are cleared when
 the SRP request ends. Cancellation, timeout, and late packets from an older
 connection cannot clear or complete a newer pairing attempt.
 
+The locally prepared 0.12.24 diagnostic extension traces the sender/core
+geometry boundary without changing presentation. The `/info` handler emits a
+single privacy-safe display tuple containing only model/configuration values,
+feature flags, refresh limits, and overscan state. Sender header geometry keeps
+its authoritative sender-side generation. Independently, a sink-pad probe logs
+every actual CAPS event with local `caps_seq`, uses one first-buffer current-
+caps snapshot only if no event was observed, and reads `GstVideoCropMeta` on
+the first buffer after CAPS, on changes, and every 120 buffers. Missing CAPS is
+evidence, but there is no claimed one-to-one mapping to a sender generation.
+The probe does not map pixels, inspect payload content, introduce
+caps/crop/scale elements, set a render rectangle, or resize the viewer. Two
+independent clean builds reproduce its diagnostic executable SHA-256
+`82B579693B60E9A1865E15BE314592838A0D3918DD1AFDF02565873213CE9397`;
+physical iPhone evidence is still required before it can be treated as a fix.
+
+The local 0.12.25 extension addresses the separately observed black initial
+normal viewer at the child-HWND/D3D11 exposure boundary. The native lifecycle
+owns the SHOW generation. Qt acknowledges READY only after the child is visible
+with a nonzero client area; the first Present from the selected D3D11 sink then
+posts that same generation using only atomic state and a nonblocking message.
+A later GUI turn revalidates it; libuxplay retains only the selected host sink,
+releases the renderer lock, requests the standard
+`gst_video_overlay_expose()` redraw, and releases the reference.
+
+Show and WindowStateChange coalesce a re-expose only for an already
+acknowledged surface. WinIdChange uses bounded retry; libuxplay suppresses SHOW
+while it rebinds every current overlay sink and starts a fresh generation only
+afterward. HIDE invalidates older work. The host Present proof remains attached
+when the independent failure-recovery pad probe is installed, and GUI-callable
+surface APIs do not depend on the receiver logger surviving shutdown. Normal
+connection SHOW raises once over ordinary windows without taking focus, but
+stays behind external fullscreen content and defers initial automatic
+fullscreen; it never sets topmost. The path does not block a GStreamer thread
+on the GUI, call expose under the D3D11 device lock, resize or fullscreen the
+viewer as recovery, set a render rectangle, crop, scale, inspect pixels, or
+reset the pipeline. Only repeated untouched physical fresh starts, restore, and
+foreground/fullscreen tests can accept the visible behavior.
+
+Two independent clean builds and the extracted no-Git corresponding-source
+rebuild reproduce core SHA-256
+`F4824A375AFCD5593D1AA2E58547703E38F211380ACF71095CB8A08929ADB0E9`.
+The pinned runtime passes static verification from an ASCII path and execution/
+self-test from a Unicode path. Corresponding-source packaging uses an isolated
+temporary Git index and object directory and exposes the checkout's real objects
+only as alternates, so it does not write build-only objects into the repository.
+
+Physical testing showed that the 0.12.25 redraw rendezvous was insufficient:
+the untouched normal viewer could still remain black until fullscreen. The
+0.12.26 extension therefore starts fresh mirror pipelines in `READY`, lets the
+media callback claim its immutable renderer generation and select H.264 or
+H.265, waits for Qt to validate the visible real child HWND, binds and commits
+only that selected `GstVideoOverlay` sink for the exact generation, and only
+then moves its pipeline to `PLAYING`. The other codec pipelines are quiesced
+after the selected pipeline becomes ready.
+
+For a real child-HWND replacement supplied by Qt, the selected pipeline moves to
+`NULL` before the sink accepts the new handle, returns to `READY`, completes a
+fresh SHOW/READY acknowledgement, rebinds and commits the selected sink, and
+only then resumes
+`PLAYING`. The first-Present/expose path remains a guarded redraw aid after
+correct binding and may execute only when the lifecycle, READY, bound, and
+Present generations all match. There is still no recovery resize, fullscreen,
+crop, scale, render rectangle, or pixel inspection.
+
+Start, stop, and destroy advance the renderer generation under one state owner.
+Media callbacks carry their claimed generation in thread-local state and bus
+watches carry immutable generation contexts. Old callbacks can drain against
+retained objects but cannot publish a renderer, change a later pipeline's
+state, or push a frame across a stop/start boundary; destroy waits for bus and
+operation references before freeing each renderer. Two independent clean
+builds and the extracted no-Git corresponding-source rebuild reproduce core
+SHA-256
+`FAA8A1575EAC7C26BA41DF09A81EB08E03DE05A621FA3C504289EA8E98DAB84A`.
+The staged 200-binary runtime passes isolated bundle verification. Physical
+untouched first-frame testing remains the acceptance gate.
+
 The same boundary gives genuine `AEROMIRROR_*` lines a dedicated protocol
 emitter. Ordinary UxPlay, libuxplay, client-metadata, and HLS-language output
 flattens control bytes and neutralizes marker tokens before stdout, while raw
@@ -168,6 +258,21 @@ externally supplied `-vs` and `-fs` arguments in headless/`--uxplay` mode. The
 hashed in `source-provenance.json`.
 
 ## Compatible runtime and build inputs
+
+The local 0.12.27 follow-up replaces the base video QWidget with a dedicated
+external-surface widget. Qt owns its HWND/events/layout but must not erase or
+backing-store-paint its pixels; paintEngine returns null and PaintOnScreen is
+retained on Windows. The production widget contract is tested with hidden
+Windows HWNDs and pinned Qt 6.10.1. This is not physical first-frame acceptance.
+The 0.12.26 normal-viewer and mixed-window placement reports remain FAIL.
+
+SHOW now verifies ordinary-window order. Only when the ordinary raise leaves
+another ordinary window above the viewer may one synchronous topmost/demotion
+transaction run, guarded again against external fullscreen foreground content.
+Demotion is unconditional, focus is not requested, and no topmost state remains.
+Current core SHA-256:
+`B3EC9500B3E5D8D69A4AD5A7FFA385891446FC1B573F97A1B04BC327806AF36F`.
+All runtime/dependency and gallery-negotiation inputs remain unchanged.
 
 The headless executable must be built against Qt 6.10.1 so it can load with
 the unchanged runtime from pinned `uxplay-windows` release `2.0.0.1736`.

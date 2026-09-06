@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Threading;
 using System.Windows.Forms;
 
@@ -18,6 +19,12 @@ namespace AirPlayReceiverMvp
         private int bonjourFirewallAssessmentGeneration;
         private bool bonjourFirewallWarningShown;
         private bool bonjourServiceWarningShown;
+        private readonly object bonjourExplicitRecoverySync = new object();
+        private int bonjourExplicitRecoveryRunning;
+        private int bonjourExplicitRecoveryReady;
+        private bool bonjourExplicitRecoverySucceeded;
+        private bool bonjourExplicitRecoveryCancelled;
+        private string bonjourExplicitRecoveryDetail = "";
 
         private void BeginBonjourFirewallAssessment()
         {
@@ -98,20 +105,38 @@ namespace AirPlayReceiverMvp
             }
             bool missing = assessment != null &&
                 assessment.State == BonjourFirewallState.Missing;
-            bool serviceStopped = serviceAssessment != null &&
+            bool serviceUnavailable = serviceAssessment != null &&
                 (serviceAssessment.State == BonjourServiceState.Stopped ||
-                 serviceAssessment.State == BonjourServiceState.StopPending);
-            if (serviceStopped)
+                 serviceAssessment.State == BonjourServiceState.StopPending ||
+                 serviceAssessment.State == BonjourServiceState.PausePending ||
+                 serviceAssessment.State == BonjourServiceState.Paused);
+            if (serviceUnavailable)
             {
                 Log("Bonjour service assessment: " +
                     serviceAssessment.State + ".");
                 if (!bonjourServiceWarningShown && settings.Notify)
                 {
                     bonjourServiceWarningShown = true;
+                    string message;
+                    switch (serviceAssessment.State)
+                    {
+                        case BonjourServiceState.StopPending:
+                            message = "Bonjour завершает остановку. AeroMirror повторит проверку.";
+                            break;
+                        case BonjourServiceState.PausePending:
+                            message = "Bonjour приостанавливается. AeroMirror повторит проверку.";
+                            break;
+                        case BonjourServiceState.Paused:
+                            message = "Bonjour приостановлен. Возобновите службу в службах Windows.";
+                            break;
+                        default:
+                            message = "Bonjour остановлен, поэтому приёмник сейчас не виден в AirPlay. Откройте AeroMirror и нажмите «Запустить Bonjour».";
+                            break;
+                    }
                     tray.ShowBalloonTip(
                         9000,
                         AppTitle,
-                        "Bonjour остановлен, поэтому приёмник сейчас не виден в AirPlay. Если служба не вернулась, снова запустите Setup или откройте диагностику.",
+                        message,
                         ToolTipIcon.Warning);
                 }
                 return;
@@ -133,6 +158,257 @@ namespace AirPlayReceiverMvp
                     9000,
                     AppTitle,
                     "Windows может блокировать Bonjour. Снова запустите Setup: он предложит безопасную проверку с правами администратора.",
+                    ToolTipIcon.Warning);
+            }
+        }
+
+        public bool IsBonjourServiceRecoveryRunning
+        {
+            get
+            {
+                return Interlocked.CompareExchange(
+                        ref bonjourExplicitRecoveryRunning, 0, 0) == 1 ||
+                    Interlocked.CompareExchange(
+                        ref bonjourExplicitRecoveryReady, 0, 0) == 1;
+            }
+        }
+
+        public bool CanRequestBonjourServiceRecovery
+        {
+            get
+            {
+                if (IsBonjourServiceRecoveryRunning)
+                    return false;
+                BonjourServiceAssessment assessment =
+                    GetBonjourServiceAssessment();
+                return assessment != null &&
+                    assessment.State == BonjourServiceState.Stopped;
+            }
+        }
+
+        public void RequestBonjourServiceRecovery()
+        {
+            if (Interlocked.CompareExchange(
+                    ref bonjourExplicitRecoveryReady, 0, 0) != 0)
+                return;
+            if (Interlocked.CompareExchange(
+                    ref bonjourExplicitRecoveryRunning, 1, 0) != 0)
+                return;
+
+            Process process = null;
+            bool cancelled;
+            string detail;
+            try
+            {
+                if (!BonjourServiceRecoveryService.TryLaunchExplicitStart(
+                        out process, out cancelled, out detail))
+                {
+                    DisposeBonjourExplicitRecoveryProcess(process);
+                    CompleteBonjourExplicitRecovery(
+                        false, cancelled, detail, true);
+                    return;
+                }
+            }
+            catch (Exception exception)
+            {
+                DisposeBonjourExplicitRecoveryProcess(process);
+                CompleteBonjourExplicitRecovery(
+                    false, false, exception.Message, true);
+                return;
+            }
+
+            try
+            {
+                bool queued = ThreadPool.QueueUserWorkItem(delegate
+                {
+                    bool succeeded = false;
+                    bool processExited = process == null;
+                    string resultDetail = "";
+                    try
+                    {
+                        succeeded =
+                            BonjourServiceRecoveryService.WaitForExplicitStart(
+                                process, out processExited, out resultDetail);
+                    }
+                    catch (Exception exception)
+                    {
+                        resultDetail = exception.Message;
+                        processExited =
+                            BonjourServiceRecoveryService.
+                                IsProcessExitConfirmed(process);
+                    }
+                    if (processExited)
+                    {
+                        DisposeBonjourExplicitRecoveryProcess(process);
+                        CompleteBonjourExplicitRecovery(
+                            succeeded, false, resultDetail, true);
+                        return;
+                    }
+
+                    CompleteBonjourExplicitRecovery(
+                        succeeded, false, resultDetail, false);
+                    WaitForBonjourExplicitRecoveryProcessExitAndRelease(
+                        process);
+                });
+                if (!queued)
+                {
+                    HandleBonjourExplicitRecoveryWorkerFailure(
+                        process,
+                        "Windows did not queue the Bonjour recovery wait.");
+                    return;
+                }
+                Log("Explicit Bonjour start request accepted; waiting for " +
+                    "the validated service to reach Running.");
+            }
+            catch (Exception exception)
+            {
+                HandleBonjourExplicitRecoveryWorkerFailure(
+                    process, exception.Message);
+            }
+        }
+
+        private void HandleBonjourExplicitRecoveryWorkerFailure(
+            Process process, string detail)
+        {
+            if (BonjourServiceRecoveryService.IsProcessExitConfirmed(process))
+            {
+                DisposeBonjourExplicitRecoveryProcess(process);
+                CompleteBonjourExplicitRecovery(
+                    false, false, detail, true);
+                return;
+            }
+
+            CompleteBonjourExplicitRecovery(
+                false, false, detail, false);
+            try
+            {
+                var watcher = new Thread(new ThreadStart(delegate
+                    {
+                        WaitForBonjourExplicitRecoveryProcessExitAndRelease(
+                            process);
+                    }));
+                watcher.IsBackground = true;
+                watcher.Name = "AeroMirror Bonjour recovery exit";
+                watcher.Start();
+            }
+            catch (Exception exception)
+            {
+                Log("Bonjour recovery process is still active and its " +
+                    "one-flight latch remains closed because an exit watcher " +
+                    "could not start: " + exception.Message);
+            }
+        }
+
+        private void WaitForBonjourExplicitRecoveryProcessExitAndRelease(
+            Process process)
+        {
+            if (!BonjourServiceRecoveryService.
+                    WaitForExplicitStartProcessExit(process))
+            {
+                Log("Bonjour recovery process exit could not be confirmed; " +
+                    "the one-flight latch remains closed.");
+                return;
+            }
+
+            DisposeBonjourExplicitRecoveryProcess(process);
+            try
+            {
+                if (!quitting)
+                    RefreshBonjourFirewallAssessment();
+            }
+            catch (Exception exception)
+            {
+                Log("Bonjour assessment refresh after recovery-process exit " +
+                    "failed: " + exception.Message);
+            }
+            finally
+            {
+                Interlocked.Exchange(
+                    ref bonjourExplicitRecoveryRunning, 0);
+            }
+            Log("Bonjour recovery process exit was confirmed; a later " +
+                "explicit retry is permitted.");
+        }
+
+        private static void DisposeBonjourExplicitRecoveryProcess(
+            Process process)
+        {
+            if (process == null)
+                return;
+            try
+            {
+                process.Dispose();
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+        private void CompleteBonjourExplicitRecovery(
+            bool succeeded, bool cancelled, string detail,
+            bool releaseFlight)
+        {
+            lock (bonjourExplicitRecoverySync)
+            {
+                bonjourExplicitRecoverySucceeded = succeeded;
+                bonjourExplicitRecoveryCancelled = cancelled;
+                bonjourExplicitRecoveryDetail = detail ?? "";
+            }
+            Interlocked.Exchange(ref bonjourExplicitRecoveryReady, 1);
+            if (releaseFlight)
+                Interlocked.Exchange(
+                    ref bonjourExplicitRecoveryRunning, 0);
+        }
+
+        private void HandleBonjourExplicitRecoveryResult()
+        {
+            if (Interlocked.Exchange(
+                    ref bonjourExplicitRecoveryReady, 0) != 1)
+                return;
+
+            bool succeeded;
+            bool cancelled;
+            string detail;
+            lock (bonjourExplicitRecoverySync)
+            {
+                succeeded = bonjourExplicitRecoverySucceeded;
+                cancelled = bonjourExplicitRecoveryCancelled;
+                detail = bonjourExplicitRecoveryDetail;
+            }
+            RefreshBonjourFirewallAssessment();
+
+            if (succeeded)
+            {
+                bonjourServiceWarningShown = false;
+                Log("Bonjour reached Running after the explicit user " +
+                    "recovery request; resuming DNS-SD publication.");
+                if (IsCoreRunning)
+                    ResumeDiscoveryAfterBonjourRecovery();
+                if (settings.Notify)
+                {
+                    tray.ShowBalloonTip(
+                        5000,
+                        AppTitle,
+                        "Bonjour запущен. AeroMirror повторно публикует приёмник в AirPlay.",
+                        ToolTipIcon.Info);
+                }
+                return;
+            }
+
+            if (cancelled)
+            {
+                Log("Bonjour start was canceled at the Windows " +
+                    "administrator confirmation.");
+                return;
+            }
+
+            Log("Bonjour explicit recovery failed: " + detail);
+            if (settings.Notify)
+            {
+                tray.ShowBalloonTip(
+                    7000,
+                    AppTitle,
+                    "Не удалось запустить Bonjour. Повторите действие или переустановите Apple Bonjour.",
                     ToolTipIcon.Warning);
             }
         }
@@ -209,8 +485,7 @@ namespace AirPlayReceiverMvp
                 BonjourServiceAssessment assessment =
                     GetBonjourServiceAssessment();
                 return assessment != null &&
-                    (assessment.State == BonjourServiceState.Stopped ||
-                     assessment.State == BonjourServiceState.StopPending);
+                    assessment.State == BonjourServiceState.Stopped;
             }
         }
 
@@ -222,6 +497,39 @@ namespace AirPlayReceiverMvp
                     GetBonjourServiceAssessment();
                 return assessment != null &&
                     assessment.State == BonjourServiceState.StartPending;
+            }
+        }
+
+        public bool IsBonjourServiceStopping
+        {
+            get
+            {
+                BonjourServiceAssessment assessment =
+                    GetBonjourServiceAssessment();
+                return assessment != null &&
+                    assessment.State == BonjourServiceState.StopPending;
+            }
+        }
+
+        public bool IsBonjourServicePausePending
+        {
+            get
+            {
+                BonjourServiceAssessment assessment =
+                    GetBonjourServiceAssessment();
+                return assessment != null &&
+                    assessment.State == BonjourServiceState.PausePending;
+            }
+        }
+
+        public bool IsBonjourServicePaused
+        {
+            get
+            {
+                BonjourServiceAssessment assessment =
+                    GetBonjourServiceAssessment();
+                return assessment != null &&
+                    assessment.State == BonjourServiceState.Paused;
             }
         }
 

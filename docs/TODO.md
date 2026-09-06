@@ -29,9 +29,10 @@ layout, public asset names, and source-provenance checks throughout the move.
 - [x] Update resilience checks so they no longer assume one source filename.
 - [x] Remove unreachable legacy forms only after the split passes the same
   build and tests, as a separately reviewed cleanup step.
-- [ ] Audit and remove only the now-unreachable manual Bonjour/discovery-repair
-  menu handlers, labels, and compatibility plumbing. Preserve the internal
-  automatic same-process refresh command and physical-IP restart path.
+- [x] Audit and remove the obsolete permanent Bonjour/discovery-repair menu
+  handlers, labels, and compatibility plumbing. Preserve the internal
+  automatic same-process refresh command, physical-IP restart path, and the
+  0.12.26 contextual stopped-service action that appears only in the error card.
 
 Acceptance target: the shell is behaviorally unchanged, its executable still
 targets Windows 10 1809+ x64 and Windows 11 x64, and existing settings,
@@ -339,13 +340,27 @@ was still `Stopped` with exit 1067, no `DNSSD_READY` had occurred since August
 0.12.22 installer-owned recovery policy, not physical proof that the new policy
 has recovered a real installation.
 
-The unpublished 0.12.21 explicit **Start Bonjour**/`sc.exe` candidate was
-superseded before publication. The 0.12.22 design removes Bonjour/discovery
-repair controls. Setup best-effort configures only a safely validated Apple
-service for Automatic start, bounded 5/30/120-second Windows recovery, and one
-exact Private/UDP 5353/LocalSubnet firewall rule after the application commit.
-Runtime monitoring is read-only and automatically republishes DNS-SD after the
-service returns. Shared system state intentionally remains after uninstall.
+The unpublished 0.12.21 permanent **Start Bonjour**/`sc.exe` control was
+superseded before publication. Version 0.12.22 removed normal Bonjour/discovery
+repair controls and made Setup best-effort configure only a safely validated
+Apple service for Automatic start, bounded 5/30/120-second Windows recovery,
+and one exact Private/UDP 5353/LocalSubnet firewall rule after the application
+commit. Runtime monitoring remains read-only during healthy and transitional
+states and automatically republishes DNS-SD after the service returns. Shared
+system state intentionally remains after uninstall.
+
+The local 0.12.26 candidate adds one narrower escape hatch for the observed
+case where all configured Windows restart actions have already been exhausted:
+only when the exact validated service is `Stopped`, the main network-status card shows a contextual
+**Запустить Bonjour** action. The user's click launches one allowlisted system
+service-start operation and one UAC prompt. Startup, timers, and monitoring
+never invoke it automatically; concurrent clicks coalesce; cancel/failure leaves
+the stopped prerequisite visible. A successful start feeds the existing bounded
+same-process/same-port DNS-SD recovery rather than restarting the core. The
+implementation also validates the service-object configuration DACL and both
+protected executable path chains, and retains its one-flight latch until a
+timed-out elevated command is confirmed exited within the current process
+lifetime.
 
 - [x] On both post-update relaunch and ordinary startup, reassess the external
   Bonjour service before treating listener/BLE readiness as a usable receiver.
@@ -353,6 +368,12 @@ service returns. Shared system state intentionally remains after uninstall.
 - [x] When Bonjour is known to be stopped, avoid presenting repeated native
   DNS-SD retries or core restarts as recovery. Keep the listener safe, retain
   bounded diagnostics, and wait for an explicit prerequisite-state change.
+- [x] Expose a contextual stopped-service recovery action only after exact
+  Bonjour identity/path/service-object ACL validation. Require one explicit user
+  click and one UAC confirmation; validate the complete protected `sc.exe` path,
+  never prompt from startup, timers, or monitoring, never overlap a still-live
+  timed-out helper, and never create an automatic service-start loop. Resume the
+  existing same-process DNS-SD recovery after success.
 - [x] Retain the observed `mDNSResponder.exe` `BEX64`/`c0000409`/`0x437c3`
   evidence without mislabelling correlation as cause, and move recovery out of
   the normal application UI into exact installer-owned Windows service policy.
@@ -367,10 +388,11 @@ service returns. Shared system state intentionally remains after uninstall.
   identity and canonical Program Files path, reject reparse points, untrusted
   ownership/write access, and NULL DACLs, use direct SCM/firewall APIs, and keep
   the helper bounded and independent from per-user logs/UI.
-- [ ] Physically verify the recovery path after an installed update: once
-  Bonjour is healthy, paired DNS-SD reaches `AEROMIRROR_DNSSD_READY` and the
-  receiver appears on the iPhone without requiring the user to discover the
-  hidden service dependency manually.
+- [ ] Physically verify the 0.12.26 stopped-service action after an installed
+  update: the contextual button appears only for the exact stopped service, one
+  click causes at most one UAC prompt, cancel/failure does not repeat it, and a
+  successful start reaches paired `AEROMIRROR_DNSSD_READY` in the same PID/on
+  the same ports before the receiver appears on the iPhone.
 
 - [ ] Add a versioned local IPC contract, preferably JSON Lines over a
   per-user Windows named pipe.
@@ -433,8 +455,10 @@ service returns. Shared system state intentionally remains after uninstall.
   0.12.22 Setup-owned service/firewall policy and its fail-open application
   transaction before changing first-run guidance.
 - [x] Move exact Private Bonjour mDNS and service resilience configuration into
-  a bounded post-commit Setup branch; keep ordinary application startup and
-  monitoring read-only and expose no repair button.
+  a bounded post-commit Setup branch. Keep ordinary application startup and
+  monitoring unelevated and free of automatic repair prompts; the only runtime
+  exception is the 0.12.26 contextual explicit start action for an exact
+  validated service already known to be `Stopped`.
 - [ ] Physically validate Setup UAC decline/approval, exact service recovery and
   firewall scope, no duplicate rule, renewed iPhone visibility, reboot behavior,
   and intentional persistence after AeroMirror uninstall on a controlled
@@ -718,8 +742,26 @@ and both taskbar-policy paths remain pending; content-aware enlargement still
 requires trustworthy bounds. Two clean native builds, extracted corresponding-
 source rebuild, package, and non-installing Setup gates pass.
 
+The local 0.12.23 outer-window experiment was rejected and removed. Widening a
+portrait normal viewer to 4:5 made the inner photo larger but did not explain or
+correct the frame supplied by the phone. The 0.12.24 candidate instead holds
+window behavior fixed and changes only the `4k60` display request from
+`3840x2160@60` to `998x2160@60`, with privacy-safe `/info` and sink-caps/PAR/
+CropMeta evidence. On the reported iPhone, the gallery photo is now visibly
+correct and the retained log independently records portrait `/info`, sender,
+and sink geometry. This is accepted one-device evidence for the causal probe,
+not a general release default or cross-device compatibility claim. Gallery-
+content rotation and automatic inner-photo detection remain deferred.
+
 - [ ] Log source dimensions, pixel aspect ratio, rotation metadata, and
   renderer dimensions for orientation transitions.
+- [x] Add a privacy-safe receiver-advertised `/info` display marker and a separate
+  observational sink-pad probe. Keep sender generations sender-local; record
+  every actual sink CAPS event with local `caps_seq`, use one first-buffer
+  snapshot only when CAPS was not observed, and read CropMeta on the first
+  buffer after CAPS, on changes, and every 120 buffers. Treat missing CAPS as
+  evidence without claiming a one-to-one sender-to-sink mapping or logging
+  identifiers, plist bodies, frames, or pixels.
 - [x] Suppress a different Photos/media canvas ratio after a device-frame
   baseline has been learned for the current session.
 - [x] Retain an early phone-shaped raw marker before the debounce so the known
@@ -756,6 +798,9 @@ source rebuild, package, and non-installing Setup gates pass.
 - [x] Remove the unverified portrait-fill scale after physical cropping and
   keep the complete Photos transport frame contained at neutral scale until a
   trustworthy content rectangle exists.
+- [x] Reject and remove the 0.12.23 temporary 4:5 outer-viewer compensation;
+  preserve the accepted phone-shaped presentation policy while investigating
+  the native negotiation and decoded-frame boundary.
 - [x] Add a shell-owned non-activating fullscreen control and event-driven
   foreground Escape path with bounded hook lifetime and unchanged Alt+Enter.
 - [x] Replace that interim overlay/hook with one native framed viewer, embedded
@@ -773,6 +818,13 @@ source rebuild, package, and non-installing Setup gates pass.
   and retain a physical HEVC 4K-versus-1080p Photos A/B. Treat that marker as
   negotiation evidence only; feature bits remain unchanged, and neither preset
   is a fix unless the visible inner-media measurement improves repeatedly.
+- [x] Run the 0.12.24 one-variable A/B on the reported iPhone and retain the
+  sender geometry and independent sink-local CAPS/CropMeta timelines. The user
+  accepted the visible portrait gallery result and the log records portrait
+  geometry on all three independent boundaries. Fullscreen was needed first to
+  expose the separately black initial D3D11 surface, so repeat an untouched-
+  window fresh start after that lifecycle defect is fixed. Do not invent a
+  one-to-one protocol correlation or generalize this single-device result.
 - [ ] Resize or letterbox the viewer without cropping content, repeatedly
   shrinking the window, or creating a resize feedback loop.
 - [ ] Respect iPhone orientation lock: AeroMirror should follow the stream
@@ -783,10 +835,15 @@ source rebuild, package, and non-installing Setup gates pass.
   portrait/landscape transitions on displays with different DPI scaling,
   including repeated tray/Alt+Enter/Esc exits and entry/exit from Photos while
   fullscreen.
-- [ ] With **Show stream in taskbar** both enabled and disabled, press Caption
-  Close during normal and fullscreen playback, verify that the stream remains
+- [ ] With **Show stream in taskbar** both enabled and disabled, minimize
+  during normal and fullscreen playback, verify that the stream remains
   alive, restore it through the taskbar or **Show stream window** as applicable,
   then confirm stop hides it and the next session shows exactly once.
+- [ ] Supersede Caption Close/minimize with an acknowledged native
+  session-disconnect command that ends only the active AirPlay session while
+  keeping the same receiver PID, listener ports, DNS-SD publication, and BLE
+  beacon ready for a future iPhone. Verify that iOS leaves Screen Mirroring and
+  that stale cleanup cannot terminate a newer session.
 
 Acceptance target: photos and videos keep their correct proportions and remain
 legible while the viewer changes orientation only when the incoming stream
@@ -833,6 +890,101 @@ reconnect guidance.
 - [ ] Embed or parent a native D3D surface behind a versioned local IPC contract
   before promising a Mac-style hover-only frame, borderless viewer, seamless
   frozen-frame handoff, or live aspect lock during edge dragging.
+- [x] Implement the first focused black-initial-viewer A/B at the native
+  HWND/D3D11 surface boundary. The native lifecycle owns the generation; Qt
+  acknowledges visible/nonzero READY, and the first selected-sink Present posts
+  the same token before a later GUI turn requests `gst_video_overlay_expose()`.
+  Show/WindowStateChange coalesces re-expose only for an acknowledged surface.
+  WinIdChange retries boundedly, rebinds all current overlay sinks, and defers
+  SHOW until the rebind finishes. HIDE invalidates old work. Keep host Present
+  proof beside the failure-recovery pad probe and keep GUI-callable APIs free of
+  logger lifetime dependencies. Do not use synchronous `SendMessage`, resize,
+  fullscreen, render rectangle, crop, scale, pixel inspection, pipeline reset,
+  or a periodic loop.
+- [x] Raise a newly connected normal viewer once over an ordinary foreground
+  window without taking keyboard focus, but place it behind an external window
+  covering its full monitor and defer any initial automatic fullscreen request.
+  Never set a persistent topmost style and do not identify games by process name
+  or window title.
+- [x] Retain the 0.12.25 physical disposition as FAIL for the primary case. Its
+  untouched normal viewer remained black and the current image appeared only
+  after entering fullscreen; the first-Present expose request was therefore not
+  sufficient on the affected PC. Do not relabel or publish that candidate.
+- [x] Implement the isolated 0.12.26 follow-up at the native lifecycle boundary:
+  serialize start, obtain the exact Qt READY acknowledgement, bind only the
+  selected codec sink to the child HWND, and enter PLAYING only after that bind.
+  Ensure render/bus/pause/resume/HLS/stop/destroy work retains the owning
+  session generation and cannot cross into a replacement renderer.
+- [x] Treat the September 4 physical 0.12.26 run as FAIL for the untouched
+  normal-viewer case: the newly connected viewer still opened with a black
+  image. Diagnose the real native presentation failure from that exact run;
+  READY/bind/PLAYING, decoded-buffer, or Present markers remain insufficient
+  without visible pixels. Do not publish 0.12.26 as the black-screen fix.
+- [x] Implement the 0.12.27 Qt external-surface contract correction: a dedicated
+  native child widget with a null paint engine, PaintOnScreen, no system
+  background and no auto-fill. Keep gallery and window geometry unchanged.
+  Source evidence is not physical acceptance; fresh-viewer rows remain open.
+- [x] Verify the exact production widget on hidden Windows HWNDs with pinned
+  Qt 6.10.1; reproduce the native core from two clean builds and the no-Git
+  corresponding-source archive. Native/managed regression and local Setup
+  verification passed; do not close physical black-screen acceptance yet.
+- [ ] Correct the inconsistent initial viewer Z-order observed in the same run.
+  The stream window opened behind the already visible Explorer `Installer`
+  folder and the AeroMirror window, while appearing in front of the
+  Instagram/Google windows. A new viewer must rise predictably above ordinary
+  application windows without taking keyboard focus, becoming permanently
+  topmost, or covering a fullscreen game/video. Retest this exact mixed-window
+  arrangement, not only a single Chrome window.
+  Local 0.12.27 now verifies the actual ordinary-window order and permits one
+  immediate promotion/demotion only after a repeated fullscreen safety check.
+  Keep this item open until the user's exact arrangement passes physically.
+- [ ] Repeat five untouched H.265 fresh starts and at least two H.264 fresh
+  starts only after the next black-screen correction; record visible output for
+  every row without moving, resizing, maximizing, or fullscreening the viewer.
+- [ ] Complete the requested cross-module audit and targeted refactoring.
+  The first corrective pass is implemented: confirmed child-HWND placement
+  defect, manual-update callback/file ownership and failed window-policy
+  acknowledgement. See releases/0.12.28/AUDIT.md for evidence and coverage.
+  Full line-by-line decomposition of the large receiver/installer remains
+  staged work; do not present this pass as a complete third-party security audit.
+  Local .29 adds bounded update transport, worker cancellation ownership,
+  exceptional-response cleanup and canonical-repository asset handling; its
+  executable checks and local Setup gates pass. See releases/0.12.29/AUDIT.md.
+- [x] Reproduce .27's child-window SHOW displacement against its installed binary
+  and guard outer placement/fit with top-level ownership in .28. Physical fresh
+  video acceptance remains open in the separate five-H.265/two-H.264 row.
+- [x] Record the September 6 user confirmation that local .28 works. Preserve
+  its frozen artifacts; do not infer the enumerated physical matrix from that
+  overall report.
+- [x] Add explicit response-size and time budgets to release metadata checks
+  in local .29, with executable cancellation/slow-response tests; preserve
+  installer SHA-256 validation. Keep form/application shutdown and automatic
+  opt-out cancellation separate from the verified UI/staging handoff.
+- [x] Confirm the canonical GitHub repository ID/address using the public API,
+  accept exact canonical/historical Setup paths with unchanged SHA-256 checks,
+  and verify a live metadata GET through the .29 packaged shell. Do not infer
+  an installer download/install or a GitHub publication from this read-only check.
+- [ ] Reconcile caption close with the requested stop-AirPlay-session behavior.
+  Local .30 adds immutable stream IDs, exact HTTP-owner close, correlated
+  results, late-SHOW suppression and session-scoped shell dismissal. Fifty
+  loopback close/reconnect cycles, same-socket replacement, peer retention and
+  stop cancellation pass. Do not mark this row accepted until a real iPhone
+  leaves Screen Mirroring and reconnects on the same receiver PID/port, also
+  after lock-then-close. Both viewer Close and continuity-warning Close are
+  wired through the same native handler; stale PID/generation/stream tests pass.
+  Explicit completion also clears managed activity/loss recovery without a
+  legacy stop line. The .30 Setup and final packaged checks are ready locally.
+  See releases/0.12.30/TEST_PLAN.md.
+- [ ] Keep the 0.12.26 stopped-Bonjour physical row PENDING until the user tests
+  the contextual action after a later real service stop; do not infer success
+  from the local service-state or automated checks.
+- [ ] Physically validate minimize/restore during the same acknowledged stream.
+  Video must redraw event-wise without resizing, fullscreening, reconnecting, or
+  starting a periodic repaint loop.
+- [x] Preserve the failed 0.12.25 expose A/B log and keep its follow-up isolated:
+  show/acknowledge the host before PLAYING and bind only the selected codec sink
+  to the child HWND. Do not combine the 0.12.26 experiment with presentation-
+  geometry changes.
 - [ ] Define keyboard-accessible move, close, fullscreen, and size controls for
   any hover-only chrome; do not remove the standard frame before those controls
   exist.

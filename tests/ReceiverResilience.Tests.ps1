@@ -110,24 +110,49 @@ $bonjourFirewallContextSource = [IO.File]::ReadAllText(
     (Join-Path $sourceRoot "Receiver\ReceiverContext.BonjourFirewall.cs"))
 $bonjourServiceSource = [IO.File]::ReadAllText(
     (Join-Path $sourceRoot "Network\BonjourServiceRecoveryService.cs"))
+$bonjourIdentitySource = [IO.File]::ReadAllText(
+    (Join-Path $sourceRoot "Network\BonjourFirewallService.cs"))
 Assert-True ($bonjourFirewallContextSource.Contains(
         "BonjourFirewallService.AssessPrivateMdnsRule()") -and
     $bonjourFirewallContextSource.Contains(
         "BonjourServiceRecoveryService.Assess()") -and
     $bonjourServiceSource.Contains(
-        "The ordinary per-user application only observes Bonjour") -and
+        "explicit recovery action while the validated service is stopped") -and
     $bonjourServiceSource.Contains("service.Status") -and
-    -not $source.Contains("RepairBonjour") -and
-    -not $source.Contains("RecoverExplicitlyWithUac") -and
+    $bonjourServiceSource.Contains("Environment.SystemDirectory") -and
+    $bonjourServiceSource.Contains("Environment.SpecialFolder.Windows") -and
+    $bonjourServiceSource.Contains(
+        'Path.Combine(systemDirectory, "sc.exe")') -and
+    $bonjourServiceSource.Contains(
+        "BonjourFirewallService.IsTrustedMachinePath(") -and
+    $bonjourServiceSource.Contains('Verb = "runas"') -and
+    $bonjourIdentitySource.Contains(
+        "TryValidateBonjourServiceObjectSecurity(") -and
+    $bonjourIdentitySource.Contains(
+        "QueryServiceObjectSecurity(") -and
+    $bonjourFirewallContextSource.Contains(
+        "WaitForExplicitStartProcessExit(process)") -and
+    $bonjourFirewallContextSource.Contains(
+        "the one-flight latch remains closed") -and
+    $bonjourServiceSource.Contains(
+        "return status == ServiceControllerStatus.Stopped;") -and
+    $bonjourFirewallContextSource.Contains(
+        "public void RequestBonjourServiceRecovery()") -and
+    $settingsFormSource.Contains(
+        "context.RequestBonjourServiceRecovery();") -and
     -not $source.Contains("RepairPrivateMdnsRuleExplicitlyWithUac")) `
-    "the ordinary application observes Bonjour without an elevated repair path"
+    "Bonjour recovery is an explicit contextual action through protected Windows service control"
 Assert-True (-not $settingsFormSource.Contains("refreshDiscovery") -and
     -not $settingsFormSource.Contains("bonjourFirewallRepair") -and
     -not $receiverContextSource.Contains("bonjourItem") -and
+    [regex]::IsMatch(
+        $settingsFormSource,
+        'bonjourRecovery\.Visible\s*=\s*showBonjourRecovery') -and
+    $settingsFormSource.Contains("bonjourServiceStopping") -and
     -not [regex]::IsMatch(
         $receiverContextSource,
         'ToolStripMenuItem\([^\r\n]*Bonjour')) `
-    "main and tray UI expose no manual Bonjour or discovery controls"
+    "Bonjour recovery is contextual and the tray exposes no permanent discovery control"
 $bonjourMonitorStart = $receiverCoreSource.IndexOf(
     "private void HandleBonjourServiceRecoveryMonitor()",
     [StringComparison]::Ordinal)
@@ -152,8 +177,10 @@ Assert-True ($bonjourMonitorSource.Contains("now.AddSeconds(3).Ticks") -and
         'TryRequestNativeDiscoveryRefresh(') -and
     $bonjourMonitorSource.Contains(
         '"Bonjour service recovered", false') -and
+    -not $bonjourMonitorSource.Contains("TryLaunchExplicitStart") -and
+    -not $bonjourMonitorSource.Contains('Verb = "runas"') -and
     -not $bonjourMonitorSource.Contains("ScheduleRestart(")) `
-    "Stopped Bonjour is polled every three seconds and Running receives at most two same-process refreshes"
+    "Stopped Bonjour is observed without UAC and Running receives at most two same-process refreshes"
 $pendingRefreshGuardIndex = $bonjourMonitorSource.IndexOf(
     "ref coreDiscoveryRefreshPendingRequest",
     [StringComparison]::Ordinal)
@@ -296,6 +323,71 @@ Assert-True ($nativePatchSource.Contains(
     -not $nativePatchSource.Contains(
         'gst_video_overlay_set_render_rectangle')) `
     "the embedded native sink contains the whole frame at neutral scale without a crop rectangle"
+Assert-True ($wrapperPatchSource.Contains(
+        'QTimer::singleShot(delayMs, this, [this, generation, attempt]()') -and
+    $wrapperPatchSource.Contains(
+        'queueRendererReady(generation, attempt + 1)') -and
+    $wrapperPatchSource.Contains('IsWindowVisible(surface)') -and
+    $wrapperPatchSource.Contains('!IsIconic(host)') -and
+    $wrapperPatchSource.Contains('GetClientRect(surface, &client)') -and
+    $wrapperPatchSource.Contains('notify_video_host_shown(') -and
+    $wrapperPatchSource.Contains('expose_video_host_surface(') -and
+    $wrapperPatchSource.Contains('AEROMIRROR_WM_RENDERER_EXPOSE') -and
+    $wrapperPatchSource.Contains(
+        'static_cast<uint64_t>(nativeMessage->wParam)') -and
+    $nativePatchSource.Contains('video_renderer_notify_host_shown(') -and
+    $nativePatchSource.Contains('video_renderer_expose_host_surface(') -and
+    $nativePatchSource.Contains(
+        '&aeromirror_host_ready_generation, generation_token') -and
+    $nativePatchSource.Contains(
+        '&aeromirror_host_present_generation') -and
+    $nativePatchSource.Contains(
+        '&aeromirror_host_expose_posted_generation') -and
+    $nativePatchSource.Contains(
+        '&aeromirror_host_exposed_generation, generation_token') -and
+    $nativePatchSource.Contains(
+        'AEROMIRROR_WM_RENDERER_EXPOSE') -and
+    $nativePatchSource.Contains(
+        'gst_video_overlay_expose(GST_VIDEO_OVERLAY(sink))') -and
+    $wrapperPatchSource.Contains(
+        'AEROMIRROR_VIDEO_HOST_EXPOSE result=%s') -and
+    $wrapperPatchSource.Contains(
+        'exposed ? "requested" : "rejected"') -and
+    $wrapperPatchSource.Contains(
+        'abandon_video_host_surface_expose(') -and
+    -not $nativePatchSource.Contains(
+        'gst_video_overlay_set_render_rectangle')) `
+    "initial host redraw retries the child, generation-matches first Present, and exposes only the selected sink without changing geometry"
+Assert-True ($wrapperPatchSource.Contains(
+        'isExternalFullscreenForeground(') -and
+    $wrapperPatchSource.Contains(
+        'setAttribute(Qt::WA_ShowWithoutActivating, true)') -and
+    $wrapperPatchSource.Contains(
+        'currentForeground = GetForegroundWindow()') -and
+    $wrapperPatchSource.Contains('host, HWND_NOTOPMOST') -and
+    $wrapperPatchSource.Contains('SWP_NOACTIVATE') -and
+    $wrapperPatchSource.Contains('host, protectedForeground') -and
+    $wrapperPatchSource.Contains('host, HWND_BOTTOM') -and
+    $wrapperPatchSource.Contains('host, HWND_TOP') -and
+    $wrapperPatchSource.Contains(
+        'AEROMIRROR_VIDEO_HOST_FOREGROUND result=%s') -and
+    $wrapperPatchSource.Contains('foreground == GetDesktopWindow()') -and
+    $wrapperPatchSource.Contains('foreground == GetShellWindow()') -and
+    $wrapperPatchSource.Contains('L"Progman"') -and
+    $wrapperPatchSource.Contains('L"WorkerW"') -and
+    $wrapperPatchSource.Contains(
+        'GetClientRect(foreground, &clientRect)') -and
+    $wrapperPatchSource.Contains(
+        'ClientToScreen(foreground, &clientTopLeft)') -and
+    $wrapperPatchSource.Contains(
+        'emitFullscreenMarker(desired, before, "deferred", source)') -and
+    $wrapperPatchSource.Contains('hasOrdinaryWindowAbove(host)') -and
+    $wrapperPatchSource.Contains('const BOOL promoted = SetWindowPos(') -and
+    $wrapperPatchSource.Contains('const BOOL demoted = SetWindowPos(') -and
+    $wrapperPatchSource.Contains('host, HWND_NOTOPMOST') -and
+    -not $wrapperPatchSource.Contains('SetForegroundWindow(') -and
+    -not $wrapperPatchSource.Contains('activateWindow(')) `
+    "viewer raises without focus theft over ordinary apps, excludes the desktop, and stays below fullscreen content"
 Assert-True ($wrapperPatchSource.Contains(
         "QByteArray m_beaconOutputBuffer") -and
     $wrapperPatchSource.Contains(
@@ -449,15 +541,55 @@ Assert-True ($nativePatchSource.Contains(
     $nativePatchSource.Contains("selected_present_proof_ready =") -and
     $nativePatchSource.Contains(
         "renderer_used->aeromirror_present_proof_ready") -and
-    $nativePatchSource.Contains("if (!sync)") -and
+    $nativePatchSource.Contains(
+        "if (!sync && !aeromirror_host_is_configured())") -and
+    $nativePatchSource.Contains(
+        "AEROMIRROR_VIDEO_HOST_PRESENT_READY codec=%s") -and
     $nativePatchSource.Contains(
         "&aeromirror_active_present_proof_ready) == 1")) `
-    "D3D11 presentation capability is atomic and unavailable when video sync is disabled"
-Assert-True ([regex]::Matches(
-        $nativePatchSource, 'g_signal_handler_disconnect\(').Count -ge 2 -and
-    [regex]::Matches(
-        $nativePatchSource, 'gst_pad_remove_probe\(').Count -ge 2) `
-    "native renderer teardown explicitly detaches both Present signal and sink probe"
+    "recovery proof remains sync-gated while host Present stays active in low-latency mode"
+Assert-True ($nativePatchSource.Contains(
+        "aeromirror_attach_d3d11_present_proof(") -and
+    $nativePatchSource.Contains(
+        "renderer_type[i], playbin_videosink") -and
+    $nativePatchSource.Contains(
+        "selected_id = renderer->id + 1") -and
+    $nativePatchSource.Contains(
+        "selected_present_proof_ready =") -and
+    $nativePatchSource.Contains(
+        "renderer->aeromirror_present_proof_ready")) `
+    "explicit HLS D3D11 playback shares first-Present readiness and active renderer identity"
+$presentAttachStart = $nativePatchSource.IndexOf(
+    "static void aeromirror_attach_d3d11_present_proof(")
+$presentDetachStart = $nativePatchSource.IndexOf(
+    "static void aeromirror_detach_d3d11_present_proof(",
+    $presentAttachStart + 1)
+$presentAvailableStart = $nativePatchSource.IndexOf(
+    "bool video_renderer_present_proof_available()",
+    $presentDetachStart + 1)
+Assert-True ($presentAttachStart -ge 0 -and
+    $presentDetachStart -gt $presentAttachStart -and
+    $presentAvailableStart -gt $presentDetachStart) `
+    "native Present attachment and teardown sections are present"
+$presentAttachSource = $nativePatchSource.Substring(
+    $presentAttachStart, $presentDetachStart - $presentAttachStart)
+$presentDetachSource = $nativePatchSource.Substring(
+    $presentDetachStart, $presentAvailableStart - $presentDetachStart)
+Assert-True ($presentAttachSource.Contains(
+        'selected->aeromirror_present_handler = g_signal_connect(') -and
+    $presentAttachSource.Contains(
+        'sync && selected->aeromirror_sink_probe != 0') -and
+    -not $presentAttachSource.Contains('g_signal_handler_disconnect(') -and
+    -not $presentAttachSource.Contains('gst_pad_remove_probe(')) `
+    "failed optional recovery-probe setup preserves the host Present handler"
+Assert-True ($presentDetachSource.Contains(
+        'g_signal_handler_disconnect(') -and
+    $presentDetachSource.Contains('gst_pad_remove_probe(') -and
+    $presentDetachSource.Contains(
+        'selected->aeromirror_present_handler = 0') -and
+    $presentDetachSource.Contains(
+        'selected->aeromirror_sink_probe = 0')) `
+    "renderer teardown explicitly detaches and clears both Present signal and sink probe"
 Assert-True ($nativePatchSource.Contains(
         "static std::atomic<unsigned int> open_connections(0)") -and
     $nativePatchSource.Contains("open_connections.fetch_add(1)") -and
@@ -688,7 +820,9 @@ Assert-True ($nativePresentSource.Contains(
         $nativePresentSource.Contains($_) }).Count -eq 0) `
     "the Present callback publishes only atomic observations"
 Assert-True ([regex]::Matches($nativePatchSource,
-        '(?ms)^\+\s*gst_app_src_push_buffer[^\r\n]*\r?\n^\+\s*aeromirror_health_note_push\(flow_return\);').Count -eq 2) `
+        '(?m)^\+\s*GstFlowReturn flow_return\s*=').Count -eq 2 -and
+    [regex]::Matches($nativePatchSource,
+        '(?m)^\+\s*aeromirror_health_note_push\(flow_return\);').Count -eq 2) `
     "every added appsrc push result is unconditionally counted"
 
 $nativeMirrorThreadSource = Get-NativePatchSlice `
@@ -774,7 +908,7 @@ $launchUpdateStart = $settingsFormSource.IndexOf(
     "private void LaunchVerifiedUpdateInstaller(string installerPath)",
     [StringComparison]::Ordinal)
 $launchUpdateEnd = $settingsFormSource.IndexOf(
-    "private void DeletePendingInstaller()",
+    "private static void DeleteFileQuietly(string path)",
     [Math]::Max(0, $launchUpdateStart),
     [StringComparison]::Ordinal)
 Assert-True ($downloadUpdateStart -ge 0 -and
@@ -1021,6 +1155,17 @@ Assert-True (-not $markBonjourSource.Contains(
     $receiverCoreSource.Contains(
         "if (attempt >= 2 || Interlocked.CompareExchange(")) `
     "a repeated native prerequisite marker cannot reset the bounded Bonjour recovery budget"
+$resumeBonjourStart = $receiverCoreSource.IndexOf(
+    "internal void ResumeDiscoveryAfterBonjourRecovery()")
+$resumeBonjourEnd = $receiverCoreSource.IndexOf(
+    "private void OnStartStop(", $resumeBonjourStart)
+$resumeBonjourSource = $receiverCoreSource.Substring(
+    $resumeBonjourStart, $resumeBonjourEnd - $resumeBonjourStart)
+Assert-True (-not $resumeBonjourSource.Contains(
+        "coreBonjourRecoveryAttempted, 0") -and
+    $resumeBonjourSource.Contains(
+        "coreBonjourServiceCheckDueTicks, 0")) `
+    "explicit Bonjour recovery accelerates checking without resetting an already reserved retry budget"
 $bonjourMonitorStart = $receiverCoreSource.IndexOf(
     "private void HandleBonjourServiceRecoveryMonitor()")
 $bonjourMonitorEnd = $receiverCoreSource.IndexOf(
@@ -1293,7 +1438,7 @@ Assert-True ($lostConnectionUiSource.Contains(
     $lostConnectionContextSource.Contains(
         "lostConnectionPlaceholderDismissedSessionGeneration = -1") -and
     $lostConnectionContextSource.Contains(
-        "DismissLostConnectionPlaceholderForCurrentSession()") -and
+        "DismissLostConnectionPlaceholderForSession(") -and
     $source.Contains(
         "ref lostConnectionPlaceholderDismissedSessionGeneration")) `
     "user dismissal is latched for one mirroring session while programmatic close stays distinct"
@@ -1485,6 +1630,9 @@ Assert-True ($showCallbackSource.Contains(
     -not $showCallbackSource.Contains("FitRendererWindow") -and
     -not $showCallbackSource.Contains("Log(")) `
     "renderer show pre-positions from loaded settings without IO, activation, or aspect fitting"
+Assert-True ($showCallbackSource.Contains(
+        "NativeMethods.IsTopLevelWindow(window)")) `
+    "renderer SHOW rejects child sink HWNDs before applying saved desktop placement"
 $moveSizeCallbackStart = $source.IndexOf(
     "private void OnRendererMoveSizeEvent")
 $moveSizeCallbackEnd = $source.IndexOf(
@@ -2392,6 +2540,16 @@ Assert-True ([regex]::Matches(
         $defaultAudioArguments,
         [regex]::Escape($resilientAudioArgument)).Count -eq 1) `
     "default audio emits exactly one resilient WASAPI2 sink argument"
+$portraitNegotiationProbeSettings = [Activator]::CreateInstance(
+    $settingsType, $true)
+$portraitNegotiationProbeSettings.QualityPreset = "4k60"
+$portraitNegotiationProbeArguments = Invoke-UxPlayArguments `
+    $portraitNegotiationProbeSettings
+Assert-True ($portraitNegotiationProbeArguments.Contains("-h265") -and
+    $portraitNegotiationProbeArguments.Contains("-s 998x2160@60") -and
+    $portraitNegotiationProbeArguments.Contains("-fps 60") -and
+    -not $portraitNegotiationProbeArguments.Contains("3840x2160")) `
+    "the 0.12.24 AirPlay negotiation probe requests the portrait sender canvas without changing the renderer window"
 Assert-True ([regex]::IsMatch(
         $defaultAudioArguments,
         '(?:^|\s)-pin\s+-reg\s+"[^"]+"(?:\s|$)') -and
@@ -3179,6 +3337,101 @@ $reconnectHintPending.SetValue($context, 0)
 $queueLostConnectionPlaceholder.Invoke($context, [object[]]@()) | Out-Null
 Assert-True ([int]$placeholderShowPending.GetValue($context) -eq 1) `
     "caption-close suppression expires when the next mirroring generation starts"
+$mirrorSessionGeneration.SetValue($context, 79)
+$rendererDismissedSession.SetValue($context, -1)
+$observe.Invoke($context, [object[]]@(42,
+    "AEROMIRROR_MIRROR_SESSION session=201 state=started")) | Out-Null
+foreach ($invalidClose in @(
+    "AEROMIRROR_VIDEO_WINDOW state=closed source=caption-close session=200 request=1",
+    "prefix AEROMIRROR_VIDEO_WINDOW state=closed source=caption-close session=201 request=1",
+    "AEROMIRROR_VIDEO_WINDOW state=closed source=caption-close session=0 request=1",
+    "AEROMIRROR_VIDEO_WINDOW state=closed source=caption-close session=201 request=0",
+    "AEROMIRROR_VIDEO_WINDOW state=closed source=unknown session=201 request=1",
+    "AEROMIRROR_VIDEO_WINDOW state=closed source=caption-close session=9223372036854775808 request=1"
+)) {
+    $observe.Invoke($context, [object[]]@(42, $invalidClose)) | Out-Null
+    Assert-True ([int]$rendererDismissedSession.GetValue($context) -eq -1) `
+        "stale or non-exact session-close markers cannot dismiss the current viewer"
+}
+$observe.Invoke($context, [object[]]@(42,
+    "AEROMIRROR_VIDEO_WINDOW state=closed source=caption-close session=201 request=2")) | Out-Null
+Assert-True ([int]$rendererDismissedSession.GetValue($context) -eq 79) `
+    "an exact matching session-close marker dismisses its managed generation"
+$mirrorSessionGeneration.SetValue($context, 80)
+$rendererDismissedSession.SetValue($context, -1)
+$observe.Invoke($context, [object[]]@(42,
+    "AEROMIRROR_MIRROR_SESSION session=202 state=started")) | Out-Null
+$observe.Invoke($context, [object[]]@(42,
+    "AEROMIRROR_VIDEO_WINDOW state=closed source=caption-close session=201 request=3")) | Out-Null
+Assert-True ([int]$rendererDismissedSession.GetValue($context) -eq -1) `
+    "a delayed previous-session caption close leaves the replacement untouched"
+$observeSessionClose = $contextType.GetMethod(
+    "ObserveNativeSessionClose", $instanceFlags)
+$observeSessionClose.Invoke($context, [object[]]@(41,
+    "AEROMIRROR_VIDEO_WINDOW state=closed source=continuity-close session=202 request=4")) | Out-Null
+Assert-True ([int]$rendererDismissedSession.GetValue($context) -eq -1) `
+    "the session observer independently rechecks its PID under the lifecycle lock"
+$observe.Invoke($context, [object[]]@(42,
+    "AEROMIRROR_VIDEO_WINDOW state=closed source=continuity-close session=202 request=4")) | Out-Null
+Assert-True ([int]$rendererDismissedSession.GetValue($context) -eq 80) `
+    "continuity Close uses the same exact native acknowledgement as caption Close"
+$dismissPlaceholder = $contextType.GetMethod(
+    "DismissLostConnectionPlaceholderForSession", $instanceFlags)
+$placeholderDismissedSession = Field "lostConnectionPlaceholderDismissedSessionGeneration"
+$placeholderDismissedSession.SetValue($context, -1)
+$placeholderClosePending.SetValue($context, 0)
+foreach ($staleOwner in @(
+    [object[]]@(41, 80, [long]202),
+    [object[]]@(42, 79, [long]202),
+    [object[]]@(42, 80, [long]201)
+)) {
+    $dismissPlaceholder.Invoke($context, $staleOwner) | Out-Null
+    Assert-True ([int]$placeholderDismissedSession.GetValue($context) -eq -1 -and
+        [int]$placeholderClosePending.GetValue($context) -eq 0) `
+        "a stale placeholder PID, managed generation or native ID cannot close its successor"
+}
+$savedCloseTestProcess = $coreProcess.GetValue($context)
+$coreProcess.SetValue($context, $null)
+$dismissPlaceholder.Invoke($context, [object[]]@(42, 80, [long]202)) | Out-Null
+Assert-True ([int]$placeholderDismissedSession.GetValue($context) -eq 80 -and
+    [int]$placeholderClosePending.GetValue($context) -eq 1) `
+    "the matching warning stays dismissed even when its native process already ended"
+$coreProcess.SetValue($context, $savedCloseTestProcess)
+$placeholderDismissedSession.SetValue($context, -1)
+Assert-True ($source.Contains("int expectedProcessId = 0") -and
+    $source.Contains("expectedProcessId != 0 && processId != expectedProcessId")) `
+    "native Close revalidates the captured process under the command writer lock"
+$mirrorActive.SetValue($context, 1)
+$recoveryPending.SetValue($context, 1)
+$recoveryPid.SetValue($context, 42)
+foreach ($invalidCompletion in @(
+    "AEROMIRROR_SESSION_CLOSE session=201 request=5 result=closed pid=42 raop_port=7000 airplay_port=7001",
+    "AEROMIRROR_SESSION_CLOSE session=202 request=5 result=stale pid=42 raop_port=7000 airplay_port=7001",
+    "AEROMIRROR_SESSION_CLOSE session=202 request=5 result=closed pid=41 raop_port=7000 airplay_port=7001",
+    "prefix AEROMIRROR_SESSION_CLOSE session=202 request=5 result=closed pid=42 raop_port=7000 airplay_port=7001"
+)) {
+    $observeSessionClose.Invoke($context, [object[]]@(42, $invalidCompletion)) | Out-Null
+    Assert-True ([int]$mirrorActive.GetValue($context) -eq 1 -and
+        [int]$recoveryPending.GetValue($context) -eq 1) `
+        "only the matching completed close can end the managed session and cancel its watchdog"
+}
+$completedClose = "AEROMIRROR_SESSION_CLOSE session=202 request=5 result=closed pid=42 raop_port=7000 airplay_port=7001"
+$observeSessionClose.Invoke($context, [object[]]@(42, $completedClose)) | Out-Null
+Assert-True ([int]$mirrorActive.GetValue($context) -eq 0 -and
+    [int]$recoveryPending.GetValue($context) -eq 0 -and
+    [int]$activePid.GetValue($context) -eq 42) `
+    "close acknowledgement ends the session without a legacy stop line or receiver restart"
+$observeSessionClose.Invoke($context, [object[]]@(42, $completedClose)) | Out-Null
+Assert-True ([int]$mirrorActive.GetValue($context) -eq 0) `
+    "a duplicate completed close is idempotent"
+$mirrorSessionGeneration.SetValue($context, 81)
+$observeSessionClose.Invoke($context, [object[]]@(42,
+    "AEROMIRROR_MIRROR_SESSION session=203 state=started")) | Out-Null
+$mirrorActive.SetValue($context, 1)
+$observeSessionClose.Invoke($context, [object[]]@(42, $completedClose)) | Out-Null
+Assert-True ([int]$mirrorActive.GetValue($context) -eq 1) `
+    "late completion cannot end a replacement session"
+$contextType.GetField("nativeMirrorSessionId", $instanceFlags).SetValue($context, [long]0)
 $mirrorSessionGeneration.SetValue($context, 0)
 $mirrorActive.SetValue($context, 1)
 $rendererDismissedSession.SetValue($context, -1)

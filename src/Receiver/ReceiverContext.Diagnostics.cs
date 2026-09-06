@@ -76,6 +76,10 @@ namespace AirPlayReceiverMvp
                         return "StartPending";
                     case BonjourServiceState.StopPending:
                         return "StopPending";
+                    case BonjourServiceState.PausePending:
+                        return "PausePending";
+                    case BonjourServiceState.Paused:
+                        return "Paused";
                     case BonjourServiceState.Stopped:
                         return "Stopped";
                     case BonjourServiceState.MissingOrUnsafe:
@@ -224,6 +228,8 @@ namespace AirPlayReceiverMvp
         {
             quitting = true;
             StopAutomaticUpdateWork();
+            if (form != null && !form.IsDisposed)
+                form.StopUpdateWork();
             CloseLostConnectionPlaceholder();
             monitorTimer.Stop();
             NetworkChange.NetworkAddressChanged -= OnNetworkAddressChanged;

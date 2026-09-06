@@ -9,6 +9,7 @@ namespace AirPlayReceiverMvp
         private int automaticUpdateEpoch;
         private int automaticUpdateCheckRunning;
         private int automaticUpdateShutdown;
+        private readonly UpdateWorkScope automaticUpdateWork = new UpdateWorkScope();
 
         public void SetAutomaticUpdatesEnabled(bool enabled)
         {
@@ -20,6 +21,7 @@ namespace AirPlayReceiverMvp
             Interlocked.Increment(ref automaticUpdateEpoch);
             if (!enabled)
             {
+                automaticUpdateWork.CancelPending();
                 AutomaticUpdateService.ClearStagedUpdate();
                 Log("Automatic updates disabled; known staged update files " +
                     "were removed.");
@@ -44,6 +46,12 @@ namespace AirPlayReceiverMvp
 
             int epoch = Interlocked.CompareExchange(
                 ref automaticUpdateEpoch, 0, 0);
+            UpdateWorkScope.Operation operation = automaticUpdateWork.Begin();
+            if (operation == null)
+            {
+                Interlocked.Exchange(ref automaticUpdateCheckRunning, 0);
+                return;
+            }
             ThreadPool.QueueUserWorkItem(delegate
             {
                 string downloadedInstaller = "";
@@ -62,7 +70,7 @@ namespace AirPlayReceiverMvp
                         return;
                     }
 
-                    UpdateInfo info = UpdateService.Check();
+                    UpdateInfo info = UpdateService.Check(operation.Token);
                     if (!IsAutomaticUpdateEpochCurrent(epoch))
                         return;
                     if (!info.IsNewer)
@@ -84,7 +92,7 @@ namespace AirPlayReceiverMvp
                     }
 
                     downloadedInstaller =
-                        UpdateService.DownloadAndVerify(info);
+                        UpdateService.DownloadAndVerify(info, operation.Token);
                     if (!IsAutomaticUpdateEpochCurrent(epoch))
                         return;
 
@@ -112,6 +120,7 @@ namespace AirPlayReceiverMvp
                 finally
                 {
                     DeleteAutomaticUpdateDownloadQuietly(downloadedInstaller);
+                    operation.Dispose();
                     Interlocked.Exchange(
                         ref automaticUpdateCheckRunning, 0);
                     if (settings.AutomaticUpdates &&
@@ -139,6 +148,7 @@ namespace AirPlayReceiverMvp
         {
             Interlocked.Exchange(ref automaticUpdateShutdown, 1);
             Interlocked.Increment(ref automaticUpdateEpoch);
+            automaticUpdateWork.Dispose();
         }
 
         private static void DeleteAutomaticUpdateDownloadQuietly(string path)

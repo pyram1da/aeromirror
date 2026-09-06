@@ -2,7 +2,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$UpstreamRoot,
 
-    [string]$Version = "0.12.22"
+    [string]$Version = "0.12.30"
 )
 
 $ErrorActionPreference = "Stop"
@@ -195,6 +195,13 @@ $libModified = @(
     & git -c ("safe.directory=" + $libuxplay) -C $libuxplay `
         status --short --untracked-files=all
 )
+# An intent-to-add entry is still an unstaged new file. Accept that spelling
+# only through the same exact reviewed-path list; staged additions stay errors.
+$libModified = @($libModified | ForEach-Object {
+    if ($_.StartsWith(" A ", [StringComparison]::Ordinal)) {
+        "?? " + $_.Substring(3)
+    } else { $_ }
+})
 $expectedLibModified = @(
     "?? aeromirror_host_protocol.h",
     "?? aeromirror_log_protocol.h",
@@ -212,6 +219,7 @@ $expectedLibModified = @(
     " M lib/http_response.c",
     " M lib/http_response.h",
     " M lib/httpd.c",
+    " M lib/httpd.h",
     " M lib/logger.c",
     " M lib/logger.h",
     " M lib/mirror_buffer.c",
@@ -289,9 +297,22 @@ Assert-FileHash -Path $reviewedLibPatch `
 $actualLibPatch = [IO.Path]::GetTempFileName()
 $actualLibIndex = Join-Path ([IO.Path]::GetTempPath()) (
     "aeromirror-libuxplay-index-" + [Guid]::NewGuid().ToString("N"))
+$actualLibObjects = Join-Path ([IO.Path]::GetTempPath()) (
+    "aeromirror-libuxplay-objects-" + [Guid]::NewGuid().ToString("N"))
 $previousGitIndexFile = $env:GIT_INDEX_FILE
+$libObjectStore = (& git -c ("safe.directory=" + $libuxplay) -C $libuxplay `
+    rev-parse --path-format=absolute --git-path objects).Trim()
+if ($LASTEXITCODE -ne 0 -or
+    -not (Test-Path -LiteralPath $libObjectStore -PathType Container)) {
+    throw "Unable to resolve the prepared library's Git object store."
+}
+$previousGitObjectDirectory = $env:GIT_OBJECT_DIRECTORY
+$previousGitAlternateObjectDirectories = $env:GIT_ALTERNATE_OBJECT_DIRECTORIES
 try {
+    New-Item -ItemType Directory -Force -Path $actualLibObjects | Out-Null
     $env:GIT_INDEX_FILE = $actualLibIndex
+    $env:GIT_OBJECT_DIRECTORY = $actualLibObjects
+    $env:GIT_ALTERNATE_OBJECT_DIRECTORIES = $libObjectStore
     & git -c ("safe.directory=" + $libuxplay) -C $libuxplay `
         read-tree HEAD
     if ($LASTEXITCODE -ne 0) {
@@ -327,6 +348,7 @@ try {
         "lib/http_response.c" `
         "lib/http_response.h" `
         "lib/httpd.c" `
+        "lib/httpd.h" `
         "lib/logger.c" `
         "lib/logger.h" `
         "lib/mirror_buffer.c" `
@@ -368,6 +390,9 @@ try {
 }
 finally {
     $env:GIT_INDEX_FILE = $previousGitIndexFile
+    $env:GIT_OBJECT_DIRECTORY = $previousGitObjectDirectory
+    $env:GIT_ALTERNATE_OBJECT_DIRECTORIES =
+        $previousGitAlternateObjectDirectories
     if (Test-Path -LiteralPath $actualLibPatch) {
         Remove-Item -LiteralPath $actualLibPatch -Force
     }
@@ -377,6 +402,11 @@ finally {
     $actualLibIndexLock = $actualLibIndex + ".lock"
     if (Test-Path -LiteralPath $actualLibIndexLock) {
         Remove-Item -LiteralPath $actualLibIndexLock -Force
+    }
+    Assert-ChildPath -Parent ([IO.Path]::GetTempPath()) `
+        -Child $actualLibObjects
+    if (Test-Path -LiteralPath $actualLibObjects) {
+        Remove-Item -LiteralPath $actualLibObjects -Recurse -Force
     }
 }
 
@@ -455,6 +485,7 @@ try {
         "lib\http_response.c",
         "lib\http_response.h",
         "lib\httpd.c",
+        "lib\httpd.h",
         "lib\logger.c",
         "lib\logger.h",
         "lib\mirror_buffer.c",

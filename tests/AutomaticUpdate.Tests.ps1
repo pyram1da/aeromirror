@@ -200,8 +200,9 @@ $automaticUpdatesField = $settingsType.GetField(
     "AutomaticUpdates", $instanceFlags)
 $parseLatest = $updateServiceType.GetMethod(
     "ParseLatestRelease", $staticFlags)
-$downloadAndVerify = Get-MethodByParameterCount `
-    $updateServiceType "DownloadAndVerify" 2 $staticFlags
+$downloadAndVerify = $updateServiceType.GetMethod(
+    "DownloadAndVerify", $staticFlags, $null,
+    [Type[]]@($updateInfoType, [Action[Uri, string]]), $null)
 $validateDownloadHop = Get-MethodByParameterCount `
     $updateServiceType "ValidateDownloadHop" 2 $staticFlags
 $isAcceptableDownloadedInstallerFile = Get-MethodByParameterCount `
@@ -376,6 +377,12 @@ try {
     }
     $verifiedPath = [string]$downloadAndVerify.Invoke(
         $null, [object[]]@($candidate, $offlineDownload))
+    $canonicalCandidate = New-UpdateInfo $candidateVersion $payloadDigest `
+        'https://github.com/pyram1da/aeromirror/releases/download/v9.8.7/AeroMirror-Setup-9.8.7.exe'
+    $canonicalPath = [string]$downloadAndVerify.Invoke(
+        $null, [object[]]@($canonicalCandidate, $offlineDownload))
+    Assert-True ([IO.File]::Exists($canonicalPath)) `
+        "the confirmed canonical repository uses the same exact filename and SHA-256 handoff"
     try {
         Assert-True ([IO.File]::Exists($verifiedPath) -and
             [IO.File]::ReadAllBytes($verifiedPath).Length -eq
@@ -540,6 +547,8 @@ try {
         "a URL without the exact versioned Setup filename is rejected before download"
 
     $unsafeCandidateUrls = @(
+        "https://github.com/someone-else/aeromirror/releases/download/v9.8.7/AeroMirror-Setup-9.8.7.exe",
+        "https://github.com/pyram1da/another-project/releases/download/v9.8.7/AeroMirror-Setup-9.8.7.exe",
         "http://github.com/Nadejny/aeromirror/releases/download/v9.8.7/AeroMirror-Setup-9.8.7.exe",
         "https://user@github.com/Nadejny/aeromirror/releases/download/v9.8.7/AeroMirror-Setup-9.8.7.exe",
         "https://github.com:444/Nadejny/aeromirror/releases/download/v9.8.7/AeroMirror-Setup-9.8.7.exe",

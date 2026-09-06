@@ -5,6 +5,7 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Web.Script.Serialization;
 
 namespace AirPlayReceiverMvp
@@ -15,6 +16,11 @@ namespace AirPlayReceiverMvp
         private const int MaximumDownloadRedirects = 5;
         private const int DownloadTimeoutMilliseconds = 30000;
         private const string ExpectedRepository = "Nadejny/aeromirror";
+        private const string CanonicalRepository = "pyram1da/aeromirror";
+        // GitHub's immutable repository ID survives the confirmed owner rename.
+        // Keep the historical local configuration marker for installed clients.
+        internal const string ReleaseMetadataUrl =
+            "https://api.github.com/repositories/1324108899/releases/latest";
 
         internal static string RepositoryFilePath
         {
@@ -28,6 +34,12 @@ namespace AirPlayReceiverMvp
 
         internal static UpdateInfo Check()
         {
+            return Check(CancellationToken.None);
+        }
+
+        internal static UpdateInfo Check(CancellationToken cancellation)
+        {
+            cancellation.ThrowIfCancellationRequested();
             string repository = ReadRepository();
             if (repository.Length == 0)
                 throw new InvalidOperationException(
@@ -35,13 +47,12 @@ namespace AirPlayReceiverMvp
                     "Он станет доступен после публикации проекта на GitHub.");
 
             ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072;
-            string api = "https://api.github.com/repos/" +
-                repository + "/releases/latest";
-            string json;
-            using (var client = CreateClient())
-                json = client.DownloadString(api);
-
-            return ParseLatestRelease(json, AppVersion.Current);
+            string json = ReleaseMetadataClient.Download(
+                new Uri(ReleaseMetadataUrl), cancellation);
+            cancellation.ThrowIfCancellationRequested();
+            UpdateInfo info = ParseLatestRelease(json, AppVersion.Current);
+            cancellation.ThrowIfCancellationRequested();
+            return info;
         }
 
         internal static UpdateInfo ParseLatestRelease(
@@ -106,16 +117,31 @@ namespace AirPlayReceiverMvp
 
         internal static string DownloadAndVerify(UpdateInfo info)
         {
-            return DownloadAndVerify(
-                info,
-                DownloadInstallerWithValidatedRedirects);
+            return DownloadAndVerify(info, CancellationToken.None);
+        }
+
+        internal static string DownloadAndVerify(
+            UpdateInfo info, CancellationToken cancellation)
+        {
+            return DownloadAndVerify(info, delegate(Uri uri, string path)
+            {
+                DownloadInstallerWithValidatedRedirects(uri, path, cancellation);
+            }, cancellation);
         }
 
         internal static string DownloadAndVerify(
             UpdateInfo info, Action<Uri, string> download)
         {
+            return DownloadAndVerify(info, download, CancellationToken.None);
+        }
+
+        internal static string DownloadAndVerify(
+            UpdateInfo info, Action<Uri, string> download,
+            CancellationToken cancellation)
+        {
             if (download == null)
                 throw new ArgumentNullException("download");
+            cancellation.ThrowIfCancellationRequested();
             Uri uri;
             string name;
             ValidateDownloadCandidate(info, out uri, out name);
@@ -124,6 +150,7 @@ namespace AirPlayReceiverMvp
             try
             {
                 download(uri, path);
+                cancellation.ThrowIfCancellationRequested();
 
                 if (!File.Exists(path))
                     throw new InvalidDataException(
@@ -142,8 +169,14 @@ namespace AirPlayReceiverMvp
                     StringComparison.OrdinalIgnoreCase))
                     throw new InvalidDataException(
                         "SHA-256 загруженного установщика не совпал с GitHub Release.");
+                cancellation.ThrowIfCancellationRequested();
                 complete = true;
                 return path;
+            }
+            catch
+            {
+                cancellation.ThrowIfCancellationRequested();
+                throw;
             }
             finally
             {
@@ -211,9 +244,15 @@ namespace AirPlayReceiverMvp
                 throw new InvalidOperationException(
                     "Установщик обновления должен загружаться по HTTPS.");
             }
-            string expectedPath = "/" + ExpectedRepository +
-                "/releases/download/v" + info.Version.ToString(3) +
-                "/" + expectedName;
+            string releasePath = "/releases/download/v" +
+                info.Version.ToString(3) + "/" + expectedName;
+            string actualPath = Uri.UnescapeDataString(uri.AbsolutePath);
+            bool expectedPath = string.Equals(actualPath,
+                    "/" + CanonicalRepository + releasePath,
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(actualPath,
+                    "/" + ExpectedRepository + releasePath,
+                    StringComparison.OrdinalIgnoreCase);
             if (!string.Equals(
                     uri.Host, "github.com",
                     StringComparison.OrdinalIgnoreCase) ||
@@ -221,10 +260,7 @@ namespace AirPlayReceiverMvp
                 uri.UserInfo.Length != 0 ||
                 uri.Query.Length != 0 ||
                 uri.Fragment.Length != 0 ||
-                !string.Equals(
-                    Uri.UnescapeDataString(uri.AbsolutePath),
-                    expectedPath,
-                    StringComparison.OrdinalIgnoreCase))
+                !expectedPath)
             {
                 throw new InvalidOperationException(
                     "Адрес установщика не привязан к ожидаемому GitHub Release.");
@@ -240,13 +276,14 @@ namespace AirPlayReceiverMvp
         }
 
         private static void DownloadInstallerWithValidatedRedirects(
-            Uri initialUri, string destinationPath)
+            Uri initialUri, string destinationPath, CancellationToken cancellation)
         {
             Uri current = initialUri;
             for (int redirect = 0;
                 redirect <= MaximumDownloadRedirects;
                 redirect++)
             {
+                cancellation.ThrowIfCancellationRequested();
                 ValidateDownloadHop(current, redirect == 0);
                 var request = (HttpWebRequest)WebRequest.Create(current);
                 request.Method = "GET";
@@ -257,8 +294,8 @@ namespace AirPlayReceiverMvp
                     AppVersion.Display;
                 request.Accept = "application/octet-stream";
 
-                using (var response =
-                    (HttpWebResponse)request.GetResponse())
+                using (cancellation.Register(request.Abort, false))
+                using (var response = GetInstallerResponse(request))
                 {
                     int status = (int)response.StatusCode;
                     if (status == 301 || status == 302 || status == 303 ||
@@ -306,6 +343,7 @@ namespace AirPlayReceiverMvp
                         long total = 0;
                         while (true)
                         {
+                            cancellation.ThrowIfCancellationRequested();
                             int read = input.Read(buffer, 0, buffer.Length);
                             if (read <= 0)
                                 break;
@@ -324,6 +362,17 @@ namespace AirPlayReceiverMvp
             }
             throw new InvalidDataException(
                 "Не удалось завершить загрузку после перенаправлений.");
+        }
+
+        private static HttpWebResponse GetInstallerResponse(HttpWebRequest request)
+        {
+            try { return (HttpWebResponse)request.GetResponse(); }
+            catch (WebException ex)
+            {
+                if (ex.Response != null)
+                    ex.Response.Close();
+                throw;
+            }
         }
 
         private static void ValidateDownloadHop(Uri uri, bool initial)
@@ -370,19 +419,6 @@ namespace AirPlayReceiverMvp
             return !string.IsNullOrWhiteSpace(value) && Regex.IsMatch(
                 value.Trim(), @"^[0-9A-Fa-f]{64}$",
                 RegexOptions.CultureInvariant);
-        }
-
-        private static WebClient CreateClient()
-        {
-            var client = new WebClient();
-            client.Encoding = Encoding.UTF8;
-            client.Headers[HttpRequestHeader.UserAgent] =
-                "AeroMirror-Windows/" +
-                AppVersion.Display;
-            client.Headers[HttpRequestHeader.Accept] =
-                "application/vnd.github+json";
-            client.Headers["X-GitHub-Api-Version"] = "2026-03-10";
-            return client;
         }
 
         private static string ReadRepository()

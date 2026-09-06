@@ -1,10 +1,303 @@
 # Project state
 
-Last updated: 2026-08-31
+## Publication in progress — 0.12.30 session-only Close
+
+- On September 6 the user explicitly authorized GitHub publication after the
+  local candidate handoff. Publish one normal updater-visible review release
+  with exactly Setup, shell source, native corresponding source and checksums.
+  Physical acceptance stays pending; no local installation is authorized.
+- GitHub preflight confirmed public repository ID 1324108899,
+  `pyram1da/aeromirror`, default branch `main`, remote HEAD `01f4d60`, and no
+  existing .30 tag or Release. Public .22 is unchanged until publication.
+
+- Implemented D-018 with immutable native stream IDs and an HTTP-owner close
+  mailbox, separate from type-based cleanup. Prepared source is isolated at
+  `C:\Users\ivang\AppData\Local\Temp\a30-work`; the .27 native tree and
+  frozen .28/.29 installers remain untouched.
+- The Qt host carries the stream ID with SHOW, hides only after command
+  admission, and suppresses late SHOW for a dismissed stream. The shell matches
+  dismissal to its current native stream. Native result follows worker drain.
+- The continuity warning captures its process/managed/native identity and uses
+  the same Qt Close handler. A matching completion ends managed activity and
+  cancels that session's loss watchdog, even without the old stop log line.
+- Local Setup/payload/corresponding source are ready. Fifty loopback lifecycle
+  cycles, stale/replacement/stop races, exact packaged-shell regression gates,
+  native worker/core/Qt checks and all four non-installing Setup gates pass.
+  Two native builds and the extracted no-Git source rebuild produce the same
+  core. Runtime dependency and isolated self-test checks pass.
+- Hashes and evidence limits: releases/0.12.30/LOCAL_BUILD_REPORT.md. Installed
+  .28 and frozen .28/.29 artifacts were verified unchanged. No installation,
+  source push, tag, Release, settings reset or live Bonjour change was performed.
+- Next: clean exact-tag packaging, public four-asset verification and a
+  post-release build report, then physical iPhone Close/reconnect on both
+  windows, including lock-then-close. The codec/Z-order/Bonjour matrix remains pending. Do not
+  claim iOS disconnection from native results or loopback tests alone.
+
+Last updated: 2026-09-06
 
 This is the single current-state handoff for AeroMirror. Keep it concise and
 update it whenever release status, accepted tests, blockers, or the immediate
 next step changes.
+
+## Frozen previous candidate — 0.12.29 bounded update work
+
+- On September 6, after testing local 0.12.28, the user reported that everything
+  works and asked to continue. Record this as user-reported correction of the
+  normal-viewer black screen, not as completion of the enumerated codec,
+  mixed-window, second-PC or Bonjour physical matrix.
+- Frozen .28 installer/payload/source are preserved. Installed shell version
+  0.12.28.0 and its exact original hash were rechecked read-only. Local .29
+  changes bounded/cancellable release-metadata I/O and abandoned update work,
+  not native video, accepted gallery negotiation, geometry or Bonjour.
+- The live metadata check also confirmed the historical slug's redirect and
+  canonical-owner Setup URLs. Metadata now pins repository ID 1324108899;
+  exact canonical/historical asset paths retain all digest/URL checks.
+- Local .29 Setup is ready. Build, 15 isolated update transport/lifetime
+  scenarios, the optional real metadata GET, canonical/historical download
+  validation, renderer/UI/resilience/Bonjour/native-host contracts and all four
+  non-installing Setup gates pass. Final packaged-shell tests pass; see
+  releases/0.12.29/LOCAL_BUILD_REPORT.md for hashes and evidence limits.
+- No installation, source push, tag or Release was performed. Physical .29
+  settings/update workflows and the full codec/window/Bonjour matrix remain
+  pending. Broad receiver/installer decomposition is still staged, not complete.
+- At the .29 freeze, Caption Close remained the separate D-018 native task.
+  The .30 implementation above uses exact stream IDs, not the existing
+  type-based connection-removal mailbox or a whole-receiver restart.
+
+## Working local baseline — 0.12.28 audit and refactoring
+
+- The user reports 0.12.27 still opens black. Installed version/core equality
+  was verified and the September 6 log contains the failing session timeline.
+- Root cause is confirmed by the untouched 13:00 live HWND hierarchy: the
+  GStreamer child had the outer host's desktop coordinates and outer size,
+  placing it beyond the Qt surface. The shell's SHOW hook matched its renderer
+  title without checking that it was a top-level window.
+- The correction guards SHOW, lookup, saved placement and aspect-fit boundaries.
+  The installed 0.12.27 binary reproduces the displacement in an executable
+  regression; the corrected binary leaves the child untouched and still
+  restores the outer window. No native or gallery changes were needed.
+- Additional audit fixes: lifetime-owned manual-update callbacks/download
+  cleanup and acknowledgement of actual window-policy API results. See
+  `releases/0.12.28/AUDIT.md` for scope, evidence and deferred work.
+- Local 0.12.28 Setup and corresponding native source are ready. Managed,
+  packaged-shell, UI-boundary, update, Bonjour, native host/core/worker and Qt
+  surface checks pass, along with all four non-installing Setup gates.
+  Hashes and exact limits are in `releases/0.12.28/LOCAL_BUILD_REPORT.md`.
+- Physical follow-up: the user reports the local candidate works. The full
+  untouched H.265/H.264 and other enumerated physical rows remain unrecorded.
+  No build was installed or published by the agent. Broad receiver/installer
+  decomposition remains separate staged audit work.
+
+## Superseded local review candidate — 0.12.27
+
+- Scope: the physical 0.12.26 black normal viewer and inconsistent initial
+  Z-order. No Bonjour/service changes, gallery geometry changes, or publication.
+- Native change: the video HWND uses a dedicated Qt widget with a null paint
+  engine, PaintOnScreen, no system background, and no auto-fill. Qt no longer
+  owns painting that external Direct3D surface. The selected-sink-before-PLAYING
+  lifecycle remains intact.
+- Window placement: check the actual ordinary-window order after HWND_TOP;
+  only if another ordinary window remains above the viewer, recheck fullscreen
+  foreground content and use one synchronous TOPMOST/NOTOPMOST transaction.
+  Never request activation or retain topmost; defer behind fullscreen content.
+- Evidence: Qt 6.10.1 source documents that Windows ignores PaintOnScreen on
+  a base QWidget and requires a paintEngine override for an external DirectX
+  surface. This confirms a contract defect, not physical first-frame success.
+- Automated/build status: PASS. Managed build, ReceiverResilience, Bonjour,
+  AutomaticUpdate, NativeHost, NativeCore, NativeWorker and the exact production
+  hidden Windows/Qt surface test passed. Two clean builds and the extracted
+  no-Git source rebuild produced core SHA-256
+  `B3EC9500B3E5D8D69A4AD5A7FFA385891446FC1B573F97A1B04BC327806AF36F`.
+  The runtime dependency pass inspected 200 binaries and isolated self-test
+  passed from the Unicode workspace path. The 0.12.27 local Setup passes all
+  four non-installing checks; see its test plan for final artifact hashes.
+- Physical status: FAIL for the user-reported black initial normal viewer.
+  The other rows remain unaccepted. Retest untouched fresh H.265/H.264
+  starts, the reported Explorer Installer + AeroMirror + Instagram/Google
+  arrangement, fullscreen foreground protection, minimize/restore and gallery.
+  Do not accept readiness markers as visible pixels. Bonjour remains pending.
+- Cleanup: deleted six generated 0.12.20/0.12.24/0.12.25 Setup/review-payload
+  files (8,196,157 bytes); kept 0.12.22 and 0.12.26 installers, source archives,
+  source trees, runtime inputs, installed settings, keys and logs.
+  Also removed four disposable verification/extraction directories created in
+  this task (14,763,208 bytes), after the exact source archives and rebuilds
+  were verified. The current prepared build source is retained.
+- Publication: no publication authorized or performed. Public 0.12.22 remains
+  the recorded latest; no remote state was changed in this task.
+- Immediate next step: retained failed baseline for the 0.12.28 audit. Do not
+  publish it as a black-screen fix. Bonjour remains for a later real service stop.
+
+## Superseded local review candidate — 0.12.26
+
+- Scope: correct the fresh normal viewer that remained black in the physical
+  0.12.25 run and provide a safe user-reachable recovery when the external
+  Apple Bonjour service has exhausted its Windows restart actions and remains
+  stopped.
+- Video correction: each native renderer session owns a generation and bounded
+  operation lifetime. Fresh mirror pipelines wait in READY; Qt shows and
+  validates the real nonzero child HWND for the exact generation; libuxplay then
+  binds and commits only the selected codec sink; and only after that commit
+  does the selected pipeline enter PLAYING. If the real child HWND changes, the
+  selected pipeline moves through NULL -> new HWND -> READY -> fresh SHOW/READY
+  -> selected-sink bind/commit -> PLAYING. Start and handle replacement are
+  serialized, and the active renderer is not published before the exact
+  generation's READY/bind transition completes.
+- Lifetime boundary: render, bus, pause/resume, HLS, stop, and destroy work is
+  generation-checked. Stop/destroy invalidates the generation under the state
+  lock, flushes the old bus, and waits for operations that already retained the
+  old session. Stale callbacks cannot mutate or expose a replacement session;
+  post-Present expose is accepted only when the current lifecycle, READY, bound,
+  and Present generations all match.
+- Presentation boundary: this changes no outer-window geometry, fullscreen
+  state, gallery negotiation, decoder/sink selection policy, render rectangle,
+  crop, scale, or pixel content. The accepted one-device portrait gallery result
+  remains unchanged, and there is no synthetic resize or periodic redraw loop.
+- Bonjour recovery: startup and monitoring remain unelevated and never produce
+  an automatic administrator prompt. Only while the exact safely validated
+  Apple service is `Stopped`, the main network-status card exposes a contextual
+  **Запустить Bonjour** action. One explicit click launches at most one
+  allowlisted system service-start operation and at most one UAC confirmation.
+  The service object's trusted owner/configuration DACL and the full protected
+  Apple and Windows `sc.exe` path chains are revalidated before elevation.
+  Concurrent clicks are coalesced; cancel, identity change, or service failure
+  leaves the prerequisite stopped. A timed-out elevated command keeps the
+  one-flight latch closed until that exact process exit is confirmed for the
+  current AeroMirror process lifetime.
+- Discovery continuation: after the service reaches `Running`, the existing
+  bounded recovery latch resumes paired DNS-SD publication inside the same core
+  process and on the same listening ports. A correlated
+  `AEROMIRROR_DNSSD_READY` acknowledgement is still required before the receiver
+  is called ready; BLE remains supplemental.
+- Automated status: PASS. The managed build, Bonjour/firewall,
+  ReceiverResilience, AutomaticUpdate, NativeHost, NativeCore, and NativeWorker
+  suites pass. Two independent clean builds and the extracted no-Git
+  corresponding-source rebuild reproduce core SHA-256
+  `FAA8A1575EAC7C26BA41DF09A81EB08E03DE05A621FA3C504289EA8E98DAB84A`.
+  The staged 200-binary runtime passes isolated verification, and the exact
+  review payload, x64 Setup, embedded-input equality, and all four
+  non-installing Setup checks pass.
+- Physical status: FAIL for the reported untouched normal viewer and mixed
+  ordinary-window Z-order. On September 4 it still opened black, behind the
+  Explorer Installer and AeroMirror windows but above Instagram/Google.
+  The stopped-Bonjour physical row remains PENDING. The next candidate must
+  show the first normal
+  H.265 and H.264 frame without any move, resize, maximize, fullscreen, or tray
+  action. The stopped-Bonjour row must verify one explicit UAC prompt, no
+  automatic repeat, same-process/same-port DNS-SD recovery after success, and
+  iPhone visibility. Automated markers cannot replace either visible result.
+- Publication: no `v0.12.26` tag or GitHub Release exists, and publication is
+  not authorized. Public 0.12.22 remains the immutable updater-visible latest.
+- Immediate next step: retained as a failed comparison baseline; do not
+  publish it as a black-screen fix. Continue with the current candidate above.
+
+## Superseded local review candidate — 0.12.25
+
+- Scope: correct the physically observed black initial normal viewer at the
+  native child-HWND/D3D11 surface boundary. Do not change viewer geometry,
+  fullscreen state, media scale, crop, render rectangle, decoder, or pipeline
+  selection as a visual workaround.
+- Root-cause evidence: in the retained 0.12.24 physical session, H.265
+  selection, portrait CAPS, decoded sink buffers, and D3D11 pre-Present
+  callbacks were healthy from the first second. They continued for about 13
+  seconds while the viewer was visibly black. Fullscreen then made the current
+  stream visible, and Escape returned to the normal window without losing the
+  image. This locates the defect after decode at the embedded-surface lifecycle
+  boundary; the Present callback alone does not prove visible pixels.
+- Change: the native lifecycle owns each SHOW generation. Qt acknowledges READY
+  only after it validates the visible nonzero child HWND. The first Present
+  from the selected D3D11 sink atomically posts that generation to Qt, whose
+  later turn asks only the retained selected sink to redraw through
+  `gst_video_overlay_expose()`. Show/WindowStateChange may coalesce a re-expose
+  only for an already acknowledged surface; HIDE invalidates older work.
+- Handle/lifetime resilience: WinIdChange uses bounded retry, suppresses SHOW
+  until all current overlay sinks are rebound to the replacement HWND, and then
+  starts a fresh native generation. The host Present proof remains installed
+  alongside the failure-recovery pad probe. GUI-callable surface APIs do not
+  write through a receiver logger that may already be destroyed at shutdown.
+- Foreground behavior: a new normal viewer rises once over an ordinary window
+  without taking keyboard focus. If an external foreground window covers its
+  complete monitor, AeroMirror stays behind it and defers an initial automatic
+  fullscreen request. No branch creates a persistent topmost window or records
+  a process name/window title.
+- Safety boundary: there is no synchronous cross-thread `SendMessage`, outer-
+  window resize, synthetic fullscreen, render rectangle, crop, scale, pixel
+  inspection, pipeline reset, periodic refresh loop, or expose inside the
+  Present callback. SHOW/EXPOSE/FOREGROUND markers describe only lifecycle and
+  request outcomes; requested expose is not physical presentation proof.
+- Automated status: PASS. Two independent clean Qt 6.10.1/GStreamer 1.28.5
+  builds and the extracted no-Git corresponding-source rebuild reproduce core
+  SHA-256
+  `F4824A375AFCD5593D1AA2E58547703E38F211380ACF71095CB8A08929ADB0E9`.
+  Runtime static verification passes from an ASCII path, and execution/self-test
+  passes from a Unicode path. The managed build, NativeHost, NativeCore,
+  NativeWorker, ReceiverResilience, Bonjour/firewall, AutomaticUpdate, exact
+  review payload, and Setup gates pass. Corresponding-source materialization
+  uses an isolated temporary Git index/object store and reads the real repository
+  objects only as alternates, so it does not write build-only objects there.
+- Physical status: FAIL for the primary reported case. A fresh normal viewer
+  was still black; entering fullscreen made the current stream visible, and
+  returning to normal preserved it. This confirms that the 0.12.25
+  first-Present expose rendezvous was insufficient on the affected system.
+  The remaining restore and foreground rows were not accepted for this
+  superseded candidate.
+- Publication: no `v0.12.25` tag or GitHub Release exists, and publication is
+  not authorized. Public 0.12.22 remains the immutable updater-visible latest.
+- Disposition: do not publish or relabel 0.12.25. Its retained failure evidence
+  leads to the stricter READY -> selected-sink bind -> PLAYING lifecycle in the
+  0.12.26 local candidate above.
+
+## Previous local diagnostic candidate — 0.12.24
+
+- Scope: determine why Photos changes a portrait `998x2160` mirror into the
+  `3840x2160 aux=0x0` presentation canvas. The user explicitly rejected a
+  viewer-shape workaround: the PC window must remain unchanged while the native
+  negotiation and decoded-frame geometry are tested.
+- Controlled variable: only the `4k60` display request changes from
+  `3840x2160@60` to `998x2160@60`. H.265, the 60 fps request, Apple TV model,
+  feature masks, rotation policy, renderer selection, sink scale, and managed
+  window behavior remain unchanged. This phone-specific value is a diagnostic
+  A/B and is not a proposed public default.
+- Native evidence: `/info` emits one privacy-safe receiver-advertised display
+  marker. Sender header geometry keeps an authoritative sender-side generation.
+  Independently, a non-mutating sink-pad probe records every actual CAPS event
+  with a sink-local `caps_seq`, uses one first-buffer snapshot only when no CAPS
+  event was observed, and reads `GstVideoCropMeta` on the first buffer after
+  CAPS, on metadata changes, and every 120 buffers. Missing CAPS is evidence;
+  no one-to-one sender-generation-to-sink-sequence mapping is claimed. The
+  probe records no plist body, client identifier, frame bytes, or sampled
+  pixels and inserts no crop, scale, capsfilter, or render rectangle.
+- 0.12.23 disposition: its local 4:5 outer-window compensation was rejected and
+  removed. Any previously generated 0.12.23 Setup or payload is superseded and
+  is not approved for installation or publication.
+- Automated status: PASS for the exact local candidate. Two independent clean
+  native builds and the extracted 149-entry no-Git corresponding-source build
+  reproduce core SHA-256
+  `82B579693B60E9A1865E15BE314592838A0D3918DD1AFDF02565873213CE9397`.
+  Native contracts/lifecycle, the managed build and focused regression suites,
+  isolated ASCII/Unicode runtime self-tests, pinned-runtime loader test, exact
+  review payload, x64 Setup, embedded-input equality, and all four non-
+  installing Setup self-checks pass.
+- Physical status: the reported iPhone now presents the gallery photo correctly
+  with the portrait `998x2160@60` request, and the user accepted the visible
+  result. The retained log independently records portrait `/info`, sender, and
+  sink geometry. This is one-device evidence for the negotiation hypothesis,
+  not proof across iPhone/iOS/GPU combinations. The strict untouched-window run
+  was obstructed by the separate black-initial-surface defect: fullscreen made
+  the already-decoded stream visible before the gallery result was inspected.
+- Interpretation boundary: a Photos transition to `998x2160 aux=0x0` would
+  support display negotiation as the cause for this phone. A continued
+  `3840x2160` canvas would show that the portrait display request is ignored or
+  insufficient. Neither result alone proves a general gallery fix.
+- Known separate issues: the initial normal viewer can present black until a
+  fullscreen resize refreshes its D3D11 surface; Caption Close still uses the
+  published minimize-equivalent behavior. Neither lifecycle issue is part of
+  this negotiation probe.
+- Publication: no `v0.12.23` or `v0.12.24` tag or GitHub Release exists, and
+  publication is not authorized. Public 0.12.22 and its four assets remain
+  immutable and updater-visible latest.
+- Disposition: its one-device gallery result is retained unchanged in 0.12.26;
+  the 0.12.25 surface attempt failed physically, and the stricter 0.12.26
+  selected-sink-before-PLAYING candidate and physical plan are current above.
 
 ## Latest public review release — 0.12.22
 

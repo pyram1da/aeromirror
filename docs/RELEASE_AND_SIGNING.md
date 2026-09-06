@@ -1,5 +1,20 @@
 # Release, update, and signing plan
 
+## 0.12.30 publication
+
+The session-only Close candidate passed local packaging and test gates. On
+September 6 the user explicitly authorized its normal-channel review publication
+before the remaining physical matrix. Local pre-release hashes are retained in
+`releases/0.12.30/LOCAL_BUILD_REPORT.md`; public exact-tag evidence belongs in
+`releases/0.12.30/BUILD_REPORT.md`. Publication does not imply physical acceptance
+or authorize changing the installed receiver.
+
+Prepared native-source packaging also supports pinned linked Git worktrees:
+resolve Git's actual object store while retaining the isolated temporary index,
+exact modified-path allowlist and patch/source hash checks. The extracted source
+must rebuild without Git metadata. Publication still uses a clean exact tag
+through `release.ps1`; linked-worktree support does not relax that gate.
+
 ## Supported Windows versions
 
 The x64 build targets:
@@ -103,6 +118,18 @@ GitHub account or access token for a public repository. It displays the
 release name and curated release body before the user decides whether to
 update.
 
+Local .29 also bounds this metadata response to 1 MiB and one 30-second
+whole-transfer deadline, with no automatic redirects. These are transport
+budgets, not an alternative to the exact tag, asset URL and SHA-256 gates below.
+Owner cancellation discards unfinished metadata/download work without changing
+the normal Release channel or launching Setup.
+
+The .29 metadata endpoint is exactly
+`https://api.github.com/repositories/1324108899/releases/latest`. This ID was
+confirmed through GitHub's public API for `pyram1da/aeromirror`; the historical
+slug above redirects there. Keep the local compatibility marker unchanged, but
+do not depend on an unrestricted metadata redirect to resolve repository identity.
+
 For a working automatic update, every GitHub Release must include:
 
 - a semantic tag such as `v0.12.7`;
@@ -116,7 +143,10 @@ example `v0.12.7`. It rejects an unprefixed, two-part, four-part, suffixed, or
 otherwise malformed value. Do not rely on a tag such
 as `v0.12.7-beta` being normalized into the public update channel.
 
-For a candidate version `X.Y.Z`, the accepted initial download URL is exactly
+For a candidate version `X.Y.Z`, local .29 accepts exactly these two confirmed
+repository names in the initial download URL:
+`https://github.com/pyram1da/aeromirror/releases/download/vX.Y.Z/AeroMirror-Setup-X.Y.Z.exe`
+or the historical
 `https://github.com/Nadejny/aeromirror/releases/download/vX.Y.Z/AeroMirror-Setup-X.Y.Z.exe`.
 The updater rejects user information, query/fragment text, a non-default port,
 HTTP, another repository, or a differently named executable. Redirects are

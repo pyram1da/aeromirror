@@ -244,19 +244,20 @@ index d65949178e1af9c5ea9d65d523e92df2f755de64..ab3d8a448db04eef51797a71c7e20eb8
      return app.exec();
  }
 diff --git a/src/mainwindow.cpp b/src/mainwindow.cpp
-index aeb732d8cf4c217188007a2079f81cb77d1bf105..6959b9b0317bac54a92715edbc2363f50e076249 100644
+index aeb732d8cf4c217188007a2079f81cb77d1bf105..ff2fcfc3515bfe044fe598b3cfddaef7d11d49bb 100644
 --- a/src/mainwindow.cpp
 +++ b/src/mainwindow.cpp
-@@ -1,6 +1,8 @@
+@@ -1,6 +1,9 @@
  #include "mainwindow.h"
  #include "airplayworker.h"
  #include "mdns_responder.hpp"
 +#include <algorithm>
 +#include <cstdio>
++#include <cstring>
  #include <windows.h>
  #include <winsvc.h>
  
-@@ -11,11 +13,14 @@
+@@ -11,11 +14,14 @@
  #include <QDesktopServices>
  #include <QDebug>
  #include <QDir>
@@ -271,7 +272,7 @@ index aeb732d8cf4c217188007a2079f81cb77d1bf105..6959b9b0317bac54a92715edbc2363f5
  #include <QPushButton>
  #include <QProcessEnvironment>
  #include <QSettings>
-@@ -27,6 +32,10 @@
+@@ -27,6 +33,10 @@
  #include <QUrl>
  #include <QVBoxLayout>
  #include <QTextStream>
@@ -282,11 +283,84 @@ index aeb732d8cf4c217188007a2079f81cb77d1bf105..6959b9b0317bac54a92715edbc2363f5
  
  struct RenameData {
      DWORD pid;
-@@ -54,17 +63,290 @@ BOOL CALLBACK EnumWindowsProcRename(HWND hwnd, LPARAM lParam) {
+@@ -54,17 +64,726 @@ BOOL CALLBACK EnumWindowsProcRename(HWND hwnd, LPARAM lParam) {
      return TRUE;
  }
  
 -MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
++static bool isExternalFullscreenForeground(
++        HWND foreground,
++        HWND rendererHost) {
++    if (!foreground || foreground == rendererHost ||
++        foreground == GetDesktopWindow() ||
++        foreground == GetShellWindow() ||
++        !IsWindowVisible(foreground) || IsIconic(foreground)) {
++        return false;
++    }
++    wchar_t className[64] = {};
++    if (GetClassNameW(foreground, className,
++                      static_cast<int>(std::size(className))) > 0 &&
++        (!lstrcmpW(className, L"Progman") ||
++         !lstrcmpW(className, L"WorkerW") ||
++         !lstrcmpW(className, L"Shell_TrayWnd"))) {
++        return false;
++    }
++    DWORD foregroundPid = 0;
++    GetWindowThreadProcessId(foreground, &foregroundPid);
++    if (!foregroundPid || foregroundPid == GetCurrentProcessId()) {
++        return false;
++    }
++    const LONG_PTR style = GetWindowLongPtrW(foreground, GWL_STYLE);
++    if (style & WS_CHILD) {
++        return false;
++    }
++    RECT clientRect = {0};
++    POINT clientTopLeft = {0, 0};
++    POINT clientBottomRight = {0, 0};
++    MONITORINFO monitorInfo = {};
++    monitorInfo.cbSize = sizeof(monitorInfo);
++    HMONITOR monitor = MonitorFromWindow(
++        foreground, MONITOR_DEFAULTTONULL);
++    if (!monitor || !GetClientRect(foreground, &clientRect) ||
++        clientRect.right <= clientRect.left ||
++        clientRect.bottom <= clientRect.top) {
++        return false;
++    }
++    clientTopLeft.x = clientRect.left;
++    clientTopLeft.y = clientRect.top;
++    clientBottomRight.x = clientRect.right;
++    clientBottomRight.y = clientRect.bottom;
++    if (!ClientToScreen(foreground, &clientTopLeft) ||
++        !ClientToScreen(foreground, &clientBottomRight) ||
++        !GetMonitorInfoW(monitor, &monitorInfo)) {
++        return false;
++    }
++    constexpr LONG tolerance = 2;
++    const RECT &screen = monitorInfo.rcMonitor;
++    return clientTopLeft.x <= screen.left + tolerance &&
++        clientTopLeft.y <= screen.top + tolerance &&
++        clientBottomRight.x >= screen.right - tolerance &&
++        clientBottomRight.y >= screen.bottom - tolerance;
++}
++
++static bool hasOrdinaryWindowAbove(HWND host) {
++    unsigned int remaining = 512;
++    for (HWND other = GetWindow(host, GW_HWNDPREV); other;
++         other = GetWindow(other, GW_HWNDPREV)) {
++        if (!remaining--) {
++            return true;
++        }
++        if (!IsWindowVisible(other) || IsIconic(other) ||
++            other == GetDesktopWindow() || other == GetShellWindow() ||
++            GetAncestor(other, GA_ROOTOWNER) == host ||
++            (GetWindowLongPtrW(other, GWL_EXSTYLE) & WS_EX_TOPMOST)) {
++            continue;
++        }
++        return true;
++    }
++    return false;
++}
++
 +RendererHostWindow::RendererHostWindow(QWidget *parent)
 +    : QMainWindow(parent) {
 +    setWindowTitle("AeroMirror");
@@ -294,32 +368,81 @@ index aeb732d8cf4c217188007a2079f81cb77d1bf105..6959b9b0317bac54a92715edbc2363f5
 +    resize(900, 600);
 +    setMinimumSize(480, 320);
 +
-+    m_videoSurface = new QWidget(this);
++    m_videoSurface = new RendererVideoSurface(this);
 +    m_videoSurface->setObjectName("aeromirrorVideoSurface");
-+    m_videoSurface->setAttribute(Qt::WA_NativeWindow);
-+    m_videoSurface->setAttribute(Qt::WA_OpaquePaintEvent);
 +    m_videoSurface->setFocusPolicy(Qt::StrongFocus);
-+    QPalette palette = m_videoSurface->palette();
-+    palette.setColor(QPalette::Window, Qt::black);
-+    m_videoSurface->setPalette(palette);
-+    m_videoSurface->setAutoFillBackground(true);
 +    m_videoSurface->installEventFilter(this);
 +    installEventFilter(this);
 +    qApp->installEventFilter(this);
 +    setCentralWidget(m_videoSurface);
 +
 +    setAttribute(Qt::WA_NativeWindow);
-+    (void) winId();
-+    (void) m_videoSurface->winId();
++    m_controlHandle = static_cast<uintptr_t>(winId());
++    m_renderHandle = static_cast<uintptr_t>(m_videoSurface->winId());
 +    hide();
 +}
 +
 +uintptr_t RendererHostWindow::renderHandle() const {
-+    return static_cast<uintptr_t>(m_videoSurface->winId());
++    return m_renderHandle;
 +}
 +
 +uintptr_t RendererHostWindow::controlHandle() const {
-+    return static_cast<uintptr_t>(winId());
++    return m_controlHandle;
++}
++
++void RendererHostWindow::scheduleHandleRebind(unsigned int attempt) {
++    if (m_handleRebindScheduled || m_rebindingHandles ||
++        !m_controlHandle || !m_renderHandle || !m_videoSurface) {
++        return;
++    }
++    m_handleRebindScheduled = true;
++    const int delayMs = attempt == 0 ? 0 : 25;
++    QTimer::singleShot(delayMs, this, [this, attempt]() {
++        m_handleRebindScheduled = false;
++        if (m_rebindingHandles || !m_videoSurface) {
++            return;
++        }
++
++        m_rebindingHandles = true;
++        const uintptr_t previousControl = m_controlHandle;
++        const uintptr_t previousRender = m_renderHandle;
++        const uintptr_t currentControl =
++            static_cast<uintptr_t>(winId());
++        const uintptr_t currentRender =
++            static_cast<uintptr_t>(m_videoSurface->winId());
++        const bool valid = currentControl && currentRender &&
++            IsWindow(reinterpret_cast<HWND>(currentControl)) &&
++            IsWindow(reinterpret_cast<HWND>(currentRender));
++        if (valid &&
++            (currentControl != previousControl ||
++             currentRender != previousRender)) {
++            m_controlHandle = currentControl;
++            m_renderHandle = currentRender;
++            m_showGeneration = 0;
++            m_hostReadyAcknowledgedGeneration = 0;
++            m_readyRetryPendingGeneration = 0;
++            m_surfaceRefreshPendingGeneration = 0;
++            set_video_host_handles(currentRender, currentControl);
++            fprintf(stdout,
++                    "\nAEROMIRROR_VIDEO_HOST_REBIND result=requested "
++                    "old-render=%llu new-render=%llu "
++                    "old-control=%llu new-control=%llu\n",
++                    static_cast<unsigned long long>(previousRender),
++                    static_cast<unsigned long long>(currentRender),
++                    static_cast<unsigned long long>(previousControl),
++                    static_cast<unsigned long long>(currentControl));
++            fflush(stdout);
++        } else if (!valid && attempt >= 60) {
++            fprintf(stdout,
++                    "\nAEROMIRROR_VIDEO_HOST_REBIND result=failed "
++                    "reason=invalid-window\n");
++            fflush(stdout);
++        }
++        m_rebindingHandles = false;
++        if (!valid && attempt < 60) {
++            scheduleHandleRebind(attempt + 1);
++        }
++    });
 +}
 +
 +void RendererHostWindow::emitFullscreenMarker(
@@ -343,6 +466,20 @@ index aeb732d8cf4c217188007a2079f81cb77d1bf105..6959b9b0317bac54a92715edbc2363f5
 +        const char *source) {
 +    ++m_fullscreenGeneration;
 +    const bool before = isFullScreen();
++    const bool initialRequest =
++        source && std::strcmp(source, "initial") == 0;
++    HWND foreground = GetForegroundWindow();
++    HWND host = reinterpret_cast<HWND>(controlHandle());
++    if (desired && initialRequest &&
++        (m_connectionForegroundDeferred ||
++         isExternalFullscreenForeground(foreground, host))) {
++        m_connectionForegroundDeferred = false;
++        emitFullscreenMarker(desired, before, "deferred", source);
++        return;
++    }
++    if (initialRequest) {
++        m_connectionForegroundDeferred = false;
++    }
 +    if (desired && !isVisible()) {
 +        emitFullscreenMarker(desired, before, "unavailable", source);
 +        return;
@@ -359,7 +496,6 @@ index aeb732d8cf4c217188007a2079f81cb77d1bf105..6959b9b0317bac54a92715edbc2363f5
 +            m_normalGeometry = normalCandidate;
 +            m_hasNormalGeometry = true;
 +        }
-+        HWND host = reinterpret_cast<HWND>(controlHandle());
 +        if (host && IsWindow(host)) {
 +            m_normalWindowStyle = GetWindowLongPtrW(host, GWL_STYLE) &
 +                ~(static_cast<LONG_PTR>(WS_MINIMIZE) |
@@ -433,20 +569,248 @@ index aeb732d8cf4c217188007a2079f81cb77d1bf105..6959b9b0317bac54a92715edbc2363f5
 +    }
 +}
 +
-+void RendererHostWindow::showRenderer() {
++void RendererHostWindow::showRenderer(uint64_t generation, uint64_t sessionId) {
++    if (!generation || (sessionId && sessionId == m_dismissedSessionId)) {
++        return;
++    }
++    m_sessionId = sessionId;
++    m_showGeneration = generation;
++    m_hostReadyAcknowledgedGeneration = 0;
++    m_readyRetryPendingGeneration = 0;
++    m_surfaceRefreshPendingGeneration = 0;
++    HWND host = reinterpret_cast<HWND>(controlHandle());
++    HWND priorForeground = GetForegroundWindow();
++    const bool priorFullscreen = isExternalFullscreenForeground(
++        priorForeground, host);
++    setAttribute(Qt::WA_ShowWithoutActivating, true);
 +    if (isFullScreen()) {
 +        showFullScreen();
 +    } else {
 +        showNormal();
 +    }
-+    raise();
-+    activateWindow();
-+    if (m_videoSurface) {
-+        m_videoSurface->setFocus(Qt::ActiveWindowFocusReason);
++    HWND currentForeground = GetForegroundWindow();
++    HWND protectedForeground = nullptr;
++    if (isExternalFullscreenForeground(currentForeground, host)) {
++        protectedForeground = currentForeground;
++    } else if (priorFullscreen && priorForeground &&
++               IsWindow(priorForeground)) {
++        protectedForeground = priorForeground;
 +    }
++    const bool deferActivation = protectedForeground != nullptr;
++    m_connectionForegroundDeferred = deferActivation;
++
++    BOOL placementApplied = FALSE;
++    bool usedFallback = false;
++    constexpr UINT placementFlags =
++        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE |
++        SWP_NOOWNERZORDER | SWP_SHOWWINDOW;
++    if (host && IsWindow(host)) {
++        const BOOL nonTopmost = SetWindowPos(
++            host, HWND_NOTOPMOST, 0, 0, 0, 0, placementFlags);
++        if (deferActivation && nonTopmost) {
++            const bool foregroundTopmost =
++                (GetWindowLongPtrW(
++                    protectedForeground, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
++            placementApplied = foregroundTopmost
++                ? SetWindowPos(
++                    host, HWND_BOTTOM, 0, 0, 0, 0,
++                    placementFlags)
++                : SetWindowPos(
++                    host, protectedForeground, 0, 0, 0, 0,
++                    placementFlags);
++        } else if (!deferActivation && nonTopmost) {
++            placementApplied = SetWindowPos(
++                host, HWND_TOP, 0, 0, 0, 0, placementFlags);
++            // A background HWND_TOP call can succeed without passing other
++            // applications. Make one synchronous topmost/demotion transaction
++            // only if ordinary windows still cover us; never retain topmost.
++            if (placementApplied && hasOrdinaryWindowAbove(host)) {
++                usedFallback = true;
++                const HWND latestForeground = GetForegroundWindow();
++                if (isExternalFullscreenForeground(latestForeground, host)) {
++                    m_connectionForegroundDeferred = true;
++                    placementApplied = SetWindowPos(
++                        host, HWND_BOTTOM, 0, 0, 0, 0, placementFlags);
++                } else {
++                    const BOOL promoted = SetWindowPos(
++                        host, HWND_TOPMOST, 0, 0, 0, 0, placementFlags);
++                    const BOOL demoted = SetWindowPos(
++                        host, HWND_NOTOPMOST, 0, 0, 0, 0, placementFlags);
++                    placementApplied = promoted && demoted &&
++                        !hasOrdinaryWindowAbove(host);
++                }
++            }
++        }
++        if (!placementApplied) {
++            usedFallback = true;
++            if (m_connectionForegroundDeferred) {
++                placementApplied = SetWindowPos(
++                    host, HWND_BOTTOM, 0, 0, 0, 0, placementFlags);
++            } else {
++                const BOOL retryNonTopmost = SetWindowPos(
++                    host, HWND_NOTOPMOST, 0, 0, 0, 0, placementFlags);
++                if (retryNonTopmost) {
++                    placementApplied = SetWindowPos(
++                        host, HWND_TOP, 0, 0, 0, 0, placementFlags);
++                }
++            }
++        }
++        if (placementApplied &&
++            (GetWindowLongPtrW(host, GWL_EXSTYLE) & WS_EX_TOPMOST)) {
++            usedFallback = true;
++            placementApplied = SetWindowPos(
++                host,
++                m_connectionForegroundDeferred ? HWND_BOTTOM : HWND_NOTOPMOST,
++                0, 0, 0, 0, placementFlags);
++            if (placementApplied && !m_connectionForegroundDeferred) {
++                placementApplied = SetWindowPos(
++                    host, HWND_TOP, 0, 0, 0, 0, placementFlags);
++            }
++        }
++        if (GetWindowLongPtrW(host, GWL_EXSTYLE) & WS_EX_TOPMOST) {
++            ShowWindow(host, SW_HIDE);
++            placementApplied = FALSE;
++        }
++        if (placementApplied && !m_connectionForegroundDeferred &&
++            hasOrdinaryWindowAbove(host)) {
++            placementApplied = FALSE;
++        }
++    }
++    fprintf(stdout,
++            "\nAEROMIRROR_VIDEO_HOST_FOREGROUND result=%s "
++            "reason=%s fallback=%d\n",
++            placementApplied
++                ? (m_connectionForegroundDeferred ? "deferred" : "raised")
++                : "failed",
++            m_connectionForegroundDeferred
++                ? "fullscreen-foreground" : "ordinary-foreground",
++            usedFallback ? 1 : 0);
++    fflush(stdout);
++    queueRendererReady(generation);
 +}
 +
-+void RendererHostWindow::hideRenderer() {
++void RendererHostWindow::queueRendererReady(
++        uint64_t generation,
++        unsigned int attempt) {
++    if (!generation || generation != m_showGeneration ||
++        m_hostReadyAcknowledgedGeneration == generation ||
++        m_readyRetryPendingGeneration == generation) {
++        return;
++    }
++    constexpr unsigned int maximumAttempts = 60;
++    const int delayMs = attempt == 0 ? 0 : 25;
++    m_readyRetryPendingGeneration = generation;
++    QTimer::singleShot(delayMs, this, [this, generation, attempt]() {
++        if (m_readyRetryPendingGeneration == generation) {
++            m_readyRetryPendingGeneration = 0;
++        }
++        if (generation != m_showGeneration ||
++            m_hostReadyAcknowledgedGeneration == generation ||
++            !m_videoSurface) {
++            return;
++        }
++        HWND host = reinterpret_cast<HWND>(controlHandle());
++        HWND surface = reinterpret_cast<HWND>(renderHandle());
++        RECT client = {0};
++        const BOOL visible = isVisible() && host && !IsIconic(host) &&
++            surface && IsWindowVisible(surface);
++        const BOOL hasClient = surface && GetClientRect(surface, &client);
++        const LONG width = hasClient ? client.right - client.left : 0;
++        const LONG height = hasClient ? client.bottom - client.top : 0;
++        const bool ready = visible && width > 0 && height > 0;
++        if (!ready && attempt < maximumAttempts) {
++            queueRendererReady(generation, attempt + 1);
++            return;
++        }
++        int hostAcknowledged = 0;
++        if (ready) {
++            hostAcknowledged = notify_video_host_shown(
++                renderHandle(),
++                static_cast<unsigned int>(width),
++                static_cast<unsigned int>(height),
++                static_cast<unsigned long long>(generation));
++        }
++        if (hostAcknowledged) {
++            m_hostReadyAcknowledgedGeneration = generation;
++        } else if (ready && attempt < maximumAttempts) {
++            queueRendererReady(generation, attempt + 1);
++            return;
++        }
++        fprintf(stdout,
++                "\nAEROMIRROR_VIDEO_HOST_SHOW result=%s generation=%llu "
++                "visible=%d client=%ldx%ld ack=%s\n",
++                ready ? "ready" : "invalid-surface",
++                static_cast<unsigned long long>(generation),
++                visible ? 1 : 0,
++                width,
++                height,
++                hostAcknowledged ? "accepted" : "unavailable");
++        fflush(stdout);
++    });
++}
++
++void RendererHostWindow::queueRendererExpose(
++        uint64_t generation,
++        unsigned int attempt) {
++    if (!generation || generation != m_showGeneration) {
++        return;
++    }
++    constexpr unsigned int maximumAttempts = 60;
++    const int delayMs = attempt == 0 ? 0 : 25;
++    QTimer::singleShot(delayMs, this, [this, generation, attempt]() {
++        if (generation != m_showGeneration ||
++            !m_videoSurface) {
++            return;
++        }
++        HWND host = reinterpret_cast<HWND>(controlHandle());
++        HWND surface = reinterpret_cast<HWND>(renderHandle());
++        RECT client = {0};
++        const BOOL visible = isVisible() && host && !IsIconic(host) &&
++            surface && IsWindowVisible(surface);
++        const BOOL hasClient = surface && GetClientRect(surface, &client);
++        const LONG width = hasClient ? client.right - client.left : 0;
++        const LONG height = hasClient ? client.bottom - client.top : 0;
++        if (!visible || width <= 0 || height <= 0) {
++            if (attempt < maximumAttempts) {
++                queueRendererExpose(generation, attempt + 1);
++                return;
++            }
++            const int abandoned = abandon_video_host_surface_expose(
++                static_cast<unsigned long long>(generation));
++            fprintf(stdout,
++                    "\nAEROMIRROR_VIDEO_HOST_EXPOSE result=deferred "
++                    "generation=%llu attempts=%u rearmed=%d\n",
++                    static_cast<unsigned long long>(generation),
++                    attempt,
++                    abandoned ? 1 : 0);
++            fflush(stdout);
++            return;
++        }
++        const int exposed = expose_video_host_surface(
++            renderHandle(),
++            static_cast<unsigned int>(width),
++            static_cast<unsigned int>(height),
++            static_cast<unsigned long long>(generation));
++        fprintf(stdout,
++                "\nAEROMIRROR_VIDEO_HOST_EXPOSE result=%s "
++                "generation=%llu client=%ldx%ld trigger=present-ready\n",
++                exposed ? "requested" : "rejected",
++                static_cast<unsigned long long>(generation),
++                width,
++                height);
++        fflush(stdout);
++    });
++}
++
++void RendererHostWindow::hideRenderer(uint64_t generation) {
++    if (!generation) {
++        return;
++    }
++    m_showGeneration = generation;
++    m_hostReadyAcknowledgedGeneration = 0;
++    m_readyRetryPendingGeneration = 0;
++    m_surfaceRefreshPendingGeneration = 0;
++    m_connectionForegroundDeferred = false;
 +    applyFullscreenState(false, "lifecycle");
 +    hide();
 +}
@@ -463,11 +827,22 @@ index aeb732d8cf4c217188007a2079f81cb77d1bf105..6959b9b0317bac54a92715edbc2363f5
 +
 +    switch (nativeMessage->message) {
 +    case AEROMIRROR_WM_RENDERER_SHOW:
-+        showRenderer();
++        showRenderer(static_cast<uint64_t>(nativeMessage->wParam),
++                     static_cast<uint64_t>(nativeMessage->lParam));
 +        if (result) *result = 0;
 +        return true;
 +    case AEROMIRROR_WM_RENDERER_HIDE:
-+        hideRenderer();
++        hideRenderer(static_cast<uint64_t>(nativeMessage->wParam));
++        if (result) *result = 0;
++        return true;
++    case AEROMIRROR_WM_RENDERER_CLOSE_SESSION:
++        closeSession(static_cast<uint64_t>(nativeMessage->wParam),
++                     "continuity-close");
++        if (result) *result = 0;
++        return true;
++    case AEROMIRROR_WM_RENDERER_EXPOSE:
++        queueRendererExpose(
++            static_cast<uint64_t>(nativeMessage->wParam));
 +        if (result) *result = 0;
 +        return true;
 +    case AEROMIRROR_WM_RENDERER_FULLSCREEN_SET: {
@@ -511,6 +886,36 @@ index aeb732d8cf4c217188007a2079f81cb77d1bf105..6959b9b0317bac54a92715edbc2363f5
 +    QWidget *target = qobject_cast<QWidget *>(watched);
 +    const bool rendererTarget = target &&
 +        (target == this || target == m_videoSurface || isAncestorOf(target));
++    const bool lifecycleTarget = target &&
++        (target == this || target == m_videoSurface);
++    if (lifecycleTarget && event &&
++        event->type() == QEvent::WinIdChange) {
++        scheduleHandleRebind();
++    } else if (lifecycleTarget && event &&
++               (event->type() == QEvent::Show ||
++                event->type() == QEvent::WindowStateChange) &&
++               m_showGeneration && isVisible() && !isMinimized()) {
++        const uint64_t generation = m_showGeneration;
++        if (m_surfaceRefreshPendingGeneration != generation) {
++            const bool reexpose =
++                m_hostReadyAcknowledgedGeneration == generation;
++            m_surfaceRefreshPendingGeneration = generation;
++            QTimer::singleShot(25, this, [this, generation, reexpose]() {
++                if (m_surfaceRefreshPendingGeneration == generation) {
++                    m_surfaceRefreshPendingGeneration = 0;
++                }
++                if (generation != m_showGeneration || !isVisible() ||
++                    isMinimized()) {
++                    return;
++                }
++                queueRendererReady(generation);
++                if (reexpose) {
++                    request_video_host_surface_expose(
++                        static_cast<unsigned long long>(generation));
++                }
++            });
++        }
++    }
 +    if (rendererTarget && event && event->type() == QEvent::KeyPress) {
 +        QKeyEvent *keyEvent = static_cast<QKeyEvent *>(event);
 +        if (keyEvent->key() == Qt::Key_Escape && isFullScreen()) {
@@ -530,12 +935,44 @@ index aeb732d8cf4c217188007a2079f81cb77d1bf105..6959b9b0317bac54a92715edbc2363f5
 +}
 +
 +void RendererHostWindow::closeEvent(QCloseEvent *event) {
++    event->ignore(); /* The receiver owns this reusable host. */
++    closeSession(m_sessionId, "caption-close");
++}
++
++void RendererHostWindow::closeSession(uint64_t sessionId, const char *source) {
++    if (!sessionId || sessionId != m_sessionId) {
++        fprintf(stdout,
++            "\nAEROMIRROR_COMMAND_REJECTED command=close-session "
++            "session=%llu reason=stale\n",
++            static_cast<unsigned long long>(sessionId));
++        fflush(stdout);
++        return;
++    }
++    if (sessionId == m_dismissedSessionId ||
++        m_closeRequestSequence == UINT64_MAX) return;
++    const uint64_t requestId = ++m_closeRequestSequence;
++    if (!request_mirroring_session_close(sessionId, requestId)) {
++        fprintf(stdout,
++            "\nAEROMIRROR_SESSION_CLOSE session=%llu request=%llu "
++            "result=unavailable source=%s\n",
++            static_cast<unsigned long long>(sessionId),
++            static_cast<unsigned long long>(requestId), source);
++        fflush(stdout);
++        return; /* Never hide a still-running phone on admission failure. */
++    }
++    m_dismissedSessionId = sessionId;
++    m_hostReadyAcknowledgedGeneration = 0;
++    m_readyRetryPendingGeneration = 0;
++    m_surfaceRefreshPendingGeneration = 0;
 +    applyFullscreenState(false, "lifecycle");
 +    fprintf(stdout,
-+            "\nAEROMIRROR_VIDEO_WINDOW state=minimized source=caption-close\n");
++            "\nAEROMIRROR_VIDEO_WINDOW state=closed source=%s "
++            "session=%llu request=%llu\n",
++            source,
++            static_cast<unsigned long long>(sessionId),
++            static_cast<unsigned long long>(requestId));
 +    fflush(stdout);
-+    showMinimized();
-+    event->ignore();
++    hide();
 +}
 +
 +MainWindow::MainWindow(
@@ -576,7 +1013,7 @@ index aeb732d8cf4c217188007a2079f81cb77d1bf105..6959b9b0317bac54a92715edbc2363f5
          return;
      }
  }
-@@ -72,6 +354,11 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
+@@ -72,6 +791,11 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
  MainWindow::~MainWindow() {
      m_quitting = true;
      stopServer();
@@ -588,7 +1025,7 @@ index aeb732d8cf4c217188007a2079f81cb77d1bf105..6959b9b0317bac54a92715edbc2363f5
  }
  
  QString MainWindow::userArgumentsPath() const {
-@@ -125,6 +412,12 @@ void MainWindow::ensureSettingsFileExists() {
+@@ -125,6 +849,12 @@ void MainWindow::ensureSettingsFileExists() {
  }
  
  QStringList MainWindow::getArgumentsFromFile() {
@@ -601,7 +1038,7 @@ index aeb732d8cf4c217188007a2079f81cb77d1bf105..6959b9b0317bac54a92715edbc2363f5
      const QString userPath = userArgumentsPath();
      const QString machinePath = machineArgumentsPath();
      const QString selectedPath = activeArgumentsPath();
-@@ -300,6 +593,12 @@ void MainWindow::onRendererChanged(int /*index*/) {
+@@ -300,6 +1030,12 @@ void MainWindow::onRendererChanged(int /*index*/) {
  }
  
  void MainWindow::applyRendererAndFullscreenArgs(QStringList &args) {
@@ -614,7 +1051,7 @@ index aeb732d8cf4c217188007a2079f81cb77d1bf105..6959b9b0317bac54a92715edbc2363f5
      while (true) {
          int idx = args.indexOf("-fs");
          if (idx < 0) break;
-@@ -377,9 +676,16 @@ void MainWindow::stopServer() {
+@@ -377,9 +1113,16 @@ void MainWindow::stopServer() {
      if (m_worker) {
          m_worker->disconnect();
          if (m_worker->isRunning()) {
@@ -633,7 +1070,7 @@ index aeb732d8cf4c217188007a2079f81cb77d1bf105..6959b9b0317bac54a92715edbc2363f5
              }
          }
          m_worker = nullptr;
-@@ -432,7 +738,156 @@ void MainWindow::onAirplayStopped() {
+@@ -432,7 +1175,171 @@ void MainWindow::onAirplayStopped() {
  }
  
  void MainWindow::onAirplayError(const QString &message) {
@@ -657,6 +1094,8 @@ index aeb732d8cf4c217188007a2079f81cb77d1bf105..6959b9b0317bac54a92715edbc2363f5
 +            "^AEROMIRROR_COMMAND refresh-discovery request=([1-9][0-9]{0,19})$");
 +        const std::regex fullscreenCommand(
 +            "^AEROMIRROR_COMMAND video-fullscreen-set state=([01])$");
++        const std::regex sessionCloseCommand(
++            "^AEROMIRROR_COMMAND close-session session=([1-9][0-9]{0,19})$");
 +        const std::regex scaleCommand(
 +            "^AEROMIRROR_COMMAND video-scale permille=([1-9][0-9]{3})$");
 +        const std::regex pairingPinCommand(
@@ -750,6 +1189,19 @@ index aeb732d8cf4c217188007a2079f81cb77d1bf105..6959b9b0317bac54a92715edbc2363f5
 +                    continue;
 +                }
 +
++                if (std::regex_match(line, match, sessionCloseCommand)) {
++                    unsigned long long session = 0;
++                    try { session = std::stoull(match[1].str()); }
++                    catch (...) { session = 0; }
++                    if (!session || !request_video_session_close(session)) {
++                        fprintf(stderr,
++                            "AEROMIRROR_COMMAND_REJECTED command=close-session "
++                            "session=%llu reason=unavailable-or-invalid\n", session);
++                        fflush(stderr);
++                    }
++                    continue;
++                }
++
 +                if (std::regex_match(line, match, scaleCommand)) {
 +                    unsigned long scale = 0;
 +                    try {
@@ -791,7 +1243,7 @@ index aeb732d8cf4c217188007a2079f81cb77d1bf105..6959b9b0317bac54a92715edbc2363f5
  }
  
  void MainWindow::toggleAutostart(bool checked) {
-@@ -456,32 +911,133 @@ void MainWindow::setAutostart(bool enabled) {
+@@ -456,32 +1363,133 @@ void MainWindow::setAutostart(bool enabled) {
  }
  
  void MainWindow::startBluetoothBeacon(const QString &path) {
@@ -820,7 +1272,7 @@ index aeb732d8cf4c217188007a2079f81cb77d1bf105..6959b9b0317bac54a92715edbc2363f5
 -        // Forward beacon logs to our debug console
 -        qDebug() << "[beacon output]" << m_beacon->readAll().trimmed();
 +        consumeBluetoothBeaconOutput(false);
-+    });
+     });
 +    connect(m_beacon, &QProcess::errorOccurred, this,
 +            [this](QProcess::ProcessError error) {
 +        if (error != QProcess::FailedToStart &&
@@ -842,11 +1294,8 @@ index aeb732d8cf4c217188007a2079f81cb77d1bf105..6959b9b0317bac54a92715edbc2363f5
 +        detail.append(" and exit code ");
 +        detail.append(QByteArray::number(exitCode));
 +        reportBluetoothBeaconFailure(detail);
-     });
- 
--    // Pass the explicit path to the beacon file
--    m_beacon->start(exe, {"--path", path});
--    qDebug() << "Beacon process started watching:" << path;
++    });
++
 +    // Bind BLE discovery to the physical Wi-Fi/Ethernet address selected by
 +    // the host shell. Letting the helper infer an address from the default
 +    // route can advertise a VPN endpoint instead.
@@ -891,7 +1340,10 @@ index aeb732d8cf4c217188007a2079f81cb77d1bf105..6959b9b0317bac54a92715edbc2363f5
 +    emitBluetoothBeaconLine(
 +        QByteArray("Advertising failed: ") + bounded);
 +}
-+
+ 
+-    // Pass the explicit path to the beacon file
+-    m_beacon->start(exe, {"--path", path});
+-    qDebug() << "Beacon process started watching:" << path;
 +void MainWindow::consumeBluetoothBeaconOutput(bool flushResidual) {
 +    if (m_beacon) m_beaconOutputBuffer.append(m_beacon->readAll());
 +    static constexpr qsizetype maximumBufferedBytes = 64 * 1024;
@@ -932,7 +1384,7 @@ index aeb732d8cf4c217188007a2079f81cb77d1bf105..6959b9b0317bac54a92715edbc2363f5
      if (m_beacon->state() != QProcess::NotRunning) {
          m_beacon->terminate();
          if (!m_beacon->waitForFinished(500)) {
-@@ -490,9 +1046,11 @@ void MainWindow::stopBluetoothBeacon() {
+@@ -490,9 +1498,11 @@ void MainWindow::stopBluetoothBeacon() {
              m_beacon->waitForFinished(100);
          }
      }
@@ -944,7 +1396,7 @@ index aeb732d8cf4c217188007a2079f81cb77d1bf105..6959b9b0317bac54a92715edbc2363f5
      qDebug() << "Beacon stopped and cleaned up";
  }
  
-@@ -547,6 +1105,13 @@ bool MainWindow::ensureBonjourServiceInstalled() {
+@@ -547,6 +1557,13 @@ bool MainWindow::ensureBonjourServiceInstalled() {
          return true;
      }
  
@@ -959,7 +1411,7 @@ index aeb732d8cf4c217188007a2079f81cb77d1bf105..6959b9b0317bac54a92715edbc2363f5
          this,
          "Bonjour Service Required",
 diff --git a/src/mainwindow.h b/src/mainwindow.h
-index 163521f87763dbabd13118946787248cfac9e1a8..8a847212d962b1ea88bcc2a2e0e57fc4f52e18de 100644
+index 163521f87763dbabd13118946787248cfac9e1a8..1fbd0a788321dbf6c71151db513f6da54e37373d 100644
 --- a/src/mainwindow.h
 +++ b/src/mainwindow.h
 @@ -1,8 +1,10 @@
@@ -973,7 +1425,7 @@ index 163521f87763dbabd13118946787248cfac9e1a8..8a847212d962b1ea88bcc2a2e0e57fc4
  #include <QMainWindow>
  #include <QComboBox>
  #include <QPushButton>
-@@ -10,16 +12,58 @@
+@@ -10,16 +12,92 @@
  #include <QProcess>
  #include <QCheckBox>
  #include <QMessageBox>
@@ -983,6 +1435,24 @@ index 163521f87763dbabd13118946787248cfac9e1a8..8a847212d962b1ea88bcc2a2e0e57fc4
  class QAction;
  class AirPlayWorker;
  
++// The HWND belongs to Qt, but its pixels belong only to GstVideoOverlay.
++// On Windows WA_PaintOnScreen is ignored unless paintEngine is overridden.
++class RendererVideoSurface final : public QWidget {
++public:
++    explicit RendererVideoSurface(QWidget *parent = nullptr) : QWidget(parent) {
++        setAttribute(Qt::WA_NativeWindow);
++        setAttribute(Qt::WA_PaintOnScreen);
++        setAttribute(Qt::WA_NoSystemBackground);
++        setAttribute(Qt::WA_OpaquePaintEvent);
++        setAutoFillBackground(false);
++    }
++
++    QPaintEngine *paintEngine() const override { return nullptr; }
++
++protected:
++    void paintEvent(QPaintEvent *) override {}
++};
++
 +class RendererHostWindow final : public QMainWindow {
 +public:
 +    explicit RendererHostWindow(QWidget *parent = nullptr);
@@ -1000,8 +1470,12 @@ index 163521f87763dbabd13118946787248cfac9e1a8..8a847212d962b1ea88bcc2a2e0e57fc4
 +    void closeEvent(QCloseEvent *event) override;
 +
 +private:
-+    void showRenderer();
-+    void hideRenderer();
++    void showRenderer(uint64_t generation, uint64_t sessionId);
++    void closeSession(uint64_t sessionId, const char *source);
++    void hideRenderer(uint64_t generation);
++    void queueRendererReady(uint64_t generation, unsigned int attempt = 0);
++    void queueRendererExpose(uint64_t generation, unsigned int attempt = 0);
++    void scheduleHandleRebind(unsigned int attempt = 0);
 +    void applyFullscreenState(bool desired, const char *source);
 +    void emitFullscreenMarker(
 +        bool requested,
@@ -1011,12 +1485,24 @@ index 163521f87763dbabd13118946787248cfac9e1a8..8a847212d962b1ea88bcc2a2e0e57fc4
 +    ) const;
 +
 +    QWidget *m_videoSurface = nullptr;
++    uintptr_t m_renderHandle = 0;
++    uintptr_t m_controlHandle = 0;
 +    QRect m_normalGeometry;
 +    bool m_hasNormalGeometry = false;
 +    intptr_t m_normalWindowStyle = 0;
 +    intptr_t m_normalWindowExStyle = 0;
 +    bool m_hasNormalWindowStyle = false;
 +    uint64_t m_fullscreenGeneration = 0;
++    uint64_t m_showGeneration = 0;
++    uint64_t m_sessionId = 0;
++    uint64_t m_dismissedSessionId = 0;
++    uint64_t m_closeRequestSequence = 0;
++    uint64_t m_hostReadyAcknowledgedGeneration = 0;
++    uint64_t m_readyRetryPendingGeneration = 0;
++    uint64_t m_surfaceRefreshPendingGeneration = 0;
++    bool m_handleRebindScheduled = false;
++    bool m_rebindingHandles = false;
++    bool m_connectionForegroundDeferred = false;
 +};
 +
  class MainWindow : public QMainWindow {
@@ -1033,7 +1519,7 @@ index 163521f87763dbabd13118946787248cfac9e1a8..8a847212d962b1ea88bcc2a2e0e57fc4
      ~MainWindow() override;
  
  protected:
-@@ -42,15 +86,22 @@ private slots:
+@@ -42,15 +120,22 @@ private slots:
  
  private:
      void startServer();
@@ -1056,7 +1542,7 @@ index 163521f87763dbabd13118946787248cfac9e1a8..8a847212d962b1ea88bcc2a2e0e57fc4
  
      QStringList getArgumentsFromFile();
      void ensureSettingsFileExists();
-@@ -79,7 +130,12 @@ private:
+@@ -79,7 +164,12 @@ private:
      QLabel *m_statusLabel = nullptr;
  
      AirPlayWorker *m_worker = nullptr;

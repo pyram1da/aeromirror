@@ -42,7 +42,12 @@ foreach ($propertyName in @(
     "IsBonjourUnavailable",
     "IsBonjourServiceRecoveryRequired",
     "IsBonjourServiceStarting",
-    "IsBonjourServiceStatusUnknown"
+    "IsBonjourServiceStopping",
+    "IsBonjourServicePausePending",
+    "IsBonjourServicePaused",
+    "IsBonjourServiceStatusUnknown",
+    "IsBonjourServiceRecoveryRunning",
+    "CanRequestBonjourServiceRecovery"
 )) {
     $property = $contextType.GetProperty(
         $propertyName, $publicInstanceFlags)
@@ -53,8 +58,7 @@ foreach ($propertyName in @(
         "$propertyName remains a read-only Boolean")
 }
 foreach ($removedProperty in @(
-    "IsBonjourFirewallRepairRunning",
-    "IsBonjourServiceRecoveryRunning"
+    "IsBonjourFirewallRepairRunning"
 )) {
     Assert-True ($null -eq $contextType.GetProperty(
         $removedProperty, $publicInstanceFlags)) (
@@ -68,6 +72,8 @@ $receiverSource = [IO.File]::ReadAllText((Join-Path $sourceRoot (
     "Receiver\ReceiverContext.cs")))
 $receiverCoreSource = [IO.File]::ReadAllText((Join-Path $sourceRoot (
     "Receiver\ReceiverContext.Core.cs")))
+$diagnosticsSource = [IO.File]::ReadAllText((Join-Path $sourceRoot (
+    "Receiver\ReceiverContext.Diagnostics.cs")))
 $settingsSource = [IO.File]::ReadAllText((Join-Path $sourceRoot (
     "UI\SettingsForm.cs")))
 $programSource = [IO.File]::ReadAllText((Join-Path $sourceRoot (
@@ -78,25 +84,155 @@ $serviceRecoverySource = [IO.File]::ReadAllText((Join-Path $sourceRoot (
     "Network\BonjourServiceRecoveryService.cs")))
 $installerSource = [IO.File]::ReadAllText((Join-Path $projectRoot (
     "installer\AirPlayReceiverSetup.cs")))
+$startBonjourText = Decode-Utf8 (
+    "0JfQsNC/0YPRgdGC0LjRgtGMIEJvbmpvdXI=")
+$oneAdministratorConfirmationText = Decode-Utf8 (
+    "V2luZG93cyDQvtC00LjQvSDRgNCw0Lcg0L/QvtC/0YDQvtGB0LjRgiDQv9C+0LTRgtCy0LXRgNC20LTQtdC90LjQtSDQsNC00LzQuNC90LjRgdGC0YDQsNGC0L7RgNCw")
+$noAutomaticRepeatText = Decode-Utf8 (
+    "QWVyb01pcnJvciDQvdC1INC/0L7QstGC0L7RgNGP0LXRgiDRjdGC0L7RgiDQt9Cw0L/RgNC+0YEg0LDQstGC0L7QvNCw0YLQuNGH0LXRgdC60Lg=")
 
-Assert-True (-not $contextSource.Contains("RepairBonjour") -and
-    -not $contextSource.Contains("RecoverBonjour") -and
+Assert-True ($contextSource.Contains(
+        "public void RequestBonjourServiceRecovery()") -and
+    $contextSource.Contains(
+        "BonjourServiceRecoveryService.TryLaunchExplicitStart(") -and
     -not $contextSource.Contains("MessageBox.Show") -and
-    -not $serviceRecoverySource.Contains("ProcessStartInfo") -and
-    -not $serviceRecoverySource.Contains('Verb = "runas"') -and
+    $serviceRecoverySource.Contains("ProcessStartInfo") -and
+    $serviceRecoverySource.Contains("Environment.SystemDirectory") -and
+    $serviceRecoverySource.Contains(
+        "Environment.SpecialFolder.Windows") -and
+    $serviceRecoverySource.Contains('Path.Combine(systemDirectory, "sc.exe")') -and
+    $serviceRecoverySource.Contains(
+        "BonjourFirewallService.IsTrustedMachinePath(") -and
+    $serviceRecoverySource.Contains('Arguments = "start \"" + serviceName + "\""') -and
+    $serviceRecoverySource.Contains('Verb = "runas"') -and
+    $serviceRecoverySource.Contains("UseShellExecute = true") -and
     -not $firewallServiceSource.Contains("RunNetshElevated") -and
     -not $firewallServiceSource.Contains(
         "RepairPrivateMdnsRuleExplicitlyWithUac") -and
     -not $programSource.Contains("bonjour-machine")) (
-    "ordinary app observes Bonjour without machine mutation or elevation")
+    "explicit recovery uses only protected sc.exe and one allowlisted service start")
+
+$requestStart = $contextSource.IndexOf(
+    "public void RequestBonjourServiceRecovery()",
+    [StringComparison]::Ordinal)
+$requestEnd = $contextSource.IndexOf(
+    "private void CompleteBonjourExplicitRecovery(",
+    $requestStart,
+    [StringComparison]::Ordinal)
+Assert-True ($requestStart -ge 0 -and $requestEnd -gt $requestStart) (
+    "explicit Bonjour request has a focused source boundary")
+$requestSource = $contextSource.Substring(
+    $requestStart, $requestEnd - $requestStart)
+Assert-True (-not $requestSource.Contains(
+        "assessment.State == BonjourServiceState.StartPending") -and
+    $requestSource.Contains("WaitForExplicitStart(") -and
+    ([regex]::Matches(
+        $requestSource,
+        [regex]::Escape("TryLaunchExplicitStart("))).Count -eq 1 -and
+    ([regex]::Matches(
+        $serviceRecoverySource,
+        [regex]::Escape("TryLaunchExplicitStart("))).Count -eq 1) (
+    "Running and StartPending are confirmed by the common bounded wait instead of a premature success")
+
+$requiredStart = $contextSource.IndexOf(
+    "public bool IsBonjourServiceRecoveryRequired",
+    [StringComparison]::Ordinal)
+$requiredEnd = $contextSource.IndexOf(
+    "public bool IsBonjourServiceStarting",
+    $requiredStart,
+    [StringComparison]::Ordinal)
+Assert-True ($requiredStart -ge 0 -and $requiredEnd -gt $requiredStart) (
+    "Bonjour recovery-required property has a focused source boundary")
+$requiredSource = $contextSource.Substring(
+    $requiredStart, $requiredEnd - $requiredStart)
+Assert-True ($requiredSource.Contains(
+        "assessment.State == BonjourServiceState.Stopped") -and
+    -not $requiredSource.Contains("BonjourServiceState.StopPending")) (
+    "the recovery button is eligible only for the exact Stopped state")
+
+$waitStart = $serviceRecoverySource.IndexOf(
+    "internal static bool WaitForExplicitStart(",
+    [StringComparison]::Ordinal)
+$waitEnd = $serviceRecoverySource.IndexOf(
+    "private static bool TryCreateExplicitStartInfo(",
+    $waitStart,
+    [StringComparison]::Ordinal)
+Assert-True ($waitStart -ge 0 -and $waitEnd -gt $waitStart) (
+    "explicit Bonjour wait has a focused source boundary")
+$waitSource = $serviceRecoverySource.Substring(
+    $waitStart, $waitEnd - $waitStart)
+$exitCodeIndex = $waitSource.IndexOf("process.ExitCode != 0")
+$runningWaitIndex = $waitSource.IndexOf("service.WaitForStatus(")
+Assert-True ($exitCodeIndex -ge 0 -and
+    $runningWaitIndex -gt $exitCodeIndex -and
+    $waitSource.Contains("commandDetail") -and
+    $waitSource.Contains("out bool processExited") -and
+    $waitSource.Contains("IsProcessExitConfirmed(process)") -and
+    -not $waitSource.Contains("process.Kill()")) (
+    "the bounded result retains whether the elevated command actually exited")
 
 Assert-True (-not $settingsSource.Contains("refreshDiscovery") -and
     -not $settingsSource.Contains("bonjourFirewallRepair") -and
     -not $receiverSource.Contains("bonjourFirewallItem") -and
+    $settingsSource.Contains($startBonjourText) -and
+    $settingsSource.Contains("bonjourRecovery.Visible = showBonjourRecovery") -and
+    $settingsSource.Contains("context.RequestBonjourServiceRecovery();") -and
     $settingsSource.Contains("bonjourServiceRecoveryRequired") -and
     $settingsSource.Contains("bonjourServiceStarting") -and
+    $settingsSource.Contains("bonjourServiceStopping") -and
+    $settingsSource.Contains("bonjourServicePausePending") -and
+    $settingsSource.Contains("bonjourServicePaused") -and
     $settingsSource.Contains("IsBonjourServiceStatusUnknown")) (
-    "main window and tray have no manual discovery or Bonjour action")
+    "the main window exposes recovery only inside the contextual Bonjour error card")
+
+$showRecoveryStart = $settingsSource.IndexOf(
+    "bool showBonjourRecovery =",
+    [StringComparison]::Ordinal)
+$showRecoveryEnd = $settingsSource.IndexOf(
+    "networkCard.Height =",
+    $showRecoveryStart,
+    [StringComparison]::Ordinal)
+Assert-True ($showRecoveryStart -ge 0 -and
+    $showRecoveryEnd -gt $showRecoveryStart) (
+    "Bonjour recovery visibility has a focused source boundary")
+$showRecoverySource = $settingsSource.Substring(
+    $showRecoveryStart, $showRecoveryEnd - $showRecoveryStart)
+Assert-True ($showRecoverySource.Contains(
+        "bonjourServiceRecoveryRequired") -and
+    $showRecoverySource.Contains("bonjourRecoveryRunning") -and
+    -not $showRecoverySource.Contains("bonjourServiceStopping") -and
+    -not $showRecoverySource.Contains("bonjourServicePausePending") -and
+    -not $showRecoverySource.Contains("bonjourServicePaused")) (
+    "stop and pause transitions may show status but never the service-start button")
+
+$completeStart = $contextSource.IndexOf(
+    "private void CompleteBonjourExplicitRecovery(",
+    [StringComparison]::Ordinal)
+$completeEnd = $contextSource.IndexOf(
+    "private void HandleBonjourExplicitRecoveryResult()",
+    $completeStart,
+    [StringComparison]::Ordinal)
+Assert-True ($completeStart -ge 0 -and $completeEnd -gt $completeStart) (
+    "explicit Bonjour completion has a focused source boundary")
+$completeSource = $contextSource.Substring(
+    $completeStart, $completeEnd - $completeStart)
+Assert-True ($requestSource.Contains("Process process = null;") -and
+    $requestSource.Contains("bool queued = ThreadPool.QueueUserWorkItem") -and
+    $requestSource.Contains("if (!queued)") -and
+    $requestSource.Contains("catch (Exception exception)") -and
+    $requestSource.Contains(
+        "WaitForBonjourExplicitRecoveryProcessExitAndRelease(") -and
+    $requestSource.Contains(
+        "WaitForExplicitStartProcessExit(process)") -and
+    $serviceRecoverySource.Contains("while (!process.WaitForExit(1000))") -and
+    -not $serviceRecoverySource.Contains("process.WaitForExit();") -and
+    $requestSource.Contains(
+        "the one-flight latch remains closed") -and
+    $completeSource.Contains(
+        "if (releaseFlight)") -and
+    $completeSource.Contains(
+        "ref bonjourExplicitRecoveryRunning, 0")) (
+    "bounded background polls retain the live-command latch until confirmed exit")
 
 $oldStoppedPromise = Decode-Utf8 (
     "V2luZG93cyDQstC+0YHRgdGC0LDQvdC+0LLQuNGCINGB0LvRg9C20LHRgw==")
@@ -120,9 +256,11 @@ Assert-True (-not $contextSource.Contains($oldStoppedPromise) -and
     -not $settingsSource.Contains($oldDiscoveryPromise) -and
     $settingsSource.Contains($existingAppleOnly) -and
     $settingsSource.Contains($trustedSource) -and
-    $settingsSource.Contains($rerunSetup) -and
-    $contextSource.Contains($rerunSetupOrDiagnostics)) (
-    "Bonjour UI states the read-only boundary and conditional recovery steps")
+    $settingsSource.Contains($startBonjourText) -and
+    $settingsSource.Contains($oneAdministratorConfirmationText) -and
+    $settingsSource.Contains($noAutomaticRepeatText) -and
+    $contextSource.Contains("HandleBonjourExplicitRecoveryResult")) (
+    "Bonjour UI explains the contextual explicit recovery and no-repeat boundary")
 
 Assert-True ($contextSource.Contains(
         "BonjourFirewallAssessmentLifetime") -and
@@ -141,6 +279,40 @@ Assert-True ($contextSource.Contains(
         '"Bonjour service recovered", false')) (
     "Bonjour is rechecked and uses at most two same-process refreshes")
 
+$monitorStart = $receiverCoreSource.IndexOf(
+    "private void HandleBonjourServiceRecoveryMonitor()",
+    [StringComparison]::Ordinal)
+$monitorEnd = $receiverCoreSource.IndexOf(
+    "private void MarkBonjourPrerequisiteUnavailable()",
+    $monitorStart,
+    [StringComparison]::Ordinal)
+$monitorSource = $receiverCoreSource.Substring(
+    $monitorStart, $monitorEnd - $monitorStart)
+Assert-True (-not $monitorSource.Contains("TryLaunchExplicitStart") -and
+    -not $monitorSource.Contains('Verb = "runas"') -and
+    -not $receiverCoreSource.Substring(
+        0, $receiverCoreSource.IndexOf(
+            "private void HandleBonjourServiceRecoveryMonitor()",
+            [StringComparison]::Ordinal)).Contains(
+                "TryLaunchExplicitStart")) (
+    "startup and timer monitoring never trigger an administrator prompt")
+
+$resumeStart = $receiverCoreSource.IndexOf(
+    "internal void ResumeDiscoveryAfterBonjourRecovery()",
+    [StringComparison]::Ordinal)
+$resumeEnd = $receiverCoreSource.IndexOf(
+    "private void OnStartStop(",
+    $resumeStart,
+    [StringComparison]::Ordinal)
+$resumeSource = $receiverCoreSource.Substring(
+    $resumeStart, $resumeEnd - $resumeStart)
+Assert-True (-not $resumeSource.Contains(
+        "coreBonjourRecoveryAttempted, 0") -and
+    $resumeSource.Contains(
+        "coreBonjourServiceCheckDueTicks, 0") -and
+    $resumeSource.Contains("HandleBonjourServiceRecoveryMonitor();")) (
+    "an explicit start accelerates the current recovery epoch without renewing its two-attempt budget")
+
 Assert-True ($firewallServiceSource.Contains(
         "Registry.LocalMachine.OpenSubKey(") -and
     $firewallServiceSource.Contains(
@@ -152,8 +324,14 @@ Assert-True ($firewallServiceSource.Contains(
     $firewallServiceSource.Contains("FileSystemRights.AppendData") -and
     $firewallServiceSource.Contains(
         "FileSystemRights.DeleteSubdirectoriesAndFiles") -and
-    $firewallServiceSource.Contains("PropagationFlags.InheritOnly")) (
-    "assessment validates exact HKLM identity and protected path")
+    $firewallServiceSource.Contains("PropagationFlags.InheritOnly") -and
+    $firewallServiceSource.Contains(
+        "TryValidateBonjourServiceObjectSecurity(") -and
+    $firewallServiceSource.Contains(
+        "QueryServiceObjectSecurity(") -and
+    $firewallServiceSource.Contains(
+        "HasUntrustedServiceControlAccess(")) (
+    "assessment validates exact HKLM identity, service DACL, and protected path")
 
 $elevatedDispatch = $installerSource.IndexOf(
     "if (IsExactBonjourMachineConfigurationInvocation(args))",
@@ -376,8 +554,197 @@ foreach ($unsafeName in @(
         "unsafe service name is rejected: $unsafeName")
 }
 
+$isExplicitStartState = Get-InternalMethod $serviceRecoveryType (
+    "IsExplicitStartState")
+$serviceStatusType = $isExplicitStartState.GetParameters()[0].ParameterType
+$stoppedServiceStatus = [Enum]::Parse($serviceStatusType, "Stopped")
+foreach ($status in [Enum]::GetValues($serviceStatusType)) {
+    $allowed = [bool]$isExplicitStartState.Invoke($null, @($status))
+    Assert-True ($allowed -eq ($status -eq $stoppedServiceStatus)) (
+        "only exact Stopped may launch sc.exe: $status")
+}
+
+$mapServiceState = Get-InternalMethod $serviceRecoveryType "MapServiceState"
+$bonjourStateType = $mapServiceState.ReturnType
+$expectedStateByServiceStatus = @{
+    Running         = "Running"
+    StartPending    = "StartPending"
+    ContinuePending = "StartPending"
+    StopPending     = "StopPending"
+    PausePending    = "PausePending"
+    Paused          = "Paused"
+    Stopped         = "Stopped"
+}
+foreach ($status in [Enum]::GetValues($serviceStatusType)) {
+    $mapped = $mapServiceState.Invoke($null, @($status)).ToString()
+    Assert-True ($mapped -eq $expectedStateByServiceStatus[$status.ToString()]) (
+        "service state maps without exposing recovery for $status")
+}
+$invalidServiceStatus = [Enum]::ToObject($serviceStatusType, 0)
+$invalidMapped = $mapServiceState.Invoke(
+    $null, @($invalidServiceStatus)).ToString()
+Assert-True ($invalidMapped -eq "Unknown") (
+    "an unknown service-controller value fails closed")
+Assert-True ($diagnosticsSource.Contains(
+        "case BonjourServiceState.PausePending:") -and
+    $diagnosticsSource.Contains('return "PausePending";') -and
+    $diagnosticsSource.Contains(
+        "case BonjourServiceState.Paused:") -and
+    $diagnosticsSource.Contains('return "Paused";')) (
+    "diagnostics preserve distinct Bonjour pause states")
+
+$createStartInfo = Get-InternalMethod $serviceRecoveryType (
+    "TryCreateExplicitStartInfo")
+[object[]]$startArguments = @("Bonjour Service", $null, $null)
+Assert-True ([bool]$createStartInfo.Invoke($null, $startArguments)) (
+    "the exact Bonjour service produces a recovery command")
+$startInfo = [Diagnostics.ProcessStartInfo]$startArguments[1]
+Assert-True ($null -ne $startInfo -and
+    [IO.Path]::GetFullPath($startInfo.FileName) -eq
+        [IO.Path]::Combine([Environment]::SystemDirectory, "sc.exe") -and
+    $startInfo.Arguments -eq 'start "Bonjour Service"' -and
+    $startInfo.Verb -eq "runas" -and
+    $startInfo.UseShellExecute -and
+    $startInfo.WindowStyle -eq [Diagnostics.ProcessWindowStyle]::Hidden -and
+    -not $startInfo.ErrorDialog) (
+    "recovery elevates only protected sc.exe with the exact start command")
+[object[]]$unsafeStartArguments = @(
+    'Bonjour Service" failure reset= 0', $null, $null)
+Assert-True (-not [bool]$createStartInfo.Invoke(
+        $null, $unsafeStartArguments) -and
+    $null -eq $unsafeStartArguments[1]) (
+    "an unsafe service name cannot produce an elevated command")
+
+$hasUntrustedWriteAccessRules = Get-InternalMethod $serviceType (
+    "HasUntrustedWriteAccessRules")
+$localSystemSid = New-Object Security.Principal.SecurityIdentifier(
+    [Security.Principal.WellKnownSidType]::LocalSystemSid, $null)
+$administratorsSid = New-Object Security.Principal.SecurityIdentifier(
+    [Security.Principal.WellKnownSidType]::BuiltinAdministratorsSid, $null)
+$usersSid = New-Object Security.Principal.SecurityIdentifier(
+    [Security.Principal.WellKnownSidType]::BuiltinUsersSid, $null)
+$trustedInstallerSid = New-Object Security.Principal.SecurityIdentifier(
+    "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464")
+
+$hasUntrustedServiceControlAccess = Get-InternalMethod $serviceType (
+    "HasUntrustedServiceControlAccess")
+function Test-UntrustedServiceControlAccess([string]$Sddl) {
+    $descriptor = [Security.AccessControl.RawSecurityDescriptor]::new($Sddl)
+    return [bool]$hasUntrustedServiceControlAccess.Invoke(
+        $null, @($descriptor))
+}
+
+Assert-True (-not (Test-UntrustedServiceControlAccess (
+        "O:SYD:(A;;GR;;;BU)(A;;GA;;;SY)"))) (
+    "read-only untrusted service access and trusted mutation access are accepted")
+Assert-True (Test-UntrustedServiceControlAccess "O:SY") (
+    "a service security descriptor with a NULL DACL fails closed")
+Assert-True (Test-UntrustedServiceControlAccess (
+        "O:BUD:(A;;GA;;;SY)")) (
+    "an untrusted service owner fails closed")
+
+foreach ($dangerousServiceAccess in @(
+    0x00000002,
+    0x00010000,
+    0x00040000,
+    0x00080000,
+    0x10000000,
+    0x40000000
+)) {
+    $mask = "0x{0:X8}" -f $dangerousServiceAccess
+    Assert-True (Test-UntrustedServiceControlAccess (
+            "O:SYD:(A;;$mask;;;BU)")) (
+        "an untrusted service mutation ACE fails closed: $mask")
+}
+
+Assert-True (Test-UntrustedServiceControlAccess (
+        "O:SYD:(A;CIIO;0x00000002;;;BU)")) (
+    "an inheritable untrusted service mutation ACE also fails closed")
+Assert-True (Test-UntrustedServiceControlAccess (
+        "O:SYD:(D;;GA;;;BU)(A;;0x00000002;;;BU)")) (
+    "an untrusted allow is rejected even when another ACE denies access")
+
+foreach ($trustedWriter in @(
+    "SY",
+    "BA",
+    $trustedInstallerSid.Value
+)) {
+    Assert-True (-not (Test-UntrustedServiceControlAccess (
+            "O:SYD:(A;;GA;;;$trustedWriter)"))) (
+        "a machine-trusted service writer is accepted: $trustedWriter")
+}
+
+function Test-UntrustedWriteAccess(
+    [Security.Principal.SecurityIdentifier]$Owner,
+    [bool]$HasDacl,
+    [Collections.IEnumerable]$Rules
+) {
+    [object[]]$arguments = New-Object object[] 3
+    $arguments[0] = $Owner
+    $arguments[1] = $HasDacl
+    $arguments[2] = $Rules
+    return [bool]$hasUntrustedWriteAccessRules.Invoke($null, $arguments)
+}
+
+$noRules = New-Object Collections.ArrayList
+$trustedNoWrite = Test-UntrustedWriteAccess $localSystemSid $true $noRules
+Assert-True (-not $trustedNoWrite) (
+    "a protected LocalSystem-owned component with a DACL is accepted")
+Assert-True (Test-UntrustedWriteAccess $localSystemSid $false $noRules) (
+    "a NULL DACL fails closed")
+Assert-True (Test-UntrustedWriteAccess $usersSid $true $noRules) (
+    "an untrusted owner fails closed")
+
+$untrustedWriteRules = New-Object Collections.ArrayList
+[void]$untrustedWriteRules.Add(
+    (New-Object Security.AccessControl.FileSystemAccessRule(
+        $usersSid,
+        [Security.AccessControl.FileSystemRights]::WriteData,
+        [Security.AccessControl.AccessControlType]::Allow)))
+$hasUntrustedWrite = Test-UntrustedWriteAccess `
+    $localSystemSid $true $untrustedWriteRules
+Assert-True $hasUntrustedWrite (
+    "a broad untrusted write ACE fails closed")
+
+foreach ($trustedWriter in @(
+    $localSystemSid, $administratorsSid, $trustedInstallerSid)) {
+    $trustedWriteRules = New-Object Collections.ArrayList
+    [void]$trustedWriteRules.Add(
+        (New-Object Security.AccessControl.FileSystemAccessRule(
+            $trustedWriter,
+            [Security.AccessControl.FileSystemRights]::WriteData,
+            [Security.AccessControl.AccessControlType]::Allow)))
+    $hasTrustedWriteOnly = Test-UntrustedWriteAccess `
+        $localSystemSid $true $trustedWriteRules
+    Assert-True (-not $hasTrustedWriteOnly) (
+        "a machine-trusted writer ACE is accepted: $trustedWriter")
+}
+
+$inheritOnlyRules = New-Object Collections.ArrayList
+[void]$inheritOnlyRules.Add(
+    (New-Object Security.AccessControl.FileSystemAccessRule(
+        $usersSid,
+        [Security.AccessControl.FileSystemRights]::WriteData,
+        [Security.AccessControl.InheritanceFlags]::ContainerInherit,
+        [Security.AccessControl.PropagationFlags]::InheritOnly,
+        [Security.AccessControl.AccessControlType]::Allow)))
+$hasInheritedOnlyWrite = Test-UntrustedWriteAccess `
+    $localSystemSid $true $inheritOnlyRules
+Assert-True (-not $hasInheritedOnlyWrite) (
+    "an inherit-only ACE does not make the current path component writable")
+
 $isExpectedBonjourPath = Get-InternalMethod $serviceType (
     "IsExpectedBonjourExecutablePath")
+$isTrustedMachinePath = Get-InternalMethod $serviceType (
+    "IsTrustedMachinePath")
+$windowsDirectory = [IO.Path]::GetFullPath(
+    [Environment]::GetFolderPath(
+        [Environment+SpecialFolder]::Windows)).TrimEnd('\')
+$systemControllerPath = [IO.Path]::Combine(
+    [Environment]::SystemDirectory, "sc.exe")
+Assert-True ([bool]$isTrustedMachinePath.Invoke(
+        $null, @($systemControllerPath, $windowsDirectory))) (
+    "the installed canonical sc.exe chain has trusted owners, ACLs, and no reparse points")
 foreach ($expectedPath in @(
     "C:\Program Files\Bonjour\mDNSResponder.exe",
     "C:\Program Files (x86)\Bonjour\mDNSResponder.exe"
@@ -492,5 +859,5 @@ foreach ($rule in @(
 }
 
 Write-Host (
-    "Bonjour prerequisite tests passed: read-only app assessment, " +
-    "background recovery monitor, no manual UI action, and exact firewall.")
+    "Bonjour prerequisite tests passed: read-only monitoring, explicit " +
+    "contextual service start, no automatic UAC, and exact firewall.")

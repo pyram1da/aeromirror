@@ -1,5 +1,14 @@
 # Third-party notices
 
+The local 0.12.30 AeroMirror-authored extension adds immutable mirroring stream
+IDs and a request-correlated session-only close path across the Qt host, UxPlay
+callbacks and HTTP owner. It also modifies the existing `lib/httpd.h` interface.
+The managed continuity warning routes an exact-session stdin intent through
+the native in-process HWND bridge to that same Qt handler.
+Upstream commits, Qt/GStreamer runtime pins, Bonjour and BLE components and
+their licenses are unchanged. Both reviewed patches and every modified source
+hash are recorded in `UPSTREAM.lock` and `native-core/source-provenance.json`.
+
 This MVP combines a Windows launcher/settings shell with a patched
 build of `leapbtw/uxplay-windows`. The patch adds a headless mode, direct
 argument passing, stable native `argv` storage, and a non-streaming loader
@@ -101,6 +110,63 @@ additional dependency. These remain
 local GPL-covered changes; upstream revisions, redistributed runtime,
 dependencies, and third-party license scope are unchanged.
 
+The locally prepared 0.12.24 diagnostic extension adds no dependency or
+protocol capability. It records the receiver-configured `/info` display tuple
+and, on an independent sink-local timeline, every actual CAPS event with a
+local `caps_seq`. It uses one first-buffer caps snapshot only if no CAPS event
+was observed, then reads `GstVideoCropMeta` on the first buffer after CAPS,
+when that metadata changes, and every 120 buffers. Sender geometry generations
+and sink sequences have no claimed one-to-one mapping. These markers contain no
+client identifiers, plist bodies, pixels, payloads, artwork, titles, file
+paths, or network URLs. They do not crop, scale, filter, map, or resize the
+mirrored video. The changes remain within the same local GPL-covered
+corresponding-source patch; upstream revisions, redistributed runtime,
+dependencies, and third-party license scope are unchanged.
+
+The local 0.12.25 surface-lifecycle extension adds no dependency, protocol
+capability, codec, or renderer. It uses the existing GStreamer
+`GstVideoOverlay` interface after the Qt owner validates its visible nonzero
+child HWND and the selected D3D11 sink reports its first Present. Native-owned
+generation tokens make stale READY, Present, expose, and handle-rebind work
+inert. Show/WindowStateChange may coalesce an event-driven re-expose only for
+an acknowledged surface; WinIdChange rebinds current overlay sinks with bounded
+retry. The Present callback posts without calling expose under its device lock,
+and its proof remains alongside the failure-recovery pad probe. Sinks are
+retained only for bounded calls and released afterward; no pixel access, media
+transform, recovery resize/fullscreen, render rectangle, crop, scale, or
+pipeline reset is introduced. The one-time ordinary/fullscreen foreground
+policy uses existing Qt/Win32 APIs, takes no keyboard focus, and adds no
+dependency or persistent topmost behavior.
+The changes remain within the same GPL-covered corresponding-source patches;
+upstream revisions, redistributed runtime, dependencies, and third-party
+license scope are unchanged.
+
+The local 0.12.27 wrapper-only change adds a dedicated Qt external-video
+surface and verified nonactivating initial window placement. It modifies
+`src/mainwindow.cpp` and `src/mainwindow.h` within the existing authored wrapper
+patch, adds no third-party dependency and does not alter libuxplay or runtime
+versions/licenses. Exact patch, source and core hashes remain in `UPSTREAM.lock`
+and `native-core/source-provenance.json`; complete corresponding source is
+required for the candidate. Physical acceptance is separate from provenance.
+
+The local 0.12.26 renderer-ordering extension adds no dependency, protocol
+capability, codec, or media transform. Fresh mirror pipelines remain in `READY`
+until the active callback selects a codec, the existing Qt host validates its
+visible real child HWND, and the selected `GstVideoOverlay` sink is bound and
+committed for that generation; only that selected pipeline then enters
+`PLAYING`. After Qt supplies a replacement real child HWND, the selected
+pipeline moves through `NULL` before the sink accepts that handle, returns to
+`READY`, obtains a fresh SHOW/READY acknowledgement, rebinds and commits the
+selected sink, and only then resumes
+`PLAYING`. Session generations, immutable bus contexts, and retained operation
+references keep late callbacks from crossing a stop/start or destroy boundary.
+The existing post-Present expose path remains a redraw aid and can execute only
+when lifecycle, READY, bound, and Present generations all match. No recovery
+resize/fullscreen, render rectangle, crop, scale, or pixel inspection is
+introduced. These changes remain inside the same GPL-covered corresponding-
+source patch; upstream revisions, redistributed runtime, dependencies, and
+third-party license scope are unchanged.
+
 The AeroMirror 0.11 network review installer does **not** mirror the full
 third-party runtime. During installation it downloads this unchanged upstream
 asset directly from GitHub and verifies it before extraction:
@@ -114,8 +180,8 @@ asset directly from GitHub and verifies it before extraction:
 
 Each published AeroMirror review release pairs Setup with that version's exact
 AeroMirror and patched native corresponding-source archives. AeroMirror 0.12.22
-uses `AeroMirror-source-0.12.22.zip` and
-`AeroMirror-native-source-0.12.22.zip` when the version is published.
+was published with `AeroMirror-source-0.12.22.zip` and
+`AeroMirror-native-source-0.12.22.zip`.
 
 All previously published assets remain immutable. Every later release must use
 its own versioned filenames rather than replace an earlier asset. The native

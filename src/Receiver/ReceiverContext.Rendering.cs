@@ -114,6 +114,12 @@ namespace AirPlayReceiverMvp
             if (processId <= 0 || processId != rendererMoveSizeHookPid)
                 return;
 
+            // SHOW includes the sink's child HWND ("Direct3D11 renderer").
+            // Its SetWindowPos coordinates are parent-relative, never desktop
+            // coordinates. Only the outer control window owns saved placement.
+            if (!NativeMethods.IsTopLevelWindow(window))
+                return;
+
             uint windowProcessId;
             NativeMethods.GetWindowThreadProcessId(window, out windowProcessId);
             if (windowProcessId != (uint)processId)
@@ -516,6 +522,8 @@ namespace AirPlayReceiverMvp
         {
             restored = Rectangle.Empty;
             targetDpi = 96;
+            if (!NativeMethods.IsTopLevelWindow(window))
+                return false;
             if (!settings.HasValidStreamWindowPlacement())
                 return false;
 
@@ -659,7 +667,8 @@ namespace AirPlayReceiverMvp
         private static bool SetRendererOuterBounds(
             IntPtr window, Rectangle bounds)
         {
-            return bounds.Width > 0 && bounds.Height > 0 &&
+            return NativeMethods.IsTopLevelWindow(window) &&
+                bounds.Width > 0 && bounds.Height > 0 &&
                 NativeMethods.SetWindowPos(
                     window, IntPtr.Zero, bounds.Left, bounds.Top,
                     bounds.Width, bounds.Height,
@@ -674,7 +683,7 @@ namespace AirPlayReceiverMvp
                 return false;
 
             if (fittedStreamWindow != IntPtr.Zero &&
-                NativeMethods.IsWindow(fittedStreamWindow) &&
+                NativeMethods.IsTopLevelWindow(fittedStreamWindow) &&
                 NativeMethods.IsWindowVisible(fittedStreamWindow))
             {
                 uint cachedPid;
@@ -694,7 +703,9 @@ namespace AirPlayReceiverMvp
             {
                 uint windowPid;
                 NativeMethods.GetWindowThreadProcessId(window, out windowPid);
-                if (windowPid == (uint)pid && NativeMethods.IsWindowVisible(window))
+                if (windowPid == (uint)pid &&
+                    NativeMethods.IsTopLevelWindow(window) &&
+                    NativeMethods.IsWindowVisible(window))
                 {
                     var title = new StringBuilder(512);
                     NativeMethods.GetWindowText(window, title, title.Capacity);
@@ -753,17 +764,22 @@ namespace AirPlayReceiverMvp
                     rendererPolicyShowInTaskbar))
             {
                 NativeMethods.SetWindowText(window, "iPhone · AeroMirror");
-                NativeMethods.SetToolWindowStyle(
+                bool taskbarApplied = NativeMethods.SetToolWindowStyle(
                     window, !settings.ShowStreamInTaskbar);
-                NativeMethods.SetWindowPos(window,
+                bool zOrderApplied = NativeMethods.SetWindowPos(window,
                     settings.AlwaysOnTop
                         ? NativeMethods.HWND_TOPMOST
                         : NativeMethods.HWND_NOTOPMOST,
                     0, 0, 0, 0,
                     NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE |
                     NativeMethods.SWP_NOACTIVATE);
+                bool policyApplied = taskbarApplied && zOrderApplied;
+                if (!policyApplied &&
+                    (rendererPolicyWindow != window || rendererPolicyApplied))
+                    Log("Renderer window policy was not accepted by Windows; " +
+                        "it remains pending for retry.");
                 rendererPolicyWindow = window;
-                rendererPolicyApplied = true;
+                rendererPolicyApplied = policyApplied;
                 rendererPolicyAlwaysOnTop = settings.AlwaysOnTop;
                 rendererPolicyShowInTaskbar = settings.ShowStreamInTaskbar;
             }
@@ -1374,6 +1390,8 @@ namespace AirPlayReceiverMvp
         private static bool FitRendererWindow(
             IntPtr window, Size videoSize, bool preserveClientArea)
         {
+            if (!NativeMethods.IsTopLevelWindow(window))
+                return false;
             NativeMethods.RECT outer;
             NativeMethods.RECT client;
             if (!NativeMethods.GetWindowRect(window, out outer) ||

@@ -30,6 +30,7 @@ namespace AirPlayReceiverMvp
         private int lostConnectionRecoveredStatePending;
         private int lostConnectionPlaceholderDismissedSessionGeneration = -1;
         private int lostConnectionRendererDismissedSessionGeneration = -1;
+        private long nativeMirrorSessionId;
         private long lostConnectionContinuityToken;
         private int lostConnectionFeedbackHandoffPending;
         private long lostConnectionFeedbackHandoffToken;
@@ -213,6 +214,19 @@ namespace AirPlayReceiverMvp
             if (action != LostConnectionPlaceholderAction.Show || quitting)
                 return;
 
+            // The displayed warning belongs to this session, not to whichever
+            // phone happens to be streaming when its Close event is delivered.
+            int placeholderPid;
+            int placeholderGeneration;
+            long placeholderNativeSessionId;
+            lock (postSessionMaintenanceSync)
+            {
+                placeholderPid = Interlocked.CompareExchange(ref activeCorePid, 0, 0);
+                placeholderGeneration = Interlocked.CompareExchange(
+                    ref mirrorSessionGeneration, 0, 0);
+                placeholderNativeSessionId = Interlocked.Read(ref nativeMirrorSessionId);
+            }
+
             IntPtr rendererWindow;
             if (TryGetRendererWindow(out rendererWindow))
                 RememberRendererBounds(rendererWindow);
@@ -229,13 +243,20 @@ namespace AirPlayReceiverMvp
                 if (quitting || Interlocked.Exchange(
                         ref lostConnectionPlaceholderClosePending, 0) == 1)
                     return;
+                lock (postSessionMaintenanceSync)
+                {
+                    if (!IsCurrentLostConnectionSessionLocked(placeholderPid,
+                            placeholderGeneration, placeholderNativeSessionId))
+                        return;
+                }
                 var placeholder = new LostConnectionForm(bounds, snapshot);
                 snapshot = null;
                 placeholder.ShowInTaskbar = settings.ShowStreamInTaskbar;
                 placeholder.TopMost = settings.AlwaysOnTop;
                 placeholder.UserDismissed += delegate
                 {
-                    DismissLostConnectionPlaceholderForCurrentSession();
+                    DismissLostConnectionPlaceholderForSession(placeholderPid,
+                        placeholderGeneration, placeholderNativeSessionId);
                 };
                 placeholder.FormClosed += delegate
                 {
@@ -277,16 +298,112 @@ namespace AirPlayReceiverMvp
             }
         }
 
-        private void DismissLostConnectionPlaceholderForCurrentSession()
+        private bool IsCurrentLostConnectionSessionLocked(
+            int processId, int sessionGeneration, long nativeSessionId)
         {
-            int sessionGeneration = Interlocked.CompareExchange(
-                ref mirrorSessionGeneration, 0, 0);
-            Interlocked.Exchange(
-                ref lostConnectionPlaceholderDismissedSessionGeneration,
-                sessionGeneration);
-            QueueLostConnectionPlaceholderClose();
-            Log("Lost-connection placeholder was dismissed for the current " +
-                "mirroring session; delayed loss events will stay hidden.");
+            return processId > 0 && sessionGeneration > 0 &&
+                processId == Interlocked.CompareExchange(ref activeCorePid, 0, 0) &&
+                sessionGeneration == Interlocked.CompareExchange(
+                    ref mirrorSessionGeneration, 0, 0) &&
+                nativeSessionId == Interlocked.Read(ref nativeMirrorSessionId);
+        }
+
+        private void DismissLostConnectionPlaceholderForSession(
+            int processId, int sessionGeneration, long nativeSessionId)
+        {
+            lock (postSessionMaintenanceSync)
+            {
+                if (!IsCurrentLostConnectionSessionLocked(
+                        processId, sessionGeneration, nativeSessionId))
+                    return;
+                Interlocked.Exchange(
+                    ref lostConnectionPlaceholderDismissedSessionGeneration,
+                    sessionGeneration);
+                QueueLostConnectionPlaceholderClose();
+            }
+            // Never take the pipe lock while holding the lifecycle lock. The
+            // writer rechecks the PID; the native owner rechecks the stream ID.
+            bool requested = nativeSessionId > 0 && TryWriteNativeVideoCommand(
+                "close-session session=" + nativeSessionId.ToString(
+                    System.Globalization.CultureInfo.InvariantCulture),
+                "continuity Close for session " + nativeSessionId.ToString(
+                    System.Globalization.CultureInfo.InvariantCulture), processId);
+            Log("Lost-connection placeholder dismissed for session " +
+                nativeSessionId + "; native close " +
+                (requested ? "requested" : "unavailable") +
+                ". Delayed loss events for this session stay hidden.");
+        }
+
+        private void ObserveNativeSessionClose(int processId, string line)
+        {
+            long sessionId;
+            bool started = false;
+            bool completed = TryParseCompletedNativeSessionClose(
+                line, processId, out sessionId);
+            if (!completed && !TryParseNativeSessionWindowMarker(
+                    line, out sessionId, out started))
+                return;
+            lock (postSessionMaintenanceSync)
+            {
+                if (processId != Interlocked.CompareExchange(ref activeCorePid, 0, 0))
+                    return;
+                if (started)
+                    Interlocked.Exchange(ref nativeMirrorSessionId, sessionId);
+                else if (Interlocked.Read(ref nativeMirrorSessionId) == sessionId)
+                {
+                    MarkRendererDismissedForCurrentSession();
+                    if (completed)
+                    {
+                        // A deliberate, acknowledged close is not a failed
+                        // connection for the loss watchdog to recover. Worker
+                        // wake/EOF paths need not emit the legacy stop line.
+                        Interlocked.Exchange(ref lostConnectionRecoveryPending, 0);
+                        Interlocked.Exchange(ref lostConnectionRecoveryPid, 0);
+                        Interlocked.Exchange(ref lostConnectionRecoveryDueTicks, 0);
+                        ResetLostConnectionHttpResetAttempt();
+                        HandleMirroringEndedMaintenance(processId);
+                    }
+                }
+            }
+        }
+
+        private static bool TryParseCompletedNativeSessionClose(
+            string line, int processId, out long sessionId)
+        {
+            sessionId = 0;
+            if (string.IsNullOrEmpty(line)) return false;
+            System.Text.RegularExpressions.Match match =
+                System.Text.RegularExpressions.Regex.Match(line.Trim(),
+                    @"\AAEROMIRROR_SESSION_CLOSE session=([1-9][0-9]{0,18}) request=[1-9][0-9]{0,19} result=closed pid=([1-9][0-9]{0,9}) raop_port=[0-9]{1,5} airplay_port=[0-9]{1,5}\z",
+                    System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+            int markerPid;
+            return match.Success && int.TryParse(match.Groups[2].Value,
+                System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture, out markerPid) &&
+                markerPid == processId && long.TryParse(match.Groups[1].Value,
+                System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture, out sessionId);
+        }
+
+        private static bool TryParseNativeSessionWindowMarker(
+            string line, out long sessionId, out bool started)
+        {
+            sessionId = 0;
+            started = false;
+            if (string.IsNullOrEmpty(line)) return false;
+            System.Text.RegularExpressions.Match match =
+                System.Text.RegularExpressions.Regex.Match(line.Trim(),
+                    @"\AAEROMIRROR_MIRROR_SESSION session=([1-9][0-9]{0,18}) state=started\z",
+                    System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+            if (match.Success)
+                started = true;
+            else
+                match = System.Text.RegularExpressions.Regex.Match(line.Trim(),
+                    @"\AAEROMIRROR_VIDEO_WINDOW state=closed source=(?:caption-close|continuity-close) session=([1-9][0-9]{0,18}) request=[1-9][0-9]{0,18}\z",
+                    System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+            return match.Success && long.TryParse(match.Groups[1].Value,
+                System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture, out sessionId);
         }
 
         private void MarkRendererDismissedForCurrentSession()
@@ -299,7 +416,7 @@ namespace AirPlayReceiverMvp
                 ref lostConnectionRendererDismissedSessionGeneration,
                 sessionGeneration);
             QueueLostConnectionPlaceholderClose();
-            Log("The renderer was minimized with its caption Close action; " +
+            Log("The renderer was dismissed with a Close action; " +
                 "loss UI is suppressed for the current mirroring session.");
         }
 
